@@ -55,6 +55,13 @@ All colours are tokens in `tokens.css`, with light values on `:root` and dark va
 Rules:
 
 - The accent fill appears at most once per region: active nav item, selected tab, primary button.
+- The current company tile in the rail is **ink**, never accent: `--color-text` fill, `--color-surface`
+  text, weight 900, a `--rail-bar` ink bar on the rail edge, `aria-current="true"`. Accent stays with
+  the active nav item next to it.
+- A company's status is a badge on its tile: building = spinner icon in `--color-warning`; failed
+  and invalid = alert icon in `--color-danger`; unknown (graph unreachable) = cloud-off icon in
+  `--color-text-muted`; ready and empty = no badge. The icon repeats what the accessible name says in
+  words ("building", "last build failed", "config invalid", "graph unreachable").
 - `-soft` tints are for selected rows and citation chips, with text in the matching strong colour.
 - Node colours are for marks (dots, bars, avatar initials), never for body text or buttons.
 - Work item state maps to badges as: open = success, merged = accent, closed = neutral.
@@ -104,10 +111,13 @@ Rules:
 
 ## 6. Layout
 
-- `AppShell` is the frame: sidebar (`--sidebar-width`, 240px), sticky top bar
-  (`--topbar-height`), content up to `--content-max` (1280px).
-- Below 900px the sidebar becomes a drawer, opened from the top bar and closed by the scrim,
-  Escape or a navigation. Below 640px the ask field takes its own row.
+- `AppShell` is the frame: company rail (`--rail-width`, 72px), sidebar (`--sidebar-width`, 240px),
+  sticky top bar (`--topbar-height`), content up to `--content-max` (1280px).
+- The rail is a full-height column of 48px tiles (`--control-lg`, `--radius-md`, `--space-2`
+  apart) under the label "Brains". Its tile list scrolls without a visible scrollbar; the add tile
+  below a hairline stays pinned. The current tile is scrolled into view when the company changes.
+- Below 900px the rail and sidebar become one drawer side by side, opened from the top bar and
+  closed by the scrim, Escape or a navigation. Below 640px the ask field takes its own row.
 - Dashboard pages use a 12-column grid: main content spans 8, side panels span 4. At 1100px and
   below, panels go to 6 or full width; at 720px and below, everything is one column.
 - Content is left-aligned. Nothing is centred except icons inside controls.
@@ -129,12 +139,13 @@ not add another component library.
 | `Input`      | Always has a label (`hideLabel` keeps it for screen readers). `hint` explains; `error` says what is wrong and how to fix it. |
 | `Tabs`       | The selected tab is the solid accent block with square corners.                                |
 | `Menu`       | Pick one of a set or run a command. Selected item shows a check.                               |
-| `Tooltip`    | Extra hint only. Never the only place information lives.                                       |
+| `Tooltip`    | Extra hint only. Never the only place information lives. `detail` adds a mono second line (an id).                                       |
 | `Dialog`     | Confirm destructive or blocking actions. Title is a question; the confirming action is last and named for what it does. |
 | `Stat`       | A count with its label, inside a `<dl>`. For summaries, not decoration.                        |
 | `EmptyState` | Says what will appear and how to get it, with one action.                                      |
 | `CitedAnswer`, `GraphPath` | The answer pattern from section 1. Citation chips link to the numbered source.   |
 | `EntityRow`, `WorkItemRow`, `ActivityBars` | List and comparison patterns for people, teams, systems and work items. |
+| `CompanyRail` | One tile per company brain; one click switches company and keeps the section you are on. Monogram 15px at width 118; ink for the current tile (section 3). Tooltip shows the name and `brain_<slug>` in mono. |
 | `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". |
 
 Adding a component:

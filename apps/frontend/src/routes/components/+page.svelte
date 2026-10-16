@@ -8,6 +8,7 @@
 		Button,
 		Card,
 		CitedAnswer,
+		CompanyRail,
 		Dialog,
 		EmptyState,
 		EntityRow,
@@ -21,8 +22,38 @@
 		WorkItemRow
 	} from '$lib';
 	import { featuredAnswer, recentWork } from '$lib/data/sample';
-	import { NODE_LABELS, type NodeType } from '$lib/types';
+	import { NODE_LABELS, type Company, type CompanyStatus, type NodeType } from '$lib/types';
 
+	const company = (name: string, status: CompanyStatus = 'ready'): Company => ({
+		slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+		name,
+		data_permission: status === 'invalid' ? null : 'public',
+		status,
+		last_synced_at: null,
+		error: null,
+		build: null,
+		graph_reachable: status !== 'unknown'
+	});
+	const railThree = ['Acme Labs', 'FalkorDB', 'Synthetic Co'].map((n) => company(n));
+	const railStatus = [
+		company('Acme Labs'),
+		company('Building Co', 'building'),
+		company('Current Co'),
+		company('Empty Co', 'empty'),
+		company('Failed Co', 'failed'),
+		company('Invalid Co', 'invalid'),
+		company('Offline Co', 'unknown')
+	];
+	const railMany = Array.from({ length: 12 }, (_, i) => company(`Company ${i + 1}`));
+	const railEdge = [
+		company('FalkorDB'),
+		company('Fabric'),
+		company('The Very Long Named Company Holdings Ltd')
+	];
+	// The rail renders real links; in the gallery a click must not leave the page.
+	const stay = (e: MouseEvent) => {
+		if ((e.target as Element).closest('a')) e.preventDefault();
+	};
 	const nodeTypes = Object.keys(NODE_LABELS) as NodeType[];
 	let dialogOpen = $state(false);
 	let sort = $state('recent');
@@ -182,6 +213,33 @@
 		</Card>
 	</div>
 
+	<Card title="Company rail">
+		<p class="note">
+			One tile per company. The current one is ink with a bar on its edge; building, failed,
+			invalid and unreachable graphs carry a mark and a word in the accessible name. Hover or
+			focus a tile for its name and graph.
+		</p>
+		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+		<div class="rails" onclick={stay}>
+			<figure>
+				<div class="frame"><CompanyRail companies={railThree} current="falkordb" pathname="/components" /></div>
+				<figcaption>Three companies</figcaption>
+			</figure>
+			<figure>
+				<div class="frame"><CompanyRail companies={railStatus} current="current_co" pathname="/components" /></div>
+				<figcaption>Building, failed, invalid, unreachable</figcaption>
+			</figure>
+			<figure>
+				<div class="frame"><CompanyRail companies={railMany} current="company_9" pathname="/components" /></div>
+				<figcaption>Twelve companies, list scrolls</figcaption>
+			</figure>
+			<figure>
+				<div class="frame"><CompanyRail companies={railEdge} current={null} pathname="/components" /></div>
+				<figcaption>Colliding monogram, 40-character name</figcaption>
+			</figure>
+		</div>
+	</Card>
+
 	<Card title="Tabs">
 		<Tabs
 			label="Example tabs"
@@ -265,6 +323,30 @@
 		grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
 		gap: var(--space-5);
 		align-items: start;
+	}
+	.note {
+		max-width: 70ch;
+		margin-bottom: var(--space-4);
+		color: var(--color-text-muted);
+	}
+	.rails {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-8);
+	}
+	.rails figure {
+		margin: 0;
+	}
+	.rails figcaption {
+		max-width: 10rem;
+		margin-top: var(--space-2);
+		color: var(--color-text-muted);
+		font-size: var(--text-xs);
+	}
+	.frame {
+		width: fit-content;
+		height: 26rem;
+		border: var(--border-hair) solid var(--color-line);
 	}
 	.stack {
 		display: flex;

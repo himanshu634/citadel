@@ -1,15 +1,20 @@
 <!--
 @component
-The dashboard frame: sidebar on the left, top bar, scrolling content. Below 900px the sidebar
-becomes a drawer opened from the top bar. Provides the tooltip context for everything inside.
+The dashboard frame: company rail and sidebar on the left, top bar, scrolling content. Below
+900px the rail and sidebar become one drawer, side by side, opened from the top bar. Provides the
+tooltip context for everything inside.
 -->
 <script lang="ts">
+	import { page } from '$app/state';
 	import { Tooltip } from 'bits-ui';
 	import type { Snippet } from 'svelte';
+	import { getCompanies } from '$lib/companies.svelte';
+	import CompanyRail from './CompanyRail.svelte';
 	import Sidebar from './Sidebar.svelte';
 	import Topbar from './Topbar.svelte';
 
 	let { children }: { children: Snippet } = $props();
+	const companies = getCompanies();
 	let navOpen = $state(false);
 	const close = () => (navOpen = false);
 </script>
@@ -19,7 +24,13 @@ becomes a drawer opened from the top bar. Provides the tooltip context for every
 <Tooltip.Provider delayDuration={300}>
 	<div class="shell">
 		<div id="app-sidebar" class={['side', { open: navOpen }]}>
-			<Sidebar onnavigate={close} />
+			<CompanyRail
+				companies={companies.list}
+				current={companies.current}
+				pathname={page.url.pathname}
+				onnavigate={close}
+			/>
+			<div class="sidebar-slot"><Sidebar onnavigate={close} /></div>
 		</div>
 		{#if navOpen}
 			<button class="scrim" type="button" aria-label="Close navigation" onclick={close}></button>
@@ -36,13 +47,18 @@ becomes a drawer opened from the top bar. Provides the tooltip context for every
 <style>
 	.shell {
 		display: grid;
-		grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+		grid-template-columns: calc(var(--rail-width) + var(--sidebar-width)) minmax(0, 1fr);
 		min-height: 100dvh;
 	}
 	.side {
 		position: sticky;
 		top: 0;
+		display: flex;
 		height: 100dvh;
+	}
+	.sidebar-slot {
+		flex: 1;
+		min-width: 0;
 	}
 	.main {
 		display: flex;
@@ -73,7 +89,7 @@ becomes a drawer opened from the top bar. Provides the tooltip context for every
 			position: fixed;
 			inset: 0 auto 0 0;
 			z-index: 31;
-			width: min(var(--sidebar-width), 85vw);
+			width: min(calc(var(--rail-width) + var(--sidebar-width)), 92vw);
 			transform: translateX(-100%);
 			transition: transform var(--duration-base) var(--ease-out);
 			visibility: hidden;

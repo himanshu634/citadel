@@ -19,3 +19,4 @@ export { default as GraphPath } from './components/brain/GraphPath.svelte';
 export { default as WorkItemRow } from './components/brain/WorkItemRow.svelte';
 
 export { default as AppShell } from './components/layout/AppShell.svelte';
+export { default as CompanyRail } from './components/layout/CompanyRail.svelte';
