@@ -369,3 +369,65 @@ def _print_rows(tool: str, rows: list[dict]) -> None:
 
 if __name__ == "__main__":
     app()
+
+
+# --- agents and simulations -------------------------------------------------------------------
+
+
+@app.command("agents")
+def agents_cmd() -> None:
+    """List the agent roles: database user, jobs (and their submit tools) and read tools."""
+    from brain.agents.roles import ROLES
+    from brain.agents.runner import missing_tools
+
+    for role in ROLES.values():
+        typer.secho(f"{role.name}  ({role.db_user})", bold=True)
+        typer.echo(f"    {role.summary}")
+        for job in role.jobs:
+            typer.echo(f"    job {job.name} -> {job.submit.name}")
+        missing = set(missing_tools(role))
+        names = [t + (" (phase 2)" if t in missing else "") for t in role.read_tools]
+        typer.echo(f"    reads: {', '.join(names)}")
+
+
+sim_app = typer.Typer(help="Run the agents on a company: a simulated sprint, race or loop.")
+app.add_typer(sim_app, name="sim")
+
+
+@sim_app.command("run")
+def sim_run(
+    slug: str,
+    scenario: str = typer.Option("sprint", "--scenario", help="sprint, race or regression."),
+    ticks: int = typer.Option(30, "--ticks", help="Stop after this many ticks."),
+    offline: bool = typer.Option(
+        False, "--offline", help="Every role plays its deterministic policy: no API key needed."
+    ),
+) -> None:
+    """Run a scenario. The agents read brain_<slug> through the graph tools; the work layer
+    (tasks, actions, decisions) is kept in memory until the FalkorDB store lands."""
+    from brain.sim import scenarios
+
+    _company(slug)
+    _connected()
+    build = scenarios.SCENARIOS.get(scenario)
+    if build is None:
+        _fail(f"unknown scenario {scenario!r}; known: {', '.join(scenarios.SCENARIOS)}")
+    sim = build(slug, clients=scenarios.offline if offline else scenarios.online)
+
+    def show(t) -> None:
+        for a in t.actions:
+            line = f"t{t.tick:<3} {a['agent']:<18} {a['kind']:<22} {a['task'] or '':<14}"
+            typer.echo(f"{line} {_short('summary', a['summary'], 70)}")
+
+    sim.run(ticks, on_tick=show)
+    s = sim.store
+    statuses: dict[str, int] = {}
+    for t in s.tasks.values():
+        statuses[t.status] = statuses.get(t.status, 0) + 1
+    lessons = s.read("memory/lessons", {})
+    findings = s.read("memory/findings", db_user="citadel_risk")
+    typer.secho(
+        f"{len(sim.ticks)} ticks: tasks {statuses}, {len(s.releases)} releases, "
+        f"{len(s.decisions)} decisions, {len(lessons)} lessons, {len(findings)} findings",
+        bold=True,
+    )
