@@ -403,6 +403,32 @@ def _load_ownership(slug: str, owns: list[Ownership], rep: LoadReport) -> None:
         )
 
 
+# --- embeddings -------------------------------------------------------------------------------
+
+
+def chunks_to_embed(slug: str, model: str, limit: int) -> list[dict[str, Any]]:
+    """The next `limit` chunks (uid, text, text_hash) not yet embedded from their current text
+    by `model`, by uid. Chunks with no text are never returned."""
+    return db.run(slug, "load/chunks_to_embed", {"model": model, "limit": limit}, read_only=True)
+
+
+def set_embeddings(slug: str, rows: list[dict[str, Any]], model: str) -> int:
+    """Store vectors: rows of {uid, vector, text_hash}. Returns the chunks written."""
+    written = 0
+    for i in range(0, len(rows), BATCH_SIZE):
+        result = db.run(
+            slug, "load/chunk_embedding", {"rows": rows[i : i + BATCH_SIZE], "model": model}
+        )
+        written += result[0]["n"] if result else 0
+    return written
+
+
+def clear_embedded(slug: str) -> int:
+    """Mark every chunk as pending for the embed stage. Returns the chunks marked."""
+    result = db.run(slug, "load/clear_embedded")
+    return result[0]["n"] if result else 0
+
+
 # --- sync state -------------------------------------------------------------------------------
 
 

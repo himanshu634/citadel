@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
-from brain import config, db, pipeline, schema, tools
+from brain import config, db, embeddings, pipeline, schema, tools
 from brain.adapters.github.client import GithubError
 from brain.adapters.linear import seed as linear_seed
 from brain.adapters.linear.client import LinearClient, LinearError
@@ -136,7 +136,29 @@ def ingest(
     dropped = {q: n for q, n in report.load.dropped.items() if n}
     for q, n in sorted(dropped.items()):
         typer.secho(f"  dropped {n} rows in {q} (an end node is not in the graph)", fg="yellow")
+    _print_embed(report.embed)
     _print_stats(slug, f"{cfg.graph_name} now holds:")
+
+
+@app.command()
+def embed(
+    slug: str,
+    everything: bool = typer.Option(
+        False, "--all", help="Embed every chunk again, not only new or changed text."
+    ),
+) -> None:
+    """Embed the chunks of brain_<slug> whose text or model changed (ingest runs this too)."""
+    company(slug)
+    connected()
+    _print_embed(embeddings.embed_pending(slug, everything=everything))
+
+
+def _print_embed(report: embeddings.EmbedReport) -> None:
+    if report.skipped_reason:
+        done = f" after {report.embedded} chunks" if report.embedded else ""
+        typer.secho(f"embedding skipped{done}: {report.skipped_reason}", fg="yellow")
+    else:
+        typer.echo(f"embedded {report.embedded} chunks")
 
 
 @app.command()

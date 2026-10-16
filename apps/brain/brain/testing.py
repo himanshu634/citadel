@@ -152,3 +152,20 @@ def ticket_graph():
     load_company(synthetic_company(slug, with_tickets=True))
     yield slug
     db.delete_graph(slug)
+
+
+@pytest.fixture(scope="session")
+def embedded_graph():
+    """brain_test_embedded: the synthetic company with every chunk embedded by a FakeEmbedder,
+    which stays the process embedder (so tools embed questions the same way) until teardown,
+    which also deletes the graph."""
+    if not falkordb_up():
+        pytest.skip("FalkorDB not reachable (make up)")
+    slug = "test_embedded"
+    db.delete_graph(slug)
+    load_company(synthetic_company(slug))
+    embeddings.set_embedder(FakeEmbedder())
+    embeddings.embed_pending(slug)
+    yield slug
+    embeddings.set_embedder(None)
+    db.delete_graph(slug)

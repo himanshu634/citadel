@@ -9,6 +9,9 @@ skipped; records without one (people, teams, ownership, links, and git-dated com
 are always loaded, which is cheap and keeps edges complete.
 `full=True` ignores the cursor, and so does a changed `window.since` (widening the window must
 pull in records older than the cursor).
+
+After the sources, the embed stage gives new or changed Chunk text its vectors (see
+`embeddings.embed_pending`); without a usable model it is skipped, never failed.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from brain import adapters, loader
+from brain import adapters, embeddings, loader
 from brain.canonical import CanonicalRecord
 from brain.config import CompanyConfig, load_company, raw_dir
 from brain.events import BuildEvent, OnEvent, noop
@@ -36,6 +39,7 @@ class SourceResult:
 class IngestReport:
     sources: list[SourceResult] = field(default_factory=list)
     load: loader.LoadReport = field(default_factory=loader.LoadReport)
+    embed: embeddings.EmbedReport = field(default_factory=embeddings.EmbedReport)
 
 
 _NO_ADAPTER = "no adapter registered"
@@ -115,7 +119,8 @@ def ingest(
     only: str | None = None,
     on_event: OnEvent | None = None,
 ) -> IngestReport:
-    """Transform step: cached/local data -> canonical records -> graph brain_<slug>."""
+    """Transform step: cached/local data -> canonical records -> graph brain_<slug>, then the
+    embed stage over every pending chunk (also when `only` limits the sources)."""
     emit = on_event or noop
     cfg = load_company(slug)
     window_since = cfg.window.since.isoformat()
@@ -149,4 +154,5 @@ def ingest(
         latest = next_cursor(records, cursor, datetime.now(UTC))
         loader.set_sync_state(slug, adapter.name, key, latest, window_since, result.loaded)
         emit(BuildEvent(slug, "load", "done", key, count=sum(loaded.written.values())))
+    report.embed = embeddings.embed_pending(slug, on_event=emit)
     return report

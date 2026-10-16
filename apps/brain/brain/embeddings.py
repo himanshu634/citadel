@@ -6,14 +6,22 @@ and gets None when embeddings are off (`EMBEDDING_PROVIDER=none`), so every call
 to handle "no embeddings". fastembed runs a small ONNX model on the CPU, so it needs no API key
 and no GPU; it is imported only when the model first loads, so importing this module is cheap.
 Tests swap in a fake with `set_embedder` (`brain.testing.FakeEmbedder`).
+
+The embed stage (`embed_pending`) runs after ingest. A chunk is embedded again only when its
+text, or the model, changed since: each vector is stored with the text hash and model it was
+made from. A model that cannot run skips the stage with a reason; it never fails the build.
 """
 
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
 from typing import Any, Protocol
 
+from brain import loader
+from brain.chunking import text_hash
 from brain.config import REPO_ROOT, get_settings
+from brain.events import BuildEvent, OnEvent, noop
 
 MODEL_CACHE = REPO_ROOT / "data" / "models"
 
@@ -103,3 +111,72 @@ def set_embedder(e: Embedder | None) -> None:
         _override = e
         if e is None:
             _default = None
+
+
+# --- the embed stage --------------------------------------------------------------------------
+
+EMBEDDINGS_OFF = (
+    "Embeddings are off (EMBEDDING_PROVIDER=none), so semantic search finds nothing. "
+    "Set EMBEDDING_PROVIDER=fastembed and run make embed."
+)
+
+
+@dataclass
+class EmbedReport:
+    embedded: int = 0  # chunks given a new vector
+    skipped_reason: str | None = None  # why the stage stopped early or did not run
+
+
+def embed_pending(
+    slug: str,
+    embedder: Embedder | None = None,
+    batch: int = 64,
+    on_event: OnEvent | None = None,
+    everything: bool = False,
+) -> EmbedReport:
+    """Embed every chunk of brain_<slug> whose text or model changed since it was embedded.
+
+    `embedder` None means `get_embedder()`. With no embedder, or a model that cannot run, the
+    stage is skipped with the reason (vectors written before the failure stay). `everything`
+    marks every chunk pending first, so each is embedded exactly once more.
+    """
+    emit = on_event or noop
+    report = EmbedReport()
+    e = embedder if embedder is not None else get_embedder()
+    if e is None:
+        return _skip(slug, report, EMBEDDINGS_OFF, emit)
+    emit(BuildEvent(slug, "embed", "running"))
+    if everything:
+        loader.clear_embedded(slug)
+    done: set[str] = set()
+    while rows := loader.chunks_to_embed(slug, e.model, batch):
+        uids = [r["uid"] for r in rows]
+        if done.intersection(uids):
+            break  # a chunk came back after its write: stop rather than loop
+        try:
+            vectors = e.passages([r["text"] for r in rows])
+        except EmbeddingUnavailable as exc:
+            return _skip(slug, report, str(exc), emit)
+        except Exception as exc:
+            return _skip(slug, report, f"Embedding model {e.model} failed: {exc}", emit)
+        written = loader.set_embeddings(
+            slug,
+            [
+                # chunks written before they carried text_hash get it here, or they stay pending
+                {"uid": r["uid"], "vector": v, "text_hash": r["text_hash"] or text_hash(r["text"])}
+                for r, v in zip(rows, vectors, strict=True)
+            ],
+            e.model,
+        )
+        report.embedded += written
+        if written == 0:
+            break  # nothing was stored, so the same batch would come back
+        done.update(uids)
+    emit(BuildEvent(slug, "embed", "done", count=report.embedded))
+    return report
+
+
+def _skip(slug: str, report: EmbedReport, reason: str, emit: OnEvent) -> EmbedReport:
+    report.skipped_reason = reason
+    emit(BuildEvent(slug, "embed", "skipped", count=report.embedded, message=reason))
+    return report
