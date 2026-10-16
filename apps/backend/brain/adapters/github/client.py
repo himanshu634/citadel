@@ -101,8 +101,8 @@ class GithubClient:
             resp = self._http.post(API, json=body)
             rate_limited = resp.status_code in (403, 429) and "rate limit" in resp.text.lower()
             if resp.status_code in (502, 503, 504) or rate_limited:
-                if attempt == self._attempts - 1:
-                    break  # no point waiting before giving up
+                if self._attempts == 1:
+                    break  # a single attempt (the API's check) never sleeps
                 wait = int(resp.headers.get("retry-after", 0)) or 2**attempt * 5
                 self._log(f"  github {resp.status_code}; retrying in {wait}s")
                 time.sleep(wait)
@@ -116,9 +116,8 @@ class GithubClient:
             if self._wait_for_rate_limit:
                 self._respect_rate_limit(data.get("rateLimit"))
             return data
-        if rate_limited:
-            raise GithubRateLimited(f"GitHub rate limit reached for {name}")
-        raise GithubError(f"GitHub API kept failing for {name}")
+        error = GithubRateLimited if rate_limited else GithubError
+        raise error(f"GitHub API kept failing for {name}")
 
     def _respect_rate_limit(self, rl: dict[str, Any] | None) -> None:
         if not rl or rl["remaining"] > LOW_BUDGET:

@@ -38,6 +38,21 @@ def test_fetch_client_retries_and_waits(slept):
     assert slept == [5]
 
 
+def test_fetch_client_gives_up_after_five_attempts_as_before(slept):
+    c = make([httpx.Response(502)] * 5)
+    with pytest.raises(GithubError, match="kept failing") as exc:
+        c.query("repo_meta", {})
+    assert not isinstance(exc.value, GithubRateLimited)
+    assert slept == [5, 10, 20, 40, 80]
+
+
+def test_fetch_client_rate_limited_to_the_end_keeps_its_message(slept):
+    c = make([rate_limited()] * 5)
+    with pytest.raises(GithubRateLimited, match="kept failing"):
+        c.query("repo_meta", {})
+    assert slept == [60] * 5
+
+
 def test_fetch_client_waits_out_a_low_budget(slept):
     make([httpx.Response(200, json=LOW)]).query("repo_meta", {})
     assert len(slept) == 1 and slept[0] > 0
