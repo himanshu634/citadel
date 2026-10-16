@@ -25,7 +25,7 @@ def _connected() -> None:
     except RedisConnectionError:
         typer.secho(
             f"Cannot reach FalkorDB at {s.falkordb_host}:{s.falkordb_port}. "
-            "Start it with `docker compose up -d` or check FALKORDB_* in .env.",
+            "Start it with `make up` or check FALKORDB_* in .env.",
             fg="red",
             err=True,
         )
@@ -64,7 +64,7 @@ def init(slug: str, name: str = typer.Option(None, help="Display name (default: 
     template = resources.files("brain").joinpath("templates/company.yaml").read_text()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(template.format(slug=slug, name=name or slug))
-    typer.echo(f"Wrote {path}. Edit sources and systems.rules, then run `brain schema {slug}`.")
+    typer.echo(f"Wrote {path}. Edit sources and systems.rules, then run `make schema SLUG={slug}`.")
 
 
 @app.command("schema")
@@ -89,7 +89,9 @@ def reset(slug: str, yes: bool = typer.Option(False, "--yes", help="Confirm dele
     """Delete the whole graph brain_<slug>. Raw caches in data/ are kept."""
     name = _graph_name(slug)
     if not yes:
-        typer.secho(f"This deletes graph {name}. Re-run with --yes to confirm.", fg="yellow")
+        typer.secho(
+            f"This deletes graph {name}. Re-run with --yes (make reset: CONFIRM=1).", fg="yellow"
+        )
         raise typer.Exit(1)
     _connected()
     deleted = db.delete_graph(slug)

@@ -167,7 +167,7 @@ def raw_dir(slug: str, adapter: str) -> Path:
 def load_company(slug: str) -> CompanyConfig:
     path = companies_dir() / f"{slug}.yaml"
     if not path.exists():
-        raise FileNotFoundError(f"no company config at {path}; run `brain init {slug}` first")
+        raise FileNotFoundError(f"no company config at {path}; run `make init SLUG={slug}` first")
     data = yaml.safe_load(path.read_text())
     cfg = CompanyConfig.model_validate(data)
     if cfg.slug != slug:

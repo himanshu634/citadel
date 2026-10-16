@@ -19,8 +19,9 @@ data/            gitignored raw API caches and inbox folders
 ## Quick start (so far)
 
 ```bash
-cp .env.example .env
-docker compose up -d          # FalkorDB on :6379, Browser on http://localhost:3000
-uv sync
-uv run brain schema falkordb  # create indexes on graph brain_falkordb
+make setup                    # uv sync + create .env from .env.example
+make up                       # FalkorDB on :6379, Browser on http://localhost:3000
+make schema                   # create indexes on graph brain_falkordb
+make schema SLUG=synthetic    # any target takes SLUG=<company>
+make help                     # list every target
 ```
