@@ -1,67 +1,91 @@
 <!--
 @component
-Top bar: menu button (narrow screens), company switcher, the ask field, sync status, theme.
+Top bar: menu button (narrow screens), the ask field, the current company's status, theme. Below
+900px the menu button is the current company's monogram tile, the same ink tile as on the rail, so
+the drawer it opens reads as "this company's navigation". The ask field is closed while there is
+nothing to ask (building, empty, unreachable, invalid) and says why in its placeholder.
 -->
 <script lang="ts">
-	import { ChevronsUpDown, Menu as MenuIcon, Search } from '@lucide/svelte';
-	import Button from '$lib/components/ui/Button.svelte';
+	import { CircleAlert, CloudOff, LoaderCircle, Menu as MenuIcon, Search } from '@lucide/svelte';
+	import type { Component } from 'svelte';
 	import Input from '$lib/components/ui/Input.svelte';
-	import Menu from '$lib/components/ui/Menu.svelte';
 	import ThemeToggle from './ThemeToggle.svelte';
-	import { companies, lastSync } from '$lib/data/sample';
+	import { getCompanies } from '$lib/companies.svelte';
+	import { monogram } from '$lib/companies';
+	import { askFieldOf, statusLineOf } from '$lib/topbar';
 
 	type Props = { onmenu: () => void; menuOpen: boolean };
 	let { onmenu, menuOpen }: Props = $props();
 
-	let current = $state(companies[0].slug);
-	let question = $state('');
-	const currentName = $derived(companies.find((c) => c.slug === current)?.name ?? current);
-	const items = $derived(
-		companies.map((c) => ({
-			value: c.slug,
-			label: c.name,
-			hint: `brain_${c.slug}`,
-			selected: c.slug === current
-		}))
+	const companies = getCompanies();
+	const company = $derived(companies.currentCompany);
+	const ask = $derived(askFieldOf(company));
+	const status = $derived(statusLineOf(company));
+	const mono = $derived(
+		company
+			? monogram(
+					companies.list.map((c) => c.name),
+					company.name
+				)
+			: null
 	);
+	// Status is never colour alone: the icon and the words say it too.
+	const icon = $derived<Component | null>(
+		company?.status === 'building'
+			? LoaderCircle
+			: company?.status === 'failed' || company?.status === 'invalid'
+				? CircleAlert
+				: company?.status === 'unknown'
+					? CloudOff
+					: null
+	);
+	let question = $state('');
 </script>
 
 <header class="topbar">
-	<div class="menu-button">
-		<Button
-			variant="ghost"
-			iconOnly
-			label="Open navigation"
-			aria-expanded={menuOpen}
-			aria-controls="app-sidebar"
-			onclick={onmenu}
-		>
+	<button
+		type="button"
+		class={['menu-button', { tile: mono !== null }]}
+		aria-label={company ? `Open navigation, ${company.name}` : 'Open navigation'}
+		aria-expanded={menuOpen}
+		aria-controls="app-sidebar"
+		onclick={onmenu}
+	>
+		{#if mono !== null}
+			<span class="mono" aria-hidden="true">{mono}</span>
+		{:else}
 			<MenuIcon aria-hidden="true" />
-		</Button>
-	</div>
-
-	<Menu {items} heading="Company graph" onselect={(v) => (current = v)}>
-		{#snippet trigger(props)}
-			<Button {...props} variant="ghost" label="Company: {currentName}">
-				<span class="company">{currentName}</span>
-				<ChevronsUpDown aria-hidden="true" />
-			</Button>
-		{/snippet}
-	</Menu>
+		{/if}
+	</button>
 
 	<form class="ask" role="search" onsubmit={(e) => e.preventDefault()}>
 		<Input
 			label="Ask the brain"
 			hideLabel
 			type="search"
-			placeholder="Ask about people, systems or decisions"
+			placeholder={ask.placeholder}
+			disabled={ask.disabled}
 			bind:value={question}
 		>
 			{#snippet leading()}<Search />{/snippet}
 		</Input>
 	</form>
 
-	<p class="sync">Synced <time datetime={lastSync.replace(' ', 'T')}>{lastSync}</time></p>
+	{#if status}
+		<p class={['status', status.tone]}>
+			{#if icon}
+				{@const Icon = icon}
+				<Icon class={{ spin: company?.status === 'building' }} aria-hidden="true" />
+			{/if}
+			<span>
+				{#if status.datetime && status.when}
+					Synced <time datetime={status.datetime}>{status.when}</time>
+				{:else}
+					{status.text}
+				{/if}
+			</span>
+		</p>
+	{/if}
 	<ThemeToggle />
 </header>
 
@@ -82,31 +106,80 @@ Top bar: menu button (narrow screens), company switcher, the ask field, sync sta
 	}
 	.menu-button {
 		display: none;
+		flex: none;
+		place-items: center;
+		width: var(--control-md);
+		height: var(--control-md);
+		border: var(--border-hair) solid var(--color-line-strong);
+		border-radius: var(--radius-md);
+		background: var(--color-surface);
+		color: var(--color-text);
+		cursor: pointer;
 	}
-	.company {
-		font-weight: var(--weight-bold);
-		font-variation-settings: 'wdth' var(--width-label);
+	.menu-button :global(svg) {
+		width: 1.25rem;
+		height: 1.25rem;
+	}
+	/* The rail's current-company tile: ink, never accent. */
+	.menu-button.tile,
+	.menu-button.tile:hover {
+		width: var(--control-lg);
+		height: var(--control-lg);
+		border-color: var(--color-text);
+		background: var(--color-text);
+		color: var(--color-surface);
+	}
+	.mono {
+		font-size: var(--rail-mark);
+		font-weight: var(--weight-black);
+		font-variation-settings: 'wdth' var(--width-heading);
+		line-height: 1;
 	}
 	.ask {
 		flex: 1;
 		max-width: 36rem;
 		min-width: 0;
 	}
-	.sync {
+	.status {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
 		margin-left: auto;
 		color: var(--color-text-muted);
 		font-size: var(--text-xs);
 		white-space: nowrap;
 	}
+	.status :global(svg) {
+		width: 0.95rem;
+		height: 0.95rem;
+		flex: none;
+	}
+	.warning :global(svg) {
+		color: var(--color-warning);
+	}
+	.danger {
+		color: var(--color-danger);
+		font-weight: var(--weight-semibold);
+	}
+	.status :global(.spin) {
+		animation: spin 1s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.status :global(.spin) {
+			animation: none;
+		}
+	}
 	@media (max-width: 900px) {
 		.menu-button {
-			display: block;
+			display: grid;
 		}
 	}
 	@media (max-width: 640px) {
-		.sync {
-			display: none;
-		}
 		.topbar {
 			flex-wrap: wrap;
 		}
@@ -114,6 +187,13 @@ Top bar: menu button (narrow screens), company switcher, the ask field, sync sta
 			order: 10;
 			flex-basis: 100%;
 			max-width: none;
+		}
+		.status {
+			flex: 1;
+			justify-content: flex-end;
+			min-width: 0;
+			white-space: normal;
+			text-align: right;
 		}
 	}
 </style>
