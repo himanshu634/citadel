@@ -17,18 +17,13 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 	import { ApiError, api } from '$lib/api/client';
 	import { getCompanies } from '$lib/companies.svelte';
 	import { Banner, Button, Card, CompanyForm, Dialog, EmptyState } from '$lib';
-	import {
-		SECTIONS,
-		cleanDraft,
-		debounce,
-		incompleteReason,
-		repoErrors
-	} from '$lib/onboarding';
+	import { cleanDraft, debounce, saveGate, visibleErrors, type Gate } from '$lib/onboarding';
 	import { repoChecks } from '$lib/repochecks.svelte';
 	import {
 		classifySaveError,
 		isDirty,
 		rebuildDialog,
+		settingsReason,
 		syncLine,
 		type RebuildDialog
 	} from '$lib/settings';
@@ -145,21 +140,25 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 		if (rejected && rejected.key === key()) out.push(...rejected.errors);
 		return out;
 	});
-	const repoProblems = $derived(form ? repoErrors(form.draft, (repo) => repoChecks.fact(repo)) : []);
 	const dirty = $derived(form ? isDirty(form.draft, form.loaded) : false);
-	const incomplete = $derived(
-		form ? SECTIONS.map((s) => incompleteReason(form!.draft, s)).find((r) => r !== null) : null
+	// The same gates as the add-company page, over all three sections at once. The field errors
+	// shown are the ones the gate counts; a GitHub check still pending also keeps Save shut.
+	const gate = $derived.by<Gate | null>(() =>
+		form
+			? {
+					draft: form.draft,
+					errors: visibleErrors(form.draft, errors),
+					validating,
+					answered: result !== null,
+					unreachable: apiProblem !== null,
+					fact: (repo) => repoChecks.fact(repo),
+					repoPending: (repo) => repoChecks.pending(repo)
+				}
+			: null
 	);
-	const ready = $derived(!validating && !apiProblem && result !== null);
-	const canSave = $derived(
-		ready && errors.length === 0 && repoProblems.length === 0 && !incomplete && dirty && !saving
-	);
-	const why = $derived.by(() => {
-		if (apiProblem || saving || !dirty) return null;
-		if (errors.length > 0 || repoProblems.length > 0) return 'Fix the fields marked above to save.';
-		if (incomplete) return incomplete;
-		return validating ? 'Checking' : null;
-	});
+	const gateResult = $derived(gate ? saveGate(gate) : null);
+	const canSave = $derived(!!gateResult && !gateResult.blocked && dirty && !saving);
+	const why = $derived(dirty && !saving ? settingsReason(gateResult?.reason ?? null) : null);
 
 	// --- Save ------------------------------------------------------------------------------------------
 	function clearMessages() {
@@ -226,21 +225,33 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 
 	async function confirmRebuild() {
 		const target = pending;
-		if (saving || !target) return;
+		const current = form;
+		if (saving || !target || !current) return;
 		saving = true;
 		saveError = null;
 		const mine = run;
 		try {
 			await api.update(target.slug, target.payload, { rebuild: true });
-			await companies.load();
-			if (mine !== run) return;
-			dialogOpen = false;
-			await goto(resolve(`/c/${target.slug}/build` as `/c/${string}`));
 		} catch (e) {
-			if (mine === run) refused(e, target.slug, target.payload);
-		} finally {
-			if (mine === run) saving = false;
+			if (mine === run) {
+				refused(e, target.slug, target.payload);
+				saving = false;
+			}
+			return;
 		}
+		// The config is saved and the rebuild runs: nothing below may report a failed save.
+		void companies.load();
+		if (mine !== run) return;
+		current.loaded = target.payload;
+		dialogOpen = false;
+		pending = null;
+		try {
+			await goto(buildPath);
+		} catch {
+			saved = 'Saved. The rebuild started.';
+			started = 'build';
+		}
+		if (mine === run) saving = false;
 	}
 
 	function cancelRebuild() {
@@ -319,12 +330,12 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 					<div class="save">
 						{#if started === 'sync'}
 							<p class="done" role="status">
-								<Check aria-hidden="true" />Sync started. <a href={resolve(`/c/${data.slug}/build` as `/c/${string}`)}>See progress</a>
+								<Check aria-hidden="true" />Sync started. <a href={buildPath}>See progress</a>
 							</p>
 						{:else if saved && !dirty}
 							<p class="done" role="status">
 								<Check aria-hidden="true" />{saved}{#if started === 'build'}
-									<a href={resolve(`/c/${data.slug}/build` as `/c/${string}`)}>See progress</a>{/if}
+									<a href={buildPath}>See progress</a>{/if}
 							</p>
 						{/if}
 						<Button variant="primary" type="submit" loading={saving && !dialogOpen} disabled={!canSave}>
@@ -338,7 +349,11 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 </div>
 
 {#if pending}
-	<Dialog bind:open={dialogOpen} title={pending.dialog.title}>
+	<!-- Escape, the X and a click outside keep the dialog open while the rebuild request is on its way. -->
+	<Dialog
+		bind:open={() => dialogOpen, (value) => (dialogOpen = value || saving)}
+		title={pending.dialog.title}
+	>
 		<div class="dialog-copy">
 			{#if pending.dialog.reasons.length > 0}
 				<ul>

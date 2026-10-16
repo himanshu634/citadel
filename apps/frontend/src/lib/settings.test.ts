@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { ApiError } from './api/client';
-import { classifySaveError, isDirty, rebuildDialog, syncLine } from './settings';
+import { classifySaveError, isDirty, rebuildDialog, settingsReason, syncLine } from './settings';
 import type { CompanyConfig, ConfigChange } from './types';
 
 function config(over: Partial<CompanyConfig> = {}): CompanyConfig {
@@ -118,6 +118,24 @@ describe('syncLine', () => {
 		expect(syncLine([])).toBe('Saved');
 		expect(syncLine(['github:acme/new'])).toBe(
 			'Saved. A build started to download github:acme/new.'
+		);
+	});
+});
+
+describe('settingsReason', () => {
+	test('drops the wizard step wording', () => {
+		expect(settingsReason(null)).toBeNull();
+		expect(settingsReason('Checking')).toBe('Checking');
+		expect(settingsReason('Checking GitHub')).toBe('Checking GitHub');
+		expect(settingsReason('Fix the fields marked above.')).toBe('Fix the fields marked above.');
+		expect(settingsReason('Fix the errors in Sources (step 2) first.')).toBe(
+			'Fix the fields marked above.'
+		);
+		expect(settingsReason('Sources (step 2): Add at least one source to continue.')).toBe(
+			'Add at least one source to save.'
+		);
+		expect(settingsReason('Enter the company name to continue.')).toBe(
+			'Enter the company name to save.'
 		);
 	});
 });

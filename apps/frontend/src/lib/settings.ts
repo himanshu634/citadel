@@ -93,3 +93,13 @@ export function syncLine(refetch: string[]): string {
 		? `Saved. A build started to download ${refetch.join(', ')}.`
 		: 'Saved';
 }
+
+/**
+ * The footer line for a save that is shut. The shared gate words its reasons for the wizard's
+ * steps ("Sources (step 2): ... to continue."); Settings shows every section on one page.
+ */
+export function settingsReason(reason: string | null): string | null {
+	if (reason === null) return null;
+	if (/^Fix the errors in /.test(reason)) return 'Fix the fields marked above.';
+	return reason.replace(/^[^:]*\(step \d\): /, '').replace(/ to continue\.$/, ' to save.');
+}
