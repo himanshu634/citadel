@@ -1,11 +1,18 @@
-"""API test fixtures: a throwaway companies/ folder and a client that never touches FalkorDB."""
+"""API test fixtures: a throwaway companies/ folder and a client that never touches FalkorDB.
+
+The client's job runner uses fake steps that wait at `gate` (inside prepare) until a test opens
+it, so a build stays running for as long as a test needs.
+"""
 
 from __future__ import annotations
+
+import threading
 
 import pytest
 from brain import config, registry
 from brain.api import create_app
-from conftest import synthetic_company
+from brain.jobs import JobRunner
+from conftest import FakeSteps, synthetic_company
 from fastapi.testclient import TestClient
 
 
@@ -23,8 +30,20 @@ def no_graph(monkeypatch):
 
 
 @pytest.fixture
-def client():
-    return TestClient(create_app())
+def gate():
+    g = threading.Event()
+    yield g
+    g.set()  # never leave a worker blocked
+
+
+@pytest.fixture
+def runner(tmp_path, gate):
+    return JobRunner(steps=FakeSteps(gate=gate), jobs_dir=tmp_path / "jobs")
+
+
+@pytest.fixture
+def client(runner):
+    return TestClient(create_app(runner))
 
 
 def write(root, slug: str, name: str) -> None:

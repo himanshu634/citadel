@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from brain.jobs import BuildSummary
 from brain.registry import FieldError
 
 Status = Literal["ready", "building", "failed", "empty", "invalid"]
@@ -22,11 +23,15 @@ class CompanyOut(BaseModel):
     status: Status
     last_synced_at: str | None = None
     error: str | None = None
-    build: dict | None = None  # BuildSummary arrives with the build routes
+    build: BuildSummary | None = None  # the company's current or last build
 
 
 class CompanyDetail(CompanyOut):
     config: dict[str, Any]
+
+
+class BuildIn(BaseModel):
+    full: bool = False  # ignore the sync cursors and load everything in the window again
 
 
 class ValidateOut(BaseModel):
