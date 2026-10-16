@@ -267,6 +267,27 @@ class JobRunner:
                 return job.snapshot.model_copy(deep=True)
         return _read(path)
 
+    def has_history(self, slug: str) -> bool:
+        """Whether the slug has a build on record (in this process or in data/jobs/)."""
+        path = self._path(slug)
+        with self._lock:
+            return slug in self._jobs or path.exists()
+
+    def forget(self, slug: str) -> bool:
+        """Delete the slug's build history (`brain reset`), so a new company can take the slug.
+        Raises JobRunning while it has a queued or running job. False when there was none."""
+        path = self._path(slug)
+        with self._lock:
+            job = self._jobs.get(slug)
+            if job is not None and job.snapshot.state in ACTIVE:
+                raise JobRunning(slug)
+            known = self._jobs.pop(slug, None) is not None
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                return known
+            return True
+
     def summary(self, slug: str) -> BuildSummary | None:
         snap = self.current(slug)
         return BuildSummary.of(snap) if snap is not None else None

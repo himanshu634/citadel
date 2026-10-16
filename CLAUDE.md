@@ -26,7 +26,7 @@ make tools                     # list the named query tools and their params
 make query TOOL=impact_of P="system=CI"   # run one (SLUG=..., JSON=1 for raw rows)
 make ask SLUG=synthetic Q="who knows Auth?"   # Claude answers from the graph (THREAD=<id> follows up)
 make chat SLUG=synthetic OFFLINE=1   # one scripted turn, no API key: router + tools + checkpointer
-make reset SLUG=x CONFIRM=1    # delete a company graph
+make reset SLUG=x CONFIRM=1    # delete brain_x, agent_x and its build history (frees the slug)
 make brain ARGS="..."          # any `brain` CLI command
 make api                       # HTTP API on 127.0.0.1:$API_PORT (default 8000), auto-reload
 make dev                       # API + frontend dev server together

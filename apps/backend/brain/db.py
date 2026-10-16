@@ -62,6 +62,13 @@ def graph_exists(slug: str) -> bool:
     return graph_name(slug) in client().list_graphs()
 
 
+def company_graphs(slug: str) -> list[str]:
+    """Which of the company's graphs exist: brain_<slug> and agent_<slug>. A new company may only
+    take a slug that has neither, or it would show the old company's data."""
+    names = set(client().list_graphs())
+    return [n for n in (graph_name(slug), agent_graph_name(slug)) if n in names]
+
+
 def rows(result) -> list[dict[str, Any]]:
     """Turn a FalkorDB QueryResult into a list of {column: value} dicts."""
     cols = [c[1] if isinstance(c, (list, tuple)) else c for c in result.header]
@@ -100,4 +107,12 @@ def delete_graph(slug: str) -> bool:
     if not graph_exists(slug):
         return False
     graph(slug).delete()
+    return True
+
+
+def delete_agent_graph(slug: str) -> bool:
+    name = agent_graph_name(slug)
+    if name not in client().list_graphs():
+        return False
+    client().select_graph(name).delete()
     return True

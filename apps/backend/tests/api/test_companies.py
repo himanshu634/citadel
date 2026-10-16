@@ -129,6 +129,62 @@ def test_create_twice_is_409(client, api_root):
     assert r.json()["detail"] == "acme_labs is already a company. Pick another name"
 
 
+# --- a slug used before: its graphs or build history are still there --------------------------
+
+REUSED = (
+    "acme_labs was used before and its data is still there. Pick another name, or delete that "
+    "data with make reset SLUG=acme_labs CONFIRM=1"
+)
+
+
+def leave_build_history(runner) -> None:
+    runner.jobs_dir.mkdir(parents=True)
+    (runner.jobs_dir / "acme_labs.json").write_text("{}")
+
+
+def leave_graphs(monkeypatch, *names: str) -> None:
+    monkeypatch.setattr(db, "company_graphs", lambda slug: list(names))
+
+
+@pytest.mark.parametrize(
+    "leftover",
+    [
+        lambda runner, mp: leave_build_history(runner),
+        lambda runner, mp: leave_graphs(mp, "brain_acme_labs"),
+        lambda runner, mp: leave_graphs(mp, "agent_acme_labs"),
+    ],
+    ids=["build_history", "brain_graph", "agent_graph"],
+)
+def test_reused_slug_is_taken_until_reset(client, runner, api_root, monkeypatch, leftover):
+    leftover(runner, monkeypatch)
+    v = client.post("/api/companies/validate", json=VALID_DRAFT).json()
+    assert v["ok"] and v["slug_taken"] is True and v["slug_taken_detail"] == REUSED
+    r = client.post("/api/companies", json=VALID_DRAFT)
+    assert r.status_code == 409 and r.json() == {"detail": REUSED}
+    assert not (api_root / "companies" / "acme_labs.yaml").exists()
+
+
+def test_existing_company_is_taken_without_reset_advice(client, api_root):
+    write(api_root, "acme_labs", name="Acme Labs")
+    v = client.post("/api/companies/validate", json=VALID_DRAFT).json()
+    assert v["slug_taken_detail"] == "acme_labs is already a company. Pick another name"
+
+
+def test_free_slug_has_no_taken_detail(client, api_root):
+    v = client.post("/api/companies/validate", json=VALID_DRAFT).json()
+    assert v["slug_taken"] is False and v["slug_taken_detail"] is None
+
+
+@pytest.mark.parametrize("error", [RedisConnectionError, RedisTimeoutError])
+def test_slug_check_with_the_graph_down_uses_the_files(client, api_root, monkeypatch, error):
+    def down(slug):
+        raise error("unreachable")
+
+    monkeypatch.setattr(db, "company_graphs", down)
+    assert client.post("/api/companies/validate", json=VALID_DRAFT).json()["slug_taken"] is False
+    assert client.post("/api/companies", json=VALID_DRAFT).status_code == 201
+
+
 def test_create_invalid_is_422_with_field_paths(client, api_root):
     bad = {**VALID_DRAFT, "sources": [{"type": "github", "repo": "x"}]}
     r = client.post("/api/companies", json=bad)

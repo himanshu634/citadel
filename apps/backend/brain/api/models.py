@@ -43,7 +43,10 @@ class ValidateOut(BaseModel):
     ok: bool
     errors: list[FieldError]
     yaml: str | None = None  # the file Save would write; only when the draft is valid
-    slug_taken: bool = False  # true whenever the draft's slug is valid and already a company
+    # The draft's slug is valid but already a company, or a former company's graphs or build
+    # history are still there (then the detail says to run make reset).
+    slug_taken: bool = False
+    slug_taken_detail: str | None = None  # the same text a create would answer with (409)
 
 
 class Overview(BaseModel):

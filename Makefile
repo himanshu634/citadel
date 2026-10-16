@@ -76,7 +76,7 @@ query: ## Run a named tool: make query TOOL=experts_for_system P="system=CI" (JS
 tools: ## List the named query tools and their parameters
 	$(BRAIN) tools
 
-reset: ## Delete graph brain_$(SLUG); needs CONFIRM=1
+reset: ## Delete graphs brain_/agent_$(SLUG) and its build history; needs CONFIRM=1
 	$(BRAIN) reset $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)
 
 brain: ## Run any brain command: make brain ARGS="query falkordb graph_stats"

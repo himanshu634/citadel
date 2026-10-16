@@ -10,6 +10,7 @@ the files. A Settings save that changes what the graph holds needs the user's co
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from typing import Annotated, NamedTuple
 
@@ -19,7 +20,7 @@ from fastapi.responses import JSONResponse
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from brain import config_diff, db, registry
+from brain import config, config_diff, db, registry
 from brain.api.deps import company_slug, get_runner, start_lock
 from brain.api.models import CompanyDetail, CompanyOut, ConfigChange, Status, ValidateOut
 from brain.config import CompanyConfig
@@ -131,20 +132,49 @@ def list_companies(runner: Runner) -> list[CompanyOut]:
     return out
 
 
-def _slug_taken(draft: dict) -> bool:
-    slug = draft.get("slug")
-    return isinstance(slug, str) and registry.exists(slug)
+def _already_a_company(slug: str) -> str:
+    return f"{slug} is already a company. Pick another name"
+
+
+def _left_behind(runner: JobRunner, slug: str) -> bool:
+    """A former company with this slug left its graphs or build history (deleting the YAML does
+    not delete them); a new company would show that data. While FalkorDB is down only the build
+    history can be checked."""
+    if runner.has_history(slug):
+        return True
+    try:
+        return bool(db.company_graphs(slug))
+    except GRAPH_DOWN:
+        log.warning("FalkorDB is not reachable; cannot check for graphs left by %s", slug)
+        return False
+
+
+def slug_taken(runner: JobRunner, slug: object) -> str | None:
+    """Why the slug cannot be used for a new company, or None when it is free (or invalid: the
+    field errors say why)."""
+    if not isinstance(slug, str) or not re.fullmatch(config.SLUG_RE, slug):
+        return None
+    if registry.exists(slug):
+        return _already_a_company(slug)
+    if _left_behind(runner, slug):
+        return (
+            f"{slug} was used before and its data is still there. Pick another name, or delete "
+            f"that data with make reset SLUG={slug} CONFIRM=1"
+        )
+    return None
 
 
 @router.post("/validate")
-def validate_company(draft: Annotated[dict, Body()]) -> ValidateOut:
+def validate_company(draft: Annotated[dict, Body()], runner: Runner) -> ValidateOut:
     """Check a draft on every form change. Writes nothing."""
     cfg, errors = registry.validate_draft(draft)
+    taken = slug_taken(runner, draft.get("slug"))
     return ValidateOut(
         ok=cfg is not None,
         errors=errors,
         yaml=registry.render_yaml(cfg) if cfg else None,
-        slug_taken=_slug_taken(draft),
+        slug_taken=taken is not None,
+        slug_taken_detail=taken,
     )
 
 
@@ -153,11 +183,12 @@ def create_company(draft: Annotated[dict, Body()], runner: Runner):
     cfg, errors = registry.validate_draft(draft)
     if cfg is None:
         return _field_errors(errors)
+    if taken := slug_taken(runner, cfg.slug):
+        raise HTTPException(status_code=409, detail=taken)
     try:
         registry.write_new(cfg)
-    except FileExistsError as exc:
-        detail = f"{cfg.slug} is already a company. Pick another name"
-        raise HTTPException(status_code=409, detail=detail) from exc
+    except FileExistsError as exc:  # created by another request since the check
+        raise HTTPException(status_code=409, detail=_already_a_company(cfg.slug)) from exc
     return _detail(cfg, runner)
 
 

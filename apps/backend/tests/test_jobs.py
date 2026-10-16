@@ -473,3 +473,20 @@ def test_rebuild_failure_after_reset_leaves_failed_and_retry_works(rebuild_compa
     r.start(rebuild_company)
     assert wait_done(r, rebuild_company, 30).state == "done"
     assert _synced_sources(rebuild_company)
+
+
+def test_forget_deletes_the_build_history(runner_recording, tmp_path):
+    assert not runner_recording.has_history("a") and runner_recording.forget("a") is False
+    runner_recording.start("a")
+    wait_done(runner_recording, "a")
+    assert runner_recording.has_history("a")
+    assert runner_recording.forget("a") is True
+    assert not (tmp_path / "a.json").exists() and runner_recording.current("a") is None
+    assert not runner_recording.has_history("a")
+
+
+def test_forget_refuses_a_running_build(runner, gate):
+    runner.start("a")
+    with pytest.raises(JobRunning):
+        runner.forget("a")
+    assert runner.has_history("a")

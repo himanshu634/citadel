@@ -20,6 +20,7 @@ from rich.table import Table
 
 from brain import config, db, pipeline, schema, tools
 from brain.adapters.github.client import GithubError
+from brain.jobs import JobRunner
 
 app = typer.Typer(help="Company Brain: a company's engineering activity as one FalkorDB graph.")
 
@@ -92,16 +93,27 @@ def schema_cmd(slug: str) -> None:
 
 @app.command()
 def reset(slug: str, yes: bool = typer.Option(False, "--yes", help="Confirm deletion.")) -> None:
-    """Delete the whole graph brain_<slug>. Raw caches in data/ are kept."""
+    """Delete everything the slug left in the graph store and its build history: graphs
+    brain_<slug> and agent_<slug>, and data/jobs/<slug>.json. companies/<slug>.yaml and the raw
+    cache in data/raw/ are kept (a refetch is slow). Frees the slug for a new company."""
     name = _graph_name(slug)
+    agent = config.agent_graph_name(slug)
     if not yes:
         typer.secho(
-            f"This deletes graph {name}. Re-run with --yes (make reset: CONFIRM=1).", fg="yellow"
+            f"This deletes graphs {name} and {agent} and the build history of {slug}. "
+            "Re-run with --yes (make reset: CONFIRM=1).",
+            fg="yellow",
         )
         raise typer.Exit(1)
     _connected()
-    deleted = db.delete_graph(slug)
-    typer.echo(f"Deleted {name}." if deleted else f"{name} does not exist; nothing to delete.")
+    deleted = []
+    if db.delete_graph(slug):
+        deleted.append(name)
+    if db.delete_agent_graph(slug):
+        deleted.append(agent)
+    if JobRunner().forget(slug):
+        deleted.append(f"data/jobs/{slug}.json")
+    typer.echo(f"Deleted {', '.join(deleted)}." if deleted else f"Nothing to delete for {slug}.")
 
 
 SOURCE_OPT = typer.Option(None, "--source", help="Only this source type, e.g. github.")
