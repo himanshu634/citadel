@@ -110,6 +110,8 @@ purpose, parameters, returns, example.
 | `tools/person_profile.cypher` | One person's teams, systems, recent PRs, reviews and declared ownership |
 | `tools/get_entity.cypher` | Open any node by uid: fields, text and direct neighbours |
 | `tools/list_systems.cypher` | All systems with change counts, people and owners |
+| `tools/recent_work_items.cypher` | Most recent PRs, issues and threads, newest first (dashboard overview) |
+| `tools/people_activity.cypher` | People with how many PRs they authored and reviewed, bots excluded (dashboard overview) |
 | `tools/graph_stats.cypher` | Node and relationship counts per type |
 
 ### Schema (`make schema`)
