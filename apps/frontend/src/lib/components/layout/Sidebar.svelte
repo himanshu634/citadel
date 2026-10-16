@@ -41,7 +41,6 @@ the shell. Sections that are not built yet stay visible but inert, marked "Soon"
 			{ label: 'Sources', icon: BookOpen }
 		]
 	};
-	// Task 10 adds the Settings page; the link exists now so the sidebar is complete.
 	const manage: Group = {
 		heading: 'Company',
 		items: [{ label: 'Settings', path: 'settings', icon: Settings }]

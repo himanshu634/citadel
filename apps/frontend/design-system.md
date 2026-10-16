@@ -183,7 +183,7 @@ Adding a component:
 - Name things by what the user knows: "Sync now", "Open graph", "Company graph".
 - Buttons are verbs that say what happens, and the result uses the same word ("Delete graph",
   then "Graph deleted").
-- Errors say what went wrong and what to do: "Use lowercase letters, digits and dashes only".
+- Errors say what went wrong and what to do: "Use lowercase letters, digits and underscores only, like acme_labs".
 - Empty states invite the next step instead of describing emptiness.
 - Dates in tables and meta lines: `6 Feb`; with a year when it is not this year.
 
