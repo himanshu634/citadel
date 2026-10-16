@@ -86,6 +86,62 @@ describe('the field', () => {
 	});
 });
 
+describe('keystrokes that keep the repo', () => {
+	test('backspace and retype still reaches ready', async () => {
+		lookupRepo.mockResolvedValue(found({ repo: 'a/b' }));
+		const add = new AddCompany();
+		add.input('a/b');
+		add.input('a/');
+		expect(add.view).toBe('typing');
+		add.input('a/b');
+		await vi.advanceTimersByTimeAsync(300);
+		expect(add.view).toBe('ready');
+	});
+
+	test('a trailing space or more of a link does not cancel the lookup', async () => {
+		lookupRepo.mockResolvedValue(found());
+		const add = new AddCompany();
+		add.input('acme-labs/platform');
+		add.input('acme-labs/platform ');
+		await vi.advanceTimersByTimeAsync(300);
+		expect(add.view).toBe('ready');
+		add.input('https://github.com/acme-labs/platform/');
+		expect(add.view).toBe('ready');
+		expect(lookupRepo).toHaveBeenCalledTimes(1);
+	});
+
+	test('an edited name is dropped when the repo changes', async () => {
+		lookupRepo.mockResolvedValue(found());
+		const add = new AddCompany();
+		await typed(add, 'acme-labs/platform');
+		add.name = 'Mine';
+		await typed(add, 'acme-labs/web');
+		expect(add.name).toBeNull();
+	});
+});
+
+test('the API itself failing is not blamed on GitHub', async () => {
+	lookupRepo.mockRejectedValue(new TypeError('fetch failed'));
+	const add = new AddCompany();
+	await typed(add, 'acme-labs/platform');
+	expect(add.view).toBe('failed');
+});
+
+test('a create still running when the dialog is reset does not touch the new session', async () => {
+	lookupRepo.mockResolvedValue(found());
+	let reject!: (e: unknown) => void;
+	onboard.mockImplementation(() => new Promise((_, r) => (reject = r)));
+	const add = new AddCompany();
+	await typed(add, 'acme-labs/platform');
+	const pending = add.create();
+	add.show();
+	reject(new ApiError(422, { code: 'private_repo' }));
+	expect(await pending).toBeNull();
+	expect(add.view).toBe('empty');
+	expect(add.error).toBeNull();
+	expect(add.busy).toBe(false);
+});
+
 describe('what the lookup says', () => {
 	test.each([
 		[{ exists: false, private: null }, 'missing'],

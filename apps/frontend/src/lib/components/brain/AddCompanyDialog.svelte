@@ -8,6 +8,7 @@ State lives in `ctl` (an `AddCompany`); `oncreated` gets the slug whose build pa
 -->
 <script lang="ts">
 	import { ArrowRight, Check } from '@lucide/svelte';
+	import { tick } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { PRIVATE_MESSAGE, type AddCompany } from '$lib/addCompany.svelte';
 	import Banner from '../ui/Banner.svelte';
@@ -23,7 +24,13 @@ State lives in `ctl` (an `AddCompany`); `oncreated` gets the slug whose build pa
 
 	const view = $derived(ctl.view);
 	const found = $derived(ctl.found);
-	let editing = $state(false);
+	let editButton: HTMLButtonElement | undefined = $state();
+
+	async function stopEditing() {
+		ctl.editingName = false;
+		await tick();
+		editButton?.focus();
+	}
 
 	const fieldError = $derived(
 		view === 'private'
@@ -99,6 +106,11 @@ State lives in `ctl` (an `AddCompany`); `oncreated` gets the slug whose build pa
 				{view === 'rate_limited' ? 'Wait a minute, then try again.' : 'Try again in a moment.'}
 				{#snippet action()}<Button size="sm" onclick={() => ctl.retry()}>Try again</Button>{/snippet}
 			</Banner>
+		{:else if view === 'failed' && ctl.lookup?.kind === 'failed'}
+			<Banner tone="danger" title="Can't look the repository up">
+				{ctl.lookup.message}
+				{#snippet action()}<Button size="sm" onclick={() => ctl.retry()}>Try again</Button>{/snippet}
+			</Banner>
 		{:else if view === 'taken' && found?.company}
 			{@const owner = found.company}
 			<Banner tone="neutral" title="{owner.name} already reads this repository">
@@ -128,21 +140,30 @@ State lives in `ctl` (an `AddCompany`); `oncreated` gets the slug whose build pa
 			<dl class="summary">
 				<dt>Company</dt>
 				<dd>
-					{#if editing}
+					{#if ctl.editingName}
 						<Input
 							label="Company name"
 							hideLabel
-							value={ctl.companyName}
+							value={ctl.name ?? found.name ?? ''}
 							oninput={(e) => (ctl.name = e.currentTarget.value)}
-							onkeydown={(e) => e.key === 'Enter' && (editing = false)}
+							onkeydown={(e) => {
+								if (e.key !== 'Enter') return;
+								e.preventDefault(); // Enter here means Done, never Add and build
+								stopEditing();
+							}}
 						/>
 					{:else}
 						<b>{ctl.companyName}</b>
 					{/if}
 				</dd>
 				<dd class="edit">
-					<button type="button" class="link" onclick={() => (editing = !editing)}>
-						{editing ? 'Done' : 'Edit'}
+					<button
+						type="button"
+						class="link"
+						bind:this={editButton}
+						onclick={() => (ctl.editingName ? stopEditing() : (ctl.editingName = true))}
+					>
+						{ctl.editingName ? 'Done' : 'Edit'}
 					</button>
 				</dd>
 				<dt>Graph</dt>
@@ -163,7 +184,7 @@ State lives in `ctl` (an `AddCompany`); `oncreated` gets the slug whose build pa
 
 	{#snippet footer()}
 		<Button
-			class="grow"
+			class="add-company-grow"
 			variant="ghost"
 			size="sm"
 			href={resolve('/new')}
@@ -246,7 +267,7 @@ State lives in `ctl` (an `AddCompany`); `oncreated` gets the slug whose build pa
 		color: var(--color-danger);
 		font-size: var(--text-sm);
 	}
-	:global(.dialog-foot) > :global(.grow) {
+	:global(.dialog-foot) > :global(.add-company-grow) {
 		margin-right: auto;
 	}
 </style>

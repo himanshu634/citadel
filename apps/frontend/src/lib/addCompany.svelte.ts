@@ -20,7 +20,8 @@ export type Lookup =
 	| { kind: 'missing'; repo: string }
 	| { kind: 'no_token' }
 	| { kind: 'rate_limited' }
-	| { kind: 'unreachable' };
+	| { kind: 'unreachable' }
+	| { kind: 'failed'; message: string };
 
 /** What the dialog draws. `owner` and `taken` are `found` with a company in the way. */
 export type View =
@@ -34,14 +35,16 @@ export type View =
 	| 'missing'
 	| 'no_token'
 	| 'rate_limited'
-	| 'unreachable';
+	| 'unreachable'
+	| 'failed';
 
 export const PRIVATE_MESSAGE = 'Citadel reads public repositories only.';
 
 function failure(error: unknown): Lookup {
 	if (error instanceof ApiError && error.status === 424) return { kind: 'no_token' };
 	if (error instanceof ApiError && error.status === 429) return { kind: 'rate_limited' };
-	return { kind: 'unreachable' };
+	if (error instanceof ApiError && error.status === 502) return { kind: 'unreachable' };
+	return { kind: 'failed', message: describeError(error) }; // the API itself, not GitHub
 }
 
 function code(error: unknown): string | null {
@@ -59,11 +62,15 @@ export class AddCompany {
 	result = $state.raw<{ repo: string; lookup: Lookup } | null>(null);
 	/** The company name as edited; null keeps the suggestion. */
 	name = $state<string | null>(null);
+	/** The name's editor is open in place of the name. */
+	editingName = $state(false);
 	busy = $state(false);
 	/** Why the last create or add did not work. */
 	error = $state<string | null>(null);
 
 	#version = 0;
+	/** Bumped by `reset`: a create or add still running for a closed dialog must not touch it. */
+	#session = 0;
 	#lookup = debounce((repo: string, mine: number) => void this.#ask(repo, mine), 300);
 
 	/** `owner/name` from the field, or null while it is not one yet. */
@@ -108,11 +115,13 @@ export class AddCompany {
 	}
 
 	reset(): void {
+		this.#session++;
 		this.#version++;
 		this.#lookup.cancel();
 		this.text = '';
 		this.result = null;
 		this.name = null;
+		this.editingName = false;
 		this.busy = false;
 		this.error = null;
 	}
@@ -122,9 +131,14 @@ export class AddCompany {
 		this.text = text;
 		this.error = null;
 		const repo = this.repo;
+		if (repo !== null && this.result?.repo === repo) return; // same repo: its lookup stands
 		const mine = ++this.#version;
 		this.#lookup.cancel();
-		if (repo === null || this.result?.repo === repo) return;
+		this.name = null; // a name typed for another repo is not this one's
+		if (repo === null) {
+			this.result = null;
+			return;
+		}
 		this.result = { repo, lookup: { kind: 'checking' } };
 		this.#lookup(repo, mine);
 	}
@@ -156,6 +170,7 @@ export class AddCompany {
 	async create(): Promise<string | null> {
 		const found = this.found;
 		if (!found || !this.canCreate) return null;
+		const session = this.#session;
 		this.busy = true;
 		this.error = null;
 		try {
@@ -165,12 +180,12 @@ export class AddCompany {
 				slug: found.slug ?? undefined,
 				...(edited && edited !== found.name ? { name: edited } : {})
 			});
-			return answer.company.slug;
+			return session === this.#session ? answer.company.slug : null;
 		} catch (e) {
-			this.#refused(e, found);
+			if (session === this.#session) this.#refused(e, found);
 			return null;
 		} finally {
-			this.busy = false;
+			if (session === this.#session) this.busy = false;
 		}
 	}
 
@@ -178,18 +193,19 @@ export class AddCompany {
 	async addTo(slug: string): Promise<string | null> {
 		const found = this.found;
 		if (!found || this.busy) return null;
+		const session = this.#session;
 		this.busy = true;
 		this.error = null;
 		try {
 			const { config } = await api.company(slug);
 			const source = { type: 'github', repo: found.repo, include: GITHUB_PARTS.map((p) => p.part) };
 			await api.update(slug, { ...config, sources: [...config.sources, source] });
-			return slug;
+			return session === this.#session ? slug : null;
 		} catch (e) {
-			this.error = describeError(e);
+			if (session === this.#session) this.error = describeError(e);
 			return null;
 		} finally {
-			this.busy = false;
+			if (session === this.#session) this.busy = false;
 		}
 	}
 

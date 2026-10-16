@@ -79,11 +79,11 @@ def create(body: OnboardIn, runner: Runner, lock: StartLock):
     repo, private, owner_name = found
     if private:
         raise HTTPException(status_code=422, detail={"code": "private_repo", "message": PRIVATE})
-    if (reader := onboard.company_reading(repo)) is not None:
-        detail = {"code": "repo_taken", "slug": reader.slug, "name": reader.name}
-        raise HTTPException(status_code=409, detail=detail)
 
-    with lock:  # pick the slug, write and start as one step; other starts take the same lock
+    with lock:  # check, pick the slug, write and start as one step; other starts take this lock
+        if (reader := onboard.company_reading(repo)) is not None:
+            detail = {"code": "repo_taken", "slug": reader.slug, "name": reader.name}
+            raise HTTPException(status_code=409, detail=detail)
         slug = body.slug or onboard.first_free(
             onboard.candidates(repo), lambda s: slug_taken(runner, s) is not None
         )
@@ -105,7 +105,7 @@ def create(body: OnboardIn, runner: Runner, lock: StartLock):
             raise HTTPException(status_code=409, detail=detail) from exc
         try:
             build, error = runner.start(cfg.slug, "build"), None
-        except Exception as exc:  # the company stays; the dialog offers to try again
+        except Exception as exc:  # the company stays; its build page offers Start build
             log.exception("first build of %s did not start", cfg.slug)
             build, error = None, str(exc) or type(exc).__name__
     return OnboardOut(company=_detail(cfg, runner), build=build, build_error=error)
