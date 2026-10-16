@@ -328,11 +328,11 @@ again.
 		flex: 1;
 		min-width: 0;
 	}
-	/* Floats over the end of the chat column, just above the composer. */
+	/* Floats over the end of the chat column, just above the composer, on its content edge. */
 	.jump {
 		position: absolute;
 		bottom: 100%;
-		left: 50%;
+		left: var(--space-6);
 		z-index: 1;
 		display: inline-flex;
 		align-items: center;
@@ -349,7 +349,6 @@ again.
 		font-weight: var(--weight-medium);
 		white-space: nowrap;
 		cursor: pointer;
-		transform: translateX(-50%);
 	}
 	.jump:hover {
 		background: var(--color-surface);
@@ -377,6 +376,9 @@ again.
 		.intro {
 			margin-right: 0;
 			padding-inline: var(--space-4);
+		}
+		.jump {
+			left: var(--space-4);
 		}
 	}
 </style>
