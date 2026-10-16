@@ -122,8 +122,11 @@ def new_trace(
     ms: int,
     answer: Answer | None = None,
     error: str | None = None,
+    model: str | None = None,
 ) -> Trace:
-    """The trace of one turn: from its Answer, or (answer None) from a run that raised."""
+    """The trace of one turn: from its Answer, or (answer None) from a run that raised.
+    `model` is the one the turn asked for (None: ANTHROPIC_MODEL); the model that served the
+    Answer wins when there is one."""
     summary = step_summary(steps)
     s = config.get_settings()
     base = {
@@ -140,12 +143,12 @@ def new_trace(
         "ms": ms,
     }
     if answer is None:
-        return Trace(**base, stop="error", error=error, model=s.anthropic_model)
+        return Trace(**base, stop="error", error=error, model=model or s.anthropic_model)
     return Trace(
         **base,
         nudges=answer.nudges,
         stop=answer.stop,
-        model=answer.model or s.anthropic_model,
+        model=answer.model or model or s.anthropic_model,
         usage=usage_of(answer.usage),
         sources=len(answer.sources),
         text=answer.text,

@@ -7,6 +7,9 @@ and forwards each event as it comes: `start`, then `step` / `step_done` per tool
 
 - The run is checkpointed per thread (graph agent_<slug>); `thread_id` in the body asks a
   follow-up. One run per thread at a time (409).
+- `model` in the body picks the Claude model for this question, one of GET /api/models
+  (`agents.llm.MODELS`; anything else is a 422). Omitted: ANTHROPIC_MODEL, Haiku 5.5 by default.
+  Follow-ups in one thread may each use a different model.
 - When the browser goes away (or presses Stop, which closes the stream), the run stops at its
   next step and the thread stays valid for the next question.
 - The worker is a plain thread, not the request's task: a cancelled request only asks it to stop.
@@ -42,7 +45,17 @@ from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
 from backend.api.deps import company_slug
-from backend.api.models import AskAnswer, AskError, AskIn, AskLlm, AskStart, AskStep, AskStepDone
+from backend.api.models import (
+    AskAnswer,
+    AskError,
+    AskIn,
+    AskLlm,
+    AskStart,
+    AskStep,
+    AskStepDone,
+    ModelOut,
+    ModelsOut,
+)
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["ask"])
@@ -103,6 +116,17 @@ def get_asker(request: Request) -> Asker:
     return request.app.state.asker
 
 
+@router.get("/models", response_model=ModelsOut)
+def models() -> ModelsOut:
+    """The Claude models a question may run on, cheapest first, and the default."""
+    cheapest = min(m.price for m in llm.MODELS)
+    out = [
+        ModelOut(id=m.id, name=m.name, blurb=m.blurb, cost=round(m.price / cheapest), slow=m.slow)
+        for m in llm.MODELS
+    ]
+    return ModelsOut(models=out, default=llm.default_model())
+
+
 @router.post("/companies/{slug}/ask")
 def ask(slug: Slug, body: AskIn, asker: Annotated[Asker, Depends(get_asker)]):
     if not asker.graph_exists(slug):
@@ -113,10 +137,14 @@ def ask(slug: Slug, body: AskIn, asker: Annotated[Asker, Depends(get_asker)]):
             status_code=409,
             detail="This chat is still answering. Wait for it, or start a new chat.",
         )
-    return EventSourceResponse(_events(asker, slug, body.question, thread_id), ping=PING_SECONDS)
+    return EventSourceResponse(
+        _events(asker, slug, body.question, thread_id, body.model), ping=PING_SECONDS
+    )
 
 
-async def _events(asker: Asker, slug: str, question: str, thread_id: str) -> AsyncIterator[dict]:
+async def _events(
+    asker: Asker, slug: str, question: str, thread_id: str, model: str | None = None
+) -> AsyncIterator[dict]:
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict | None] = asyncio.Queue()
     stop = threading.Event()
@@ -135,8 +163,9 @@ async def _events(asker: Asker, slug: str, question: str, thread_id: str) -> Asy
         def keep(answer: Answer | None = None, error: str | None = None) -> str | None:
             ms = round((time.perf_counter() - started) * 1000)
             trace = new_trace(
-                slug, question, thread_id, via="api", steps=steps, ms=ms, answer=answer, error=error
-            )
+                slug, question, thread_id, via="api", steps=steps, ms=ms, answer=answer,
+                error=error, model=model,
+            )  # fmt: skip
             return trace.id if asker.traces(slug).add(trace) else None
 
         try:
@@ -148,6 +177,7 @@ async def _events(asker: Asker, slug: str, question: str, thread_id: str) -> Asy
                 toolset=asker.toolset(),
                 checkpointer=asker.checkpointer(slug),
                 stop=stop,
+                model=model,
             ):
                 if isinstance(event, Answer):
                     payload = answer_out(event, keep(event))

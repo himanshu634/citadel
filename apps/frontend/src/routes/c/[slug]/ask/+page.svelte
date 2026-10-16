@@ -11,7 +11,10 @@ below everything is one column with each walk under its conversation. `?q=` (fro
 ask field) asks once on arrival and is then removed from the address, so a reload does not ask
 again. Every chat is kept on the server: the past chats column (`ChatList`, foldable, kept in
 `citadel-ask-history`) lists them, `?thread=<id>` opens one (a reload or a shared link reopens
-it), and each lane shows how it answered (`TurnTimeline`, folded under the answer).
+it), and each lane shows how it answered (`TurnTimeline`, folded under the answer). A chip under
+the question field picks the Claude model for the next question (`ModelPicker`, direction P;
+Haiku 5.5 by default, kept in this browser); each answer says which model wrote it, and a
+follow-up on another model says so.
 -->
 <script lang="ts">
 	import {
@@ -29,9 +32,10 @@ it), and each lane shows how it answered (`TurnTimeline`, folded under the answe
 	import type { Attachment } from 'svelte/attachments';
 	import { prefersReducedMotion } from 'svelte/motion';
 	import { MediaQuery } from 'svelte/reactivity';
-	import { Banner, Button, ChatList, Input } from '$lib';
+	import { Banner, Button, ChatList, Input, ModelPicker } from '$lib';
 	import { AskThread } from '$lib/ask.svelte';
 	import { Chats } from '$lib/chats.svelte';
+	import { ModelChoice } from '$lib/models.svelte';
 	import AskLane from '$lib/components/brain/AskLane.svelte';
 	import Splitter from '$lib/components/ui/Splitter.svelte';
 	import { getCompanies } from '$lib/companies.svelte';
@@ -64,6 +68,17 @@ it), and each lane shows how it answered (`TurnTimeline`, folded under the answe
 	$effect(() => {
 		void chats.refresh();
 	});
+
+	// The same list for every company; the pick is kept in this browser.
+	const models = new ModelChoice();
+	$effect(() => {
+		void models.load();
+	});
+
+	/** The model that wrote a turn: the answer's (it may differ after a fallback), else the one asked for. */
+	function modelOf(t: (typeof thread.turns)[number]): string | null {
+		return t.answer?.model ?? t.calls.at(-1)?.model ?? t.model;
+	}
 
 	const wanted = $derived(page.url.searchParams.get('thread'));
 	// The address names the open chat: reopen it when it changes (a link, back, a reload); a bare
@@ -198,7 +213,7 @@ it), and each lane shows how it answered (`TurnTimeline`, folded under the answe
 			question = text; // asked from the top bar mid-answer: keep it ready to send
 			return;
 		}
-		void thread.ask(text);
+		void thread.ask(text, models.selected);
 		question = '';
 		void pinLatest();
 	}
@@ -299,6 +314,8 @@ it), and each lane shows how it answered (`TurnTimeline`, folded under the answe
 			{/if}
 			{#each thread.turns as turn, i (i)}
 				{@const selected = i === thread.selected}
+				{@const was = i > 0 ? modelOf(thread.turns[i - 1]) : null}
+				{@const wrote = modelOf(turn)}
 				<AskLane
 					{turn}
 					index={i}
@@ -312,6 +329,8 @@ it), and each lane shows how it answered (`TurnTimeline`, folded under the answe
 					replaying={selected && thread.replaying}
 					onreplay={() => thread.replay(i, prefersReducedMotion.current)}
 					onrate={(rating, note) => thread.rate(i, rating, note)}
+					answeredBy={turn.answer?.model ? (models.nameOf(turn.answer.model) ?? turn.answer.model) : null}
+					switched={was && wrote && was !== wrote ? { from: models.nameOf(was) ?? was, to: models.nameOf(wrote) ?? wrote } : null}
 				/>
 			{/each}
 		</div>
@@ -329,20 +348,29 @@ it), and each lane shows how it answered (`TurnTimeline`, folded under the answe
 					ask(question);
 				}}
 			>
-				<div class="field">
-					<Input
-						label="Your question"
-						hideLabel
-						placeholder={field.disabled ? field.placeholder : thread.turns.length ? 'Ask a follow-up' : field.placeholder}
-						disabled={field.disabled}
-						bind:value={question}
-					/>
+				<Input
+					label="Your question"
+					hideLabel
+					placeholder={field.disabled ? field.placeholder : thread.turns.length ? 'Ask a follow-up' : field.placeholder}
+					disabled={field.disabled}
+					bind:value={question}
+				/>
+				<div class="controls">
+					{#if models.models.length}
+						<ModelPicker
+							models={models.models}
+							selected={models.selected}
+							defaultId={models.defaultId}
+							disabled={thread.running}
+							onpick={(id) => models.pick(id)}
+						/>
+					{/if}
+					{#if thread.running}
+						<Button onclick={() => thread.stop()}>Stop</Button>
+					{:else}
+						<Button type="submit" variant="primary" disabled={field.disabled || !question.trim()}>Ask</Button>
+					{/if}
 				</div>
-				{#if thread.running}
-					<Button onclick={() => thread.stop()}>Stop</Button>
-				{:else}
-					<Button type="submit" variant="primary" disabled={field.disabled || !question.trim()}>Ask</Button>
-				{/if}
 			</form>
 		</div>
 	</div>
@@ -476,12 +504,17 @@ it), and each lane shows how it answered (`TurnTimeline`, folded under the answe
 	}
 	.composer {
 		display: flex;
+		flex-direction: column;
 		gap: var(--space-2);
 		padding: var(--space-3) var(--space-6) var(--space-4);
 	}
-	.field {
-		flex: 1;
-		min-width: 0;
+	.controls {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+	.controls :global(.btn) {
+		margin-left: auto;
 	}
 	/* Floats over the end of the chat column, just above the composer, on its content edge. */
 	.jump {

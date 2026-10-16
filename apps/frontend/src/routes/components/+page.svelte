@@ -26,6 +26,7 @@
 		GraphWalk,
 		Input,
 		Menu,
+		ModelPicker,
 		NodeChip,
 		NodeInspector,
 		Select,
@@ -68,6 +69,7 @@
 	// The Ask walk: citation 1 stays lit unless another is hovered.
 	let walkHover = $state<number | null>(null);
 	let liveRating = $state<'up' | 'down' | null>(null);
+	let liveModel = $state('claude-haiku-5-5');
 	let liveNote = $state<string | null>(null);
 	const walkActive = $derived(walkHover ?? 1);
 	const walkLit = $derived(highlightFor(walks.answer.sources[walkActive - 1], walks.done));
@@ -982,6 +984,24 @@
 			<figure>
 				<TurnTimeline calls={chatSamples.timeline.slice(0, 1)} steps={walks.running} />
 				<figcaption>Folded; open it to see a graph call still running</figcaption>
+			</figure>
+		</div>
+	</Card>
+
+	<Card title="Model picker (Ask)">
+		<div class="walks">
+			<figure>
+				<ModelPicker
+					models={chatSamples.models}
+					selected={liveModel}
+					defaultId="claude-haiku-5-5"
+					onpick={(id) => (liveModel = id)}
+				/>
+				<figcaption>Live: open it, pick a model; Haiku 5.5 is the default, Fable 5.1 is slow</figcaption>
+			</figure>
+			<figure>
+				<ModelPicker models={chatSamples.models} selected="claude-opus-5-5" defaultId="claude-haiku-5-5" disabled onpick={() => {}} />
+				<figcaption>Locked while an answer runs</figcaption>
 			</figure>
 		</div>
 	</Card>

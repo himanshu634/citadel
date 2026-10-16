@@ -182,6 +182,7 @@ export const followUp: WalkStep[] = [
 
 const turn = (over: Partial<Turn>): Turn => ({
 	question: '',
+	model: null,
 	calls: [],
 	steps: [],
 	answer: null,

@@ -31,6 +31,7 @@ export { default as ConfigPreview } from './components/brain/ConfigPreview.svelt
 export { default as EntityRow } from './components/brain/EntityRow.svelte';
 export { default as GraphPath } from './components/brain/GraphPath.svelte';
 export { default as GraphWalk } from './components/brain/GraphWalk.svelte';
+export { default as ModelPicker } from './components/brain/ModelPicker.svelte';
 export { default as NodeInspector } from './components/brain/NodeInspector.svelte';
 export { default as WalkAnswer } from './components/brain/WalkAnswer.svelte';
 export { default as StepRows } from './components/brain/StepRows.svelte';

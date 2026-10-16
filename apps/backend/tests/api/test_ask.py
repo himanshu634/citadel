@@ -69,6 +69,35 @@ def test_follow_up_keeps_the_thread_id(company, runner):
     assert frames(r.text)[0] == ("start", {"thread_id": "abc123"})
 
 
+def test_models_lists_the_four_claude_models_cheapest_first(runner):
+    client = make_client(runner, FakeClient())
+    body = client.get("/api/models").json()
+    assert [m["id"] for m in body["models"]] == [
+        "claude-haiku-5-5",
+        "claude-sonnet-5-5",
+        "claude-opus-5-5",
+        "claude-fable-5-1",
+    ]
+    assert [m["cost"] for m in body["models"]] == [1, 20, 40, 100]
+    assert [m["slow"] for m in body["models"]] == [False, False, False, True]
+    assert body["default"] == "claude-haiku-5-5"
+
+
+def test_a_question_runs_on_the_model_it_names(company, runner):
+    claude = FakeClient(reply(submit("t1", "No sources.", [])), reply(submit("t2", "None.", [])))
+    client = make_client(runner, claude)
+    url = f"/api/companies/{company}/ask"
+    assert client.post(url, json={"question": "Why?", "model": "claude-sonnet-5-5"}).is_success
+    assert client.post(url, json={"question": "Why?"}).is_success
+    assert [r["model"] for r in claude.requests] == ["claude-sonnet-5-5", "claude-haiku-5-5"]
+
+
+def test_an_unknown_model_is_a_422(company, runner):
+    client = make_client(runner, FakeClient())
+    r = client.post(f"/api/companies/{company}/ask", json={"question": "x", "model": "gpt-5"})
+    assert r.status_code == 422 and "unknown model" in r.text
+
+
 def test_a_company_without_a_graph_is_refused(company, runner):
     client = make_client(runner, FakeClient(), graph_exists=False)
     r = client.post(f"/api/companies/{company}/ask", json={"question": "Why?"})

@@ -461,6 +461,25 @@ export interface AskAnswer {
 	model: string | null;
 }
 
+/** A Claude model a question may run on (GET /api/models, backend `ModelOut`). */
+export interface ModelInfo {
+	id: string;
+	name: string;
+	/** One line on what it is good for. */
+	blurb: string;
+	/** Price per token as a multiple of the cheapest model's: 1, 20, 40, 100. */
+	cost: number;
+	/** An answer can take minutes. */
+	slow: boolean;
+}
+
+export interface ModelsOut {
+	/** Cheapest first. */
+	models: ModelInfo[];
+	/** The id a question runs on when it names none. */
+	default: string;
+}
+
 /** One tool call as the page shows it: asked for (running), then done. */
 export interface WalkStep extends AskStepEvent {
 	status: 'running' | 'done';

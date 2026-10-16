@@ -13,7 +13,7 @@ is only hidden, so it opens where it was. While the answer runs, a hidden live r
 screen readers the step under way. Below 1100px the walk goes under the conversation.
 -->
 <script lang="ts">
-	import { Copy, LoaderCircle, RotateCcw, Waypoints } from '@lucide/svelte';
+	import { ArrowLeftRight, Copy, LoaderCircle, RotateCcw, Waypoints } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import type { Turn } from '$lib/ask.svelte';
@@ -49,6 +49,10 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 		onreplay?: () => void;
 		/** A thumbs (or null, taken back), with the note sent with a thumbs down. */
 		onrate?: (rating: Rating | null, note?: string) => void;
+		/** The model that wrote the answer, by name ("Haiku 5.5"). */
+		answeredBy?: string | null;
+		/** This question ran on another model than the one before it. */
+		switched?: { from: string; to: string } | null;
 	};
 
 	let {
@@ -63,7 +67,9 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 		revealed = null,
 		replaying = false,
 		onreplay,
-		onrate
+		onrate,
+		answeredBy = null,
+		switched = null
 	}: Props = $props();
 	const id = $props.id();
 
@@ -176,6 +182,12 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 	<div class="chat">
 		<!-- The strip's heading already says the question to assistive tech. -->
 		<p class="bubble" aria-hidden="true">{turn.question}</p>
+		{#if switched}
+			<p class="switched">
+				<ArrowLeftRight aria-hidden="true" />Switched from {switched.from} to {switched.to}. The first answer on a
+				new model is a little slower.
+			</p>
+		{/if}
 		<div class="who">
 			<span class="mark" aria-hidden="true"><Waypoints /></span>
 			<span class="name">{brain} brain</span>
@@ -227,6 +239,7 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 				<Button size="sm" variant="ghost" disabled={graphSteps === 0} onclick={() => onreplay?.()}>
 					<RotateCcw aria-hidden="true" />{replaying ? 'Replaying' : 'Replay walk'}
 				</Button>
+				{#if answeredBy}<span class="stamp">{answeredBy}</span>{/if}
 			</div>
 		{/if}
 		{#if turn.calls.length}
@@ -370,6 +383,29 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 	.note {
 		color: var(--color-text-muted);
 		font-size: var(--text-sm);
+	}
+	.switched {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--space-2);
+		color: var(--color-text-muted);
+		font-size: var(--text-sm);
+	}
+	.switched :global(svg) {
+		flex: none;
+		width: var(--text-sm);
+		height: var(--text-sm);
+		margin-top: var(--space-1);
+	}
+	/* Which model wrote the answer: a mono stamp at the end of the actions. */
+	.stamp {
+		margin-left: auto;
+		padding: 0 var(--space-1);
+		border-radius: var(--radius-sm);
+		background: var(--color-surface-sunken);
+		color: var(--color-text-muted);
+		font-family: var(--font-mono);
+		font-size: var(--text-xs);
 	}
 	.actions {
 		display: flex;
