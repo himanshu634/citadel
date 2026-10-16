@@ -22,6 +22,8 @@ make schema SLUG=synthetic     # create indexes on brain_synthetic (idempotent)
 make synthetic                 # regenerate synthetic JSONL, schema + full ingest into brain_synthetic
 make fetch | ingest | sync     # SOURCE=<type> limits to one source; FULL=1 ignores sync cursors
 make stats                     # node/relationship counts
+make tools                     # list the named query tools and their params
+make query TOOL=impact_of P="system=CI"   # run one (SLUG=..., JSON=1 for raw rows)
 make reset SLUG=x CONFIRM=1    # delete a company graph
 make brain ARGS="..."          # any `brain` CLI command
 
@@ -75,6 +77,12 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
 - **`pipeline.py`** is the source-agnostic glue the CLI calls. Ingest is incremental: each source
   has a `SyncState` node holding a cursor; records older than it are skipped, records without a
   timestamp (people, teams, ownership, links) are always loaded. `--full` ignores the cursor.
+- **`tools.py`** is the read side: `TOOLS` maps each tool name to its `queries/tools/<name>.cypher`,
+  a pydantic params model (input schema for agents) and a row model (always uids + urls for
+  citations). `call(slug, name, **params)` is the one entry point; typed wrappers sit on top.
+  `prepare` only converts params (days → epoch, text → RediSearch OR query, login → uid). No
+  LLM-generated Cypher anywhere. `path_between` uses `algo.SPpaths` (FalkorDB's `shortestPath`
+  rejects undirected traversals).
 - **`db.py`** is the only place that opens a connection and selects the graph (`brain_<slug>`);
   all queries go through `db.run()` so nothing can hit the wrong company's graph.
 
