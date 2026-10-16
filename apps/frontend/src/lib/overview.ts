@@ -6,7 +6,7 @@
  * decisions here makes them testable, and keeps the page a thin layer of fetch and markup. The
  * state comes from `company.status`, never from `build`, which may be a finished build.
  */
-import { stepOf } from './build';
+import { buildingLabel } from './topbar';
 import { NODE_PLURALS } from './types';
 import type {
 	Company,
@@ -53,9 +53,7 @@ export function viewOf(company: Company): OverviewView {
 
 /** The waiting banner's title: "Building, step 3 of 5", "Building", or "Not built yet". */
 export function buildingTitle(company: Company): string {
-	if (company.status !== 'building') return 'Not built yet';
-	const step = company.build ? stepOf(company.build) : null;
-	return step ? `Building, step ${step.n} of ${step.total}` : 'Building';
+	return company.status === 'building' ? buildingLabel(company) : 'Not built yet';
 }
 
 /** The graph labels the overview counts, in display order. Other labels (Chunk) stay out. */

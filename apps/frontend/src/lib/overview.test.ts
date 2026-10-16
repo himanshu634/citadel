@@ -8,6 +8,7 @@ import {
 	viewOf,
 	workItemOf
 } from './overview';
+import { statusLineOf } from './topbar';
 import type { BuildSummary, Company, PersonActivity, RecentWorkItem, SystemSummary } from './types';
 
 function company(over: Partial<Company> = {}): Company {
@@ -105,6 +106,15 @@ describe('buildingTitle', () => {
 	test('an unbuilt company with nothing running is not "building"', () => {
 		expect(buildingTitle(company({ status: 'empty' }))).toBe('Not built yet');
 	});
+});
+
+test('the overview banner and the top bar word a build in progress the same way', () => {
+	const rows = [
+		company({ status: 'building' }),
+		company({ status: 'building', build: build({ stage: null }) }),
+		company({ status: 'building', build: build({ stage: 'load' }) })
+	];
+	for (const c of rows) expect(buildingTitle(c)).toBe(statusLineOf(c)?.text);
 });
 
 describe('statCards', () => {
