@@ -303,35 +303,55 @@ def chat(
 
 def _run_ask(slug: str, question: str, thread: str | None, client=None):
     """One turn. A turn with the real Claude (no `client`) leaves a trace in
-    data/traces/<slug>.jsonl (`brain traces`); a scripted --offline turn does not."""
+    data/traces/<slug>.jsonl (`brain traces`) and is kept in the chat history (agent_<slug>,
+    the Ask page's chat list); a scripted --offline turn is not."""
     import time
     import uuid
 
     from brain import llm
-    from brain.agents.ask import ask_traced
+    from brain.agents.ask import Answer, answer_out, run_events
+    from brain.agents.history import GraphChatStore, Recorder
     from brain.agents.traces import TraceStore, new_trace
 
     thread = thread or uuid.uuid4().hex[:12]
     started = time.perf_counter()
+    live = client is None
+    recorder = Recorder(GraphChatStore(slug), question) if live else None
 
-    def keep(**kw) -> None:
-        if client is None:
-            ms = round((time.perf_counter() - started) * 1000)
-            TraceStore(slug).add(new_trace(slug, question, thread, via="cli", ms=ms, **kw))
+    def keep(**kw) -> str | None:
+        if not live:
+            return None
+        ms = round((time.perf_counter() - started) * 1000)
+        trace = new_trace(slug, question, thread, via="cli", ms=ms, **kw)
+        return trace.id if TraceStore(slug).add(trace) else None
 
+    steps: list[dict] = []
+    answer = None
     try:
-        answer, steps = ask_traced(
+        for event in run_events(
             slug, question, thread_id=thread, client=client, checkpointer=db.checkpointer(slug)
-        )
+        ):
+            if isinstance(event, Answer):
+                answer = event
+                break
+            if event.get("kind") == "step_done":
+                steps.append(event)
+            if recorder:
+                recorder.on(event)
     except Exception as e:
         problem = llm.describe_error(e)
-        keep(steps=[], error=problem or f"{type(e).__name__}: {e}")
+        trace_id = keep(steps=[], error=problem or f"{type(e).__name__}: {e}")
+        if recorder:
+            recorder.fail(problem or f"{type(e).__name__}: {e}", trace_id)
         if problem is None:
             raise
         if "No Anthropic credentials" in problem:
             problem += " Or try --offline."
         _fail(problem)
-    keep(steps=steps, answer=answer)
+    assert answer is not None  # run_events always ends with one
+    trace_id = keep(steps=steps, answer=answer)
+    if recorder:
+        recorder.answer(answer_out(answer, trace_id), answer.model)
     return answer
 
 

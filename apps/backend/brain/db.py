@@ -103,6 +103,30 @@ def run_text(slug: str, cypher: str, params: dict[str, Any] | None = None):
     return graph(slug).query(cypher, params)
 
 
+def agent_graph(slug: str) -> Graph:
+    return client().select_graph(agent_graph_name(slug))
+
+
+def run_agent(
+    slug: str, name: str, params: dict[str, Any] | None = None, read_only: bool = False
+) -> list[dict[str, Any]]:
+    """Run the named query against agent_<slug> (the chat history beside the checkpoints).
+
+    A file of several statements (`;`) runs them in order and returns the last one's rows. A
+    read of an agent graph that does not exist yet (no chat so far) has no rows.
+    """
+    g = agent_graph(slug)
+    out: list[dict[str, Any]] = []
+    for stmt in queries.get(name).statements():
+        try:
+            out = rows(g.ro_query(stmt, params) if read_only else g.query(stmt, params))
+        except ResponseError:
+            if read_only and agent_graph_name(slug) not in client().list_graphs():
+                return []
+            raise
+    return out
+
+
 def delete_graph(slug: str) -> bool:
     if not graph_exists(slug):
         return False

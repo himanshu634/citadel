@@ -10,6 +10,7 @@ import threading
 
 import pytest
 from brain import config, registry
+from brain.agents.history import MemoryChatStore
 from brain.api import create_app
 from brain.jobs import JobRunner
 from conftest import FakeSteps, synthetic_company
@@ -29,6 +30,14 @@ def no_graph(monkeypatch):
     graphs left behind."""
     monkeypatch.setattr("brain.api.companies.status_of", lambda slug: ("empty", None))
     monkeypatch.setattr("brain.db.company_graphs", lambda slug: [])
+
+
+@pytest.fixture(autouse=True)
+def history(monkeypatch):
+    """Ask runs record into an in-memory history, never into a real agent_<slug> graph."""
+    store = MemoryChatStore()
+    monkeypatch.setattr("brain.api.ask.graph_history", lambda slug: store)
+    return store
 
 
 @pytest.fixture

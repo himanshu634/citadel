@@ -113,6 +113,7 @@ def add_brain_loop(
     tool_defs = [*toolset.definitions(), submit_tool]
 
     def call_claude(state: AgentState) -> dict[str, Any]:
+        started = time.perf_counter()
         with client.beta.messages.stream(
             model=s.anthropic_model,
             max_tokens=s.anthropic_max_tokens,
@@ -131,6 +132,8 @@ def add_brain_loop(
             # next request in this thread invalid. Nothing has been sent back yet, so drop it.
             content = [b for b in content if b["type"] != "tool_use"]
         writer = get_stream_writer()
+        ms = round((time.perf_counter() - started) * 1000)
+        writer(llm_event(content, msg, ms, submit))  # before its steps: they hang off it
         for b in content:
             if b["type"] == "tool_use":
                 writer({"kind": "step", "id": b["id"], "tool": b["name"], "input": b.get("input")})
@@ -259,6 +262,69 @@ def check_answer(answer: dict[str, Any], seen: dict[str, Any]) -> str | None:
             f"Marker [n] cites sources[n-1]; fix them and call {SUBMIT} again."
         )
     return None
+
+
+RESULT_PREVIEW = 2000  # characters of an MCP or server tool result kept for the history
+
+
+def llm_event(content: list[dict[str, Any]], msg: Any, ms: int, submit: str) -> dict[str, Any]:
+    """The `llm` event for one Claude response: what it said and thought, what it asked for,
+    tokens and timing (chat history and the Ask page's timeline). `calls` lists every tool the
+    response used in order: `graph` and `submit` calls (tool_use) run later in run_tools, so
+    they have no result here; `mcp` (mcp_tool_use, through the MCP connector) and `server`
+    (server_tool_use) calls ran on Anthropic's side and come with their result blocks."""
+    results = {
+        b["tool_use_id"]: b
+        for b in content
+        if b["type"].endswith("_tool_result") and "tool_use_id" in b
+    }
+    calls: list[dict[str, Any]] = []
+    for b in content:
+        kind = {"tool_use": None, "mcp_tool_use": "mcp", "server_tool_use": "server"}.get(
+            b["type"], "skip"
+        )
+        if kind == "skip":
+            continue
+        call = {
+            "id": b["id"],
+            "tool": b["name"],
+            "kind": kind or ("submit" if b["name"] == submit else "graph"),
+            "server": b.get("server_name"),
+            "input": b.get("input") or {},
+        }
+        if kind and (res := results.get(b["id"])):
+            call["error"] = _result_text(res) if res.get("is_error") else None
+            call["result"] = _result_text(res)[:RESULT_PREVIEW]
+        calls.append(call)
+    usage = msg.usage
+    return {
+        "kind": "llm",
+        "text": "\n\n".join(b["text"] for b in content if b["type"] == "text") or None,
+        "thinking": "\n\n".join(b.get("thinking") or "" for b in content
+                                 if b["type"] == "thinking").strip() or None,
+        "model": msg.model,
+        "stop": msg.stop_reason,
+        "ms": ms,
+        "usage": {
+            "input": usage.input_tokens or 0,
+            "output": usage.output_tokens or 0,
+            "cache_read": getattr(usage, "cache_read_input_tokens", None) or 0,
+            "cache_write": getattr(usage, "cache_creation_input_tokens", None) or 0,
+        },
+        "calls": calls,
+    }  # fmt: skip
+
+
+def _result_text(block: dict[str, Any]) -> str:
+    """The text of a server-side tool result block (a string, or text blocks, or anything)."""
+    body = block.get("content")
+    if isinstance(body, str):
+        return body
+    if isinstance(body, list):
+        texts = [c.get("text", "") for c in body if isinstance(c, dict) and c.get("type") == "text"]
+        if texts:
+            return "\n".join(texts)
+    return json.dumps(body, default=str)
 
 
 _MODEL_INTERNAL = {"thinking", "redacted_thinking", "tool_use", "server_tool_use"}

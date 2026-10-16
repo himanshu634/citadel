@@ -147,12 +147,47 @@ class AskStart(BaseModel):
 
 class AskStep(BaseModel):
     """Claude asked for a tool. `n` numbers the graph steps of one answer; submit_answer (the
-    answer check) has none."""
+    answer check) has none. `call` is the seq of the Claude response (`llm`) that asked."""
 
     id: str
     n: int | None
     tool: str
     input: dict[str, Any] | None = None
+    call: int | None = None
+
+
+class AskCall(BaseModel):
+    """A tool one Claude response used. `graph` and `submit` calls run afterwards (their
+    step_done follows); `mcp` and `server` calls ran on Anthropic's side and carry a result."""
+
+    id: str
+    tool: str
+    kind: Literal["graph", "submit", "mcp", "server"]
+    server: str | None = None  # the MCP server's name
+    input: dict[str, Any] = {}
+    error: str | None = None
+    result: str | None = None
+
+
+class AskUsage(BaseModel):
+    input: int = 0
+    output: int = 0
+    cache_read: int = 0
+    cache_write: int = 0
+
+
+class AskLlm(BaseModel):
+    """One Claude response: what it said (text), its thinking when the API returns it, and the
+    tools it asked for."""
+
+    seq: int
+    text: str | None = None
+    thinking: str | None = None
+    model: str | None = None
+    stop: str | None = None
+    ms: int | None = None
+    usage: AskUsage = AskUsage()
+    calls: list[AskCall] = []
 
 
 class AskStepDone(AskStep):

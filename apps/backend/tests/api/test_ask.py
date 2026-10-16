@@ -47,8 +47,12 @@ def test_ask_streams_steps_then_the_answer(company, runner):
     r = client.post(f"/api/companies/{company}/ask", json={"question": "Why JWT?"})
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
     got = frames(r.text)
-    assert [k for k, _ in got] == ["start", "step", "step_done", "step", "step_done", "answer"]
-    done = got[2][1]
+    assert [k for k, _ in got] == ["start", "llm", "step", "step_done", "llm", "step",
+                                   "step_done", "answer"]  # fmt: skip
+    llm = got[1][1]
+    assert llm["seq"] == 1 and llm["calls"][0]["kind"] == "graph" and llm["usage"]["input"] == 100
+    assert got[2][1]["call"] == 1 and got[5][1]["call"] == 2
+    done = got[3][1]
     assert done["n"] == 1 and done["count"] == 2 and "kind" not in done
     assert {n["uid"] for n in done["nodes"]} == {"pr:1", "issue:11"}
     answer = got[-1][1]
