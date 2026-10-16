@@ -144,7 +144,7 @@ def ingest(
         emit(BuildEvent(slug, "normalize", "done", key, count=result.loaded))
 
         emit(BuildEvent(slug, "load", "running", key))
-        loaded = loader.load(slug, records)
+        loaded = loader.load(slug, records, origin=key)
         report.load.merge(loaded)
         latest = next_cursor(records, cursor, datetime.now(UTC))
         loader.set_sync_state(slug, adapter.name, key, latest, window_since, result.loaded)

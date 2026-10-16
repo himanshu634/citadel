@@ -16,11 +16,12 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from brain import db
 from brain.canonical import (
+    URL_PREFIX,
     CanonicalRecord,
     Change,
     Comment,
@@ -32,6 +33,7 @@ from brain.canonical import (
     System,
     Team,
     WorkItem,
+    is_url_ref,
     person_uid,
     system_uid,
     team_uid,
@@ -49,7 +51,18 @@ LINK_QUERIES: dict[tuple[str, str, str], str] = {
     ("MENTIONS", "WorkItem", "System"): "load/link_mentions_workitem_system",
     ("MENTIONS", "Document", "WorkItem"): "load/link_mentions_document_workitem",
     ("MENTIONS", "Document", "System"): "load/link_mentions_document_system",
+    ("BLOCKS", "WorkItem", "WorkItem"): "load/link_blocks",
 }
+
+# Same, for a link whose to_uid is a url ref (the target is the work item with that url).
+# Mirrors canonical.URL_LINKS.
+URL_LINK_QUERIES: dict[tuple[str, str, str], str] = {
+    ("MENTIONS", "WorkItem", "WorkItem"): "load/link_mentions_workitem_workitem_by_url",
+}
+
+# For sorting tickets by priority; no priority sorts last.
+PRIORITY_RANK = {"urgent": 1, "high": 2, "medium": 3, "low": 4}
+NO_PRIORITY_RANK = 5
 
 
 @dataclass
@@ -77,6 +90,11 @@ def epoch(dt: datetime | None) -> int | None:
     return int(dt.timestamp()) if dt else None
 
 
+def day_epoch(d: date | None) -> int | None:
+    """The date at 00:00 UTC, in epoch seconds."""
+    return int(datetime(d.year, d.month, d.day, tzinfo=UTC).timestamp()) if d else None
+
+
 def _base(r: CanonicalRecord) -> dict[str, Any]:
     return {"uid": r.uid, "source": r.source, "url": r.url}
 
@@ -101,8 +119,13 @@ def _dedupe(records: Iterable[CanonicalRecord]) -> dict[type, list[CanonicalReco
     return {t: list(d.values()) for t, d in by_type.items()}
 
 
-def load(slug: str, records: Iterable[CanonicalRecord]) -> LoadReport:
-    """Write records to brain_<slug>. Idempotent."""
+def load(slug: str, records: Iterable[CanonicalRecord], origin: str | None = None) -> LoadReport:
+    """Write records to brain_<slug>. Idempotent.
+
+    `origin` is the key of the source being loaded. With it, the BLOCKS edges of that source that
+    this load did not write are deleted afterwards: the load is that source's whole picture of
+    its dependencies. Without it nothing is ever pruned.
+    """
     groups = _dedupe(records)
     rep = LoadReport()
 
@@ -145,6 +168,12 @@ def load(slug: str, records: Iterable[CanonicalRecord]) -> LoadReport:
                 "merged_at": iso(w.merged_at),
                 "labels": w.labels,
                 "container": w.container,
+                "key": w.key,
+                "status_category": w.status_category,
+                "priority": w.priority,
+                "priority_rank": PRIORITY_RANK.get(w.priority or "", NO_PRIORITY_RANK),
+                "due_date": w.due_date.isoformat() if w.due_date else None,
+                "due_ts": day_epoch(w.due_date),
             }
             for w in of(WorkItem)
         ],
@@ -199,6 +228,18 @@ def load(slug: str, records: Iterable[CanonicalRecord]) -> LoadReport:
             rep,
         )
 
+    # assignees are replaced, not accumulated; only for items whose source tracks them
+    _run(
+        slug,
+        "load/assigned_to",
+        [
+            {"work_item_uid": w.uid, "person_uids": [person_uid(a) for a in w.assignees]}
+            for w in of(WorkItem)
+            if w.assignees is not None
+        ],
+        rep,
+    )
+
     # 3. other relationships
     _run(
         slug,
@@ -248,13 +289,25 @@ def load(slug: str, records: Iterable[CanonicalRecord]) -> LoadReport:
     _run(slug, "load/commented_on", [{"person_uid": p, "work_item_uid": w} for p, w in pairs], rep)
     _load_ownership(slug, of(Ownership), rep)
     links: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    kept_blocks: list[str] = []
     for link in of(Link):
-        query = LINK_QUERIES[(link.rel, link.from_label, link.to_label)]
-        links[query].append(
-            {"from_uid": link.from_uid, "to_uid": link.to_uid, "source": link.source}
-        )
+        key = (link.rel, link.from_label, link.to_label)
+        row: dict[str, Any] = {"from_uid": link.from_uid, "source": link.source}
+        if is_url_ref(link.to_uid):
+            query = URL_LINK_QUERIES[key]
+            row["to_url"] = link.to_uid.removeprefix(URL_PREFIX)
+        else:
+            query = LINK_QUERIES[key]
+            row["to_uid"] = link.to_uid
+        if link.rel == "BLOCKS":
+            row.update(origin=origin, uid=link.uid)
+            kept_blocks.append(link.uid)
+        links[query].append(row)
     for query, rows in links.items():
         _run(slug, query, rows, rep)
+    if origin is not None:
+        # not a row batch, so it is not counted in the report
+        db.run(slug, "load/prune_blocks", {"origin": origin, "keep": kept_blocks})
     return rep
 
 
