@@ -1,8 +1,10 @@
 <!--
 @component
-The dashboard frame: company rail and sidebar on the left, top bar, scrolling content. Below
-900px the rail and sidebar become one drawer, side by side, opened from the top bar. Provides the
-tooltip context for everything inside.
+The dashboard frame: company rail and sidebar on the left, top bar, scrolling content. The top
+bar's fold button (or the [ key) folds the sidebar to its icons; the choice is kept in this
+browser (`citadel-sidebar`). Below 900px the rail and sidebar become one drawer, side by side,
+opened from the top bar, and the sidebar is never folded there. Provides the tooltip context for
+everything inside.
 -->
 <script lang="ts">
 	import { page } from '$app/state';
@@ -18,11 +20,36 @@ tooltip context for everything inside.
 	import Topbar from './Topbar.svelte';
 
 	let { children }: { children: Snippet } = $props();
-	// The Graph page is a full-bleed canvas: no content width cap, no padding (design-system.md).
-	const bleed = $derived(page.url.pathname.endsWith('/graph'));
+	// Graph and Ask fill the window under the top bar: no content width cap, no padding (design-system.md).
+	const bleed = $derived(/\/(graph|ask)$/.test(page.url.pathname));
 	const companies = getCompanies();
 	let navOpen = $state(false);
 	const close = () => (navOpen = false);
+
+	const FOLD_KEY = 'citadel-sidebar';
+	let folded = $state(false);
+	// Read once in the browser: storage can be blocked (private window), and then it stays open.
+	$effect(() => {
+		try {
+			folded = localStorage.getItem(FOLD_KEY) === 'folded';
+		} catch {
+			// keep it open
+		}
+	});
+	function fold() {
+		folded = !folded;
+		try {
+			localStorage.setItem(FOLD_KEY, folded ? 'folded' : 'open');
+		} catch {
+			// not remembered; it still folds for this visit
+		}
+	}
+	const typing = (t: EventTarget | null) =>
+		t instanceof HTMLElement && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
+	function onkeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape' && navOpen) close();
+		if (e.key === '[' && !e.metaKey && !e.ctrlKey && !e.altKey && !typing(e.target)) fold();
+	}
 	// One add-a-company dialog for the app: the rail's + and "Add another" both open it.
 	const adding = new AddCompany();
 	setAddCompany(adding);
@@ -34,10 +61,10 @@ tooltip context for everything inside.
 	}
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && navOpen && close()} />
+<svelte:window {onkeydown} />
 
 <Tooltip.Provider delayDuration={300}>
-	<div class="shell">
+	<div class={['shell', { folded }]}>
 		<div id="app-sidebar" class={['side', { open: navOpen }]}>
 			<CompanyRail
 				companies={companies.list}
@@ -49,13 +76,13 @@ tooltip context for everything inside.
 					adding.show();
 				}}
 			/>
-			<div class="sidebar-slot"><Sidebar onnavigate={close} /></div>
+			<div class="sidebar-slot"><Sidebar onnavigate={close} {folded} /></div>
 		</div>
 		{#if navOpen}
 			<button class="scrim" type="button" aria-label="Close navigation" onclick={close}></button>
 		{/if}
 		<div class={['main', { bleed }]}>
-			<Topbar onmenu={() => (navOpen = !navOpen)} menuOpen={navOpen} />
+			<Topbar onmenu={() => (navOpen = !navOpen)} menuOpen={navOpen} {folded} onfold={fold} />
 			<main class={['content', { bleed }]}>
 				{@render children()}
 			</main>
@@ -69,6 +96,9 @@ tooltip context for everything inside.
 		display: grid;
 		grid-template-columns: calc(var(--rail-width) + var(--sidebar-width)) minmax(0, 1fr);
 		min-height: 100dvh;
+	}
+	.shell.folded {
+		grid-template-columns: calc(var(--rail-width) + var(--sidebar-folded)) minmax(0, 1fr);
 	}
 	.side {
 		position: sticky;
@@ -114,7 +144,8 @@ tooltip context for everything inside.
 		display: none;
 	}
 	@media (max-width: 900px) {
-		.shell {
+		.shell,
+		.shell.folded {
 			grid-template-columns: minmax(0, 1fr);
 		}
 		.side {
