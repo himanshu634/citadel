@@ -56,7 +56,7 @@ def read(slug: str) -> CompanyConfig:
     return config.load_company(slug)
 
 
-def _describe(exc: Exception) -> str:
+def describe(exc: Exception) -> str:
     if isinstance(exc, ValidationError):
         return "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors())
     return str(exc)
@@ -70,7 +70,7 @@ def list_companies() -> list[CompanyConfig | InvalidCompany]:
         try:
             valid.append(config.load_company(file.stem))
         except (OSError, yaml.YAMLError, ValueError) as exc:  # ValidationError is a ValueError
-            invalid.append(InvalidCompany(slug=file.stem, error=_describe(exc)))
+            invalid.append(InvalidCompany(slug=file.stem, error=describe(exc)))
     valid.sort(key=lambda c: (c.name.lower(), c.slug))
     invalid.sort(key=lambda c: c.slug)
     return [*valid, *invalid]
