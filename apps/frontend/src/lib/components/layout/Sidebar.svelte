@@ -2,7 +2,10 @@
 @component
 Primary navigation. The current page is the solid ultramarine block: the one loud element in
 the shell. Sections that are not built yet stay visible but inert, marked "Soon". `folded` shows
-the icons only (`--sidebar-folded` wide), each named by a tooltip and for screen readers.
+the icons only (`--sidebar-folded` wide), each named by a tooltip. Open and folded are one markup:
+AppShell animates the slot's width, the labels fade (out at once, in once there is room) and are
+clipped, and no icon or row moves. Each link carries its name in `aria-label`, so a folded item
+keeps it. `--fold-motion` (1, or 0 from AppShell before its first paint) turns the fades off.
 -->
 <script lang="ts">
 	import { resolve } from '$app/paths';
@@ -64,27 +67,24 @@ the icons only (`--sidebar-folded` wide), each named by a tooltip and for screen
 </script>
 
 <nav class={['sidebar', { folded }]} aria-label="Main">
-	{#if folded}
-		<a class="brand mark" href={resolve('/')} onclick={onnavigate} aria-label="Citadel">C</a>
-	{:else}
-		<a class="brand" href={resolve('/')} onclick={onnavigate}>Citadel</a>
-		{#if slug !== null && company}
-			<div class="company">
-				<p class="company-name">{company.name}</p>
-				<p class="company-graph">brain_{company.slug}</p>
-			</div>
-		{/if}
+	<!-- Folded, the brand keeps its C: the rest of the word fades into the clipped edge. -->
+	<a class="brand" href={resolve('/')} onclick={onnavigate}>C<span class="label">itadel</span></a>
+	{#if slug !== null && company}
+		<div class="company" aria-hidden={folded}>
+			<p class="company-name">{company.name}</p>
+			<p class="company-graph">brain_{company.slug}</p>
+		</div>
 	{/if}
 	{#each groups as group (group.heading)}
 		<div class="group">
-			<h2 class={{ 'sr-only': folded }}>{group.heading}</h2>
+			<h2><span class="label">{group.heading}</span></h2>
 			<ul>
 				{#each group.items as item (item.label)}
 					{@const path = pathOf(item)}
 					{@const active = path !== undefined && trim(resolve(path as '/')) === trim(page.url.pathname)}
 					<li>
-						{#if path !== undefined && folded}
-							<Tooltip text={item.label} side="right">
+						{#if path !== undefined}
+							<Tooltip text={item.label} side="right" disabled={!folded}>
 								{#snippet trigger(props)}
 									<a
 										{...props}
@@ -95,33 +95,19 @@ the icons only (`--sidebar-folded` wide), each named by a tooltip and for screen
 										onclick={onnavigate}
 									>
 										<item.icon aria-hidden="true" />
+										<span class="label">{item.label}</span>
 									</a>
 								{/snippet}
 							</Tooltip>
-						{:else if path !== undefined}
-							<a
-								href={resolve(path as '/')}
-								class={['item', { active }]}
-								aria-current={active ? 'page' : undefined}
-								onclick={onnavigate}
-							>
-								<item.icon aria-hidden="true" />
-								{item.label}
-							</a>
-						{:else if folded}
-							<Tooltip text="{item.label}: soon" side="right">
+						{:else}
+							<Tooltip text="{item.label}: soon" side="right" disabled={!folded}>
 								{#snippet trigger(props)}
-									<span {...props} class="item soon" role="img" aria-label="{item.label}, soon">
+									<span {...props} class="item soon" aria-disabled="true">
 										<item.icon aria-hidden="true" />
+										<span class="label">{item.label} <small>Soon</small></span>
 									</span>
 								{/snippet}
 							</Tooltip>
-						{:else}
-							<span class="item soon" aria-disabled="true">
-								<item.icon aria-hidden="true" />
-								{item.label}
-								<small>Soon</small>
-							</span>
 						{/if}
 					</li>
 				{/each}
@@ -132,16 +118,29 @@ the icons only (`--sidebar-folded` wide), each named by a tooltip and for screen
 
 <style>
 	.sidebar {
+		/* Labels fade out at once and fade in once the slot has mostly opened. */
+		--fold-fade: calc(var(--duration-fast) * var(--fold-motion, 1));
+		--fold-delay: calc((var(--duration-base) - var(--duration-fast)) * var(--fold-motion, 1));
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-6);
 		height: 100%;
-		padding: var(--space-5) var(--space-3);
+		/* The same in both states, so the icons keep their place while the width changes. */
+		padding: var(--space-5) var(--space-2);
 		background: var(--color-surface);
 		border-right: var(--border-hair) solid var(--color-line);
-		/* Folded, the 40px items overflow the 56px slot's padding and border by 1px: no sideways bar. */
 		overflow-x: hidden;
 		overflow-y: auto;
+	}
+	.folded {
+		--fold-delay: 0s;
+	}
+	.label {
+		white-space: nowrap;
+		transition: opacity var(--fold-fade) var(--ease-out) var(--fold-delay);
+	}
+	.folded .label {
+		opacity: 0;
 	}
 	.brand {
 		padding-inline: var(--space-3);
@@ -151,6 +150,7 @@ the icons only (`--sidebar-folded` wide), each named by a tooltip and for screen
 		font-variation-settings: 'wdth' var(--width-brand);
 		letter-spacing: -0.01em;
 		text-decoration: none;
+		white-space: nowrap;
 	}
 	.company {
 		display: flex;
@@ -159,6 +159,10 @@ the icons only (`--sidebar-folded` wide), each named by a tooltip and for screen
 		padding-inline: var(--space-3);
 		/* Hangs from the brand: the company head belongs to the brand above it. */
 		margin-top: calc(-1 * var(--space-3));
+		transition: opacity var(--fold-fade) var(--ease-out) var(--fold-delay);
+	}
+	.folded .company {
+		opacity: 0;
 	}
 	.company-name {
 		overflow: hidden;
@@ -182,12 +186,27 @@ the icons only (`--sidebar-folded` wide), each named by a tooltip and for screen
 		flex-direction: column;
 		gap: var(--space-1);
 	}
+	/* Folded, a heading keeps its row and becomes the hairline between groups. */
 	h2 {
+		position: relative;
 		padding-inline: var(--space-3);
 		color: var(--color-text-muted);
 		font-size: var(--text-xs);
 		font-weight: var(--weight-bold);
 		font-variation-settings: 'wdth' var(--width-label);
+	}
+	.group + .group h2::after {
+		content: '';
+		position: absolute;
+		inset-inline: 0;
+		top: 50%;
+		border-top: var(--border-hair) solid var(--color-line);
+		opacity: 0;
+		transition: opacity var(--fold-fade) var(--ease-out);
+	}
+	.folded .group + .group h2::after {
+		opacity: 1;
+		transition-delay: var(--fold-fade);
 	}
 	ul {
 		display: flex;
@@ -203,24 +222,46 @@ the icons only (`--sidebar-folded` wide), each named by a tooltip and for screen
 		gap: var(--space-3);
 		min-height: var(--control-md);
 		padding-inline: var(--space-3);
+		/* Clips the label at the block's edge while the slot narrows. */
+		overflow: hidden;
 		border-radius: var(--radius-none);
 		color: var(--color-text);
 		font-weight: var(--weight-medium);
 		text-decoration: none;
+		transition:
+			background-color var(--duration-fast) var(--ease-out),
+			color var(--duration-fast) var(--ease-out),
+			transform var(--duration-fast) var(--ease-out);
 	}
 	.item :global(svg) {
 		width: 1.05rem;
 		height: 1.05rem;
 		flex: none;
+		transition: transform var(--duration-fast) var(--ease-out);
+	}
+	.item .label {
+		display: flex;
+		flex: 1 0 auto;
+		align-items: center;
+		gap: var(--space-2);
 	}
 	a.item:hover {
 		background: var(--color-surface-sunken);
+	}
+	a.item:hover :global(svg) {
+		transform: scale(1.08);
+	}
+	a.item:active {
+		transform: scale(0.97);
 	}
 	.item.active,
 	a.item.active:hover {
 		background: var(--color-accent);
 		color: var(--color-on-accent);
 		font-weight: var(--weight-semibold);
+	}
+	a.item.active:hover :global(svg) {
+		transform: none;
 	}
 	.soon {
 		color: var(--color-text-faint);
@@ -230,25 +271,14 @@ the icons only (`--sidebar-folded` wide), each named by a tooltip and for screen
 		margin-left: auto;
 		font-size: var(--text-xs);
 	}
-	/* Folded: icons only, one column of 40px squares. */
-	.folded {
-		align-items: center;
-		padding-inline: var(--space-2);
-	}
-	.folded .item {
-		justify-content: center;
-		width: var(--control-md);
-		padding: 0;
-	}
-	.folded .group + .group {
-		padding-top: var(--space-4);
-		border-top: var(--border-hair) solid var(--color-line);
-	}
-	.mark {
-		display: grid;
-		place-items: center;
-		width: var(--control-md);
-		height: var(--control-md);
-		padding: 0;
+	@media (prefers-reduced-motion: reduce) {
+		.sidebar {
+			--fold-fade: 0s;
+			--fold-delay: 0s;
+		}
+		a.item:hover :global(svg),
+		a.item:active {
+			transform: none;
+		}
 	}
 </style>

@@ -7,7 +7,7 @@ the drawer it opens reads as "this company's navigation". The ask field is close
 nothing to ask (building, empty, unreachable, invalid) and says why in its placeholder.
 -->
 <script lang="ts">
-	import { CircleAlert, CloudOff, LoaderCircle, Menu as MenuIcon, PanelLeftClose, PanelLeftOpen, Search } from '@lucide/svelte';
+	import { CircleAlert, CloudOff, LoaderCircle, Menu as MenuIcon, PanelLeftClose, Search } from '@lucide/svelte';
 	import type { Component } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -73,7 +73,8 @@ nothing to ask (building, empty, unreachable, invalid) and says why in its place
 		title={folded ? 'Show the sidebar ([)' : 'Hide the sidebar ([)'}
 		onclick={onfold}
 	>
-		{#if folded}<PanelLeftOpen aria-hidden="true" />{:else}<PanelLeftClose aria-hidden="true" />{/if}
+		<!-- One icon: its chevron turns to point where the sidebar will go. -->
+		<PanelLeftClose class={['fold-icon', { folded }]} aria-hidden="true" />
 	</button>
 	<button
 		type="button"
@@ -160,14 +161,35 @@ nothing to ask (building, empty, unreachable, invalid) and says why in its place
 		background: none;
 		color: var(--color-text-muted);
 		cursor: pointer;
+		transition:
+			background-color var(--duration-fast) var(--ease-out),
+			color var(--duration-fast) var(--ease-out),
+			transform var(--duration-fast) var(--ease-out);
 	}
 	.fold-button:hover {
 		background: var(--color-surface-sunken);
 		color: var(--color-text);
 	}
+	.fold-button:active {
+		transform: scale(0.92);
+	}
 	.fold-button :global(svg) {
 		width: 1.15rem;
 		height: 1.15rem;
+	}
+	/* The chevron (the icon's last path) turns over in place, in step with the sidebar. */
+	.fold-button :global(.fold-icon path:last-child) {
+		transform-box: fill-box;
+		transform-origin: center;
+		transition: transform var(--duration-base) var(--ease-out);
+	}
+	.fold-button :global(.fold-icon.folded path:last-child) {
+		transform: scaleX(-1);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.fold-button:active {
+			transform: none;
+		}
 	}
 	.menu-button :global(svg) {
 		width: 1.25rem;
