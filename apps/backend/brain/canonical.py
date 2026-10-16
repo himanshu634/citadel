@@ -53,8 +53,18 @@ class Record(BaseModel):
     url: str | None = None  # where a human can see the original (used for citations)
 
     def changed_at(self) -> datetime | None:
-        """Latest timestamp on the record; used by incremental ingest. None = always load."""
+        """Latest activity timestamp on the record (used for the ingest window)."""
         return None
+
+    def arrival_at(self) -> datetime | None:
+        """When the source system recorded this, by its own clock; drives incremental ingest.
+
+        None = always load. Defaults to changed_at(). Records dated by a client clock (git
+        commit dates, file mtimes) return None: those dates can be older than when the record
+        reached the source (a late push) or in the future (a skewed laptop clock), so they must
+        neither be filtered by the cursor nor move it.
+        """
+        return self.changed_at()
 
     @model_validator(mode="after")
     def _uid_required(self):
@@ -133,6 +143,9 @@ class Change(Record):
     def changed_at(self) -> datetime | None:
         return to_utc(self.date)
 
+    def arrival_at(self) -> datetime | None:
+        return None  # git dates come from the author's machine; see Record.arrival_at
+
 
 WorkItemKind = Literal["pull_request", "issue", "ticket", "thread"]
 
@@ -166,6 +179,9 @@ class Document(Record):
 
     def changed_at(self) -> datetime | None:
         return to_utc(self.updated_at)
+
+    def arrival_at(self) -> datetime | None:
+        return None  # last git commit date or file mtime: a client clock
 
 
 # --- facts that become relationships (plus a Chunk for comment text) ---------------------------

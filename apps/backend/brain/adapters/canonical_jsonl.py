@@ -11,12 +11,13 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Literal
 
 from pydantic import ValidationError
 
 from brain import canonical as c
 from brain.adapters.base import SourceUnavailable
-from brain.config import CanonicalJsonlSource, CompanyConfig
+from brain.config import CompanyConfig, PathSource
 
 # file name -> model. Files are optional; order is irrelevant (the loader orders writes).
 FILES: dict[str, type[c.Record]] = {
@@ -33,8 +34,13 @@ FILES: dict[str, type[c.Record]] = {
 }
 
 
+class CanonicalJsonlSource(PathSource):
+    type: Literal["canonical_jsonl"]
+
+
 class CanonicalJsonlAdapter:
     name = "canonical_jsonl"
+    source_model = CanonicalJsonlSource
 
     def key(self, source: CanonicalJsonlSource) -> str:
         return f"{self.name}:{source.path.as_posix()}"

@@ -4,6 +4,8 @@ An AI coding assistant (Claude Code) was used to build this project. Parts it he
 
 - Project skeleton: uv workspace, Docker Compose, config models, CLI.
 - FalkorDB connection layer and schema (index) setup, checked against the running engine.
+- Ingestion: canonical models, normalize, loader and load queries, the synthetic company, the
+  GitHub adapter (GraphQL fetch, git partial clone, transform) and their tests.
 - Frontend: design directions, the design system (tokens, components, `design-system.md`) and the
   dashboard layout in `apps/frontend`.
 

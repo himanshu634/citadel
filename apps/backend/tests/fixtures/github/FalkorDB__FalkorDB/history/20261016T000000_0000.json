@@ -1,0 +1,26 @@
+[
+ {
+  "oid": "0f45a8685aa8d542f026b4f5f6bcaa0fbb43c1c9",
+  "committedDate": "2026-10-15T13:51:48Z",
+  "messageHeadline": "fix: bulk-imported attribute spans never overflow Slot::len (#2539) (\u2026",
+  "url": "https://github.com/FalkorDB/FalkorDB/commit/0f45a8685aa8d542f026b4f5f6bcaa0fbb43c1c9",
+  "author": {
+   "name": "Avi Avni",
+   "user": {
+    "login": "AviAvni"
+   }
+  }
+ },
+ {
+  "oid": "13e849935c53279cf4fb56422cec34fcb760f494",
+  "committedDate": "2026-10-15T11:21:06Z",
+  "messageHeadline": "fix: a deleted edge no longer keeps its type after a constraint regis\u2026",
+  "url": "https://github.com/FalkorDB/FalkorDB/commit/13e849935c53279cf4fb56422cec34fcb760f494",
+  "author": {
+   "name": "Avi Avni",
+   "user": {
+    "login": "AviAvni"
+   }
+  }
+ }
+]

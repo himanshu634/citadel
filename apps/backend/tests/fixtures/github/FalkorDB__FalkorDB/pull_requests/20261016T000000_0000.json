@@ -1,0 +1,154 @@
+[
+ {
+  "number": 3063,
+  "title": "fix: bulk-imported attribute spans never overflow Slot::len",
+  "body": "Refs #2539 (fixes the silent loss of *every* property; the separate \"reject the CREATE with C's error\" part stays open there)\n\n## Problem\n\n`Slot.len` is a `u16` written as `n as u16` (`attribute_store.rs:598`, `:609`). The bulk import path handed the span writer every resolved column, including columns the full dictionary refused to mint (`ATTRIBUTE_ID_NONE`). With 65,535 real ids plus the sentine",
+  "url": "https://github.com/FalkorDB/FalkorDB/pull/3063",
+  "state": "MERGED",
+  "createdAt": "2026-09-25T04:57:32Z",
+  "updatedAt": "2026-10-15T14:10:46Z",
+  "closedAt": "2026-10-15T14:10:44Z",
+  "mergedAt": "2026-10-15T14:10:44Z",
+  "author": {
+   "login": "AviAvni",
+   "__typename": "User"
+  },
+  "labels": {
+   "nodes": [
+    {
+     "name": "6.0"
+    }
+   ]
+  },
+  "mergeCommit": {
+   "oid": "0f45a8685aa8d542f026b4f5f6bcaa0fbb43c1c9"
+  },
+  "closingIssuesReferences": {
+   "nodes": [
+    {
+     "number": 2539,
+     "repository": {
+      "nameWithOwner": "FalkorDB/FalkorDB"
+     }
+    }
+   ]
+  },
+  "commits": {
+   "nodes": [
+    {
+     "commit": {
+      "oid": "aaaece6f1c4fcb22d0fcd641d4d20addcce1e1ae"
+     }
+    },
+    {
+     "commit": {
+      "oid": "ec1f916bfadd22ddaec6d2a1bd2b6e7d0602f53f"
+     }
+    }
+   ]
+  },
+  "reviews": {
+   "nodes": [
+    {
+     "id": "PRR_kwDOJ9smgc8AAAABPLfv-Q",
+     "author": {
+      "login": "copilot-pull-request-reviewer",
+      "__typename": "Bot"
+     },
+     "state": "COMMENTED",
+     "submittedAt": "2026-09-25T05:13:40Z",
+     "url": "https://github.com/FalkorDB/FalkorDB/pull/3063#pullrequestreview-5313654777"
+    },
+    {
+     "id": "PRR_kwDOJ9smgc8AAAABSboQDQ",
+     "author": {
+      "login": "DvirDukhan",
+      "__typename": "User"
+     },
+     "state": "APPROVED",
+     "submittedAt": "2026-10-15T10:46:39Z",
+     "url": "https://github.com/FalkorDB/FalkorDB/pull/3063#pullrequestreview-5531897869"
+    }
+   ]
+  },
+  "comments": {
+   "nodes": [
+    {
+     "id": "IC_kwDOJ9smgc8AAAABW1ELOA",
+     "author": {
+      "login": "coderabbitai",
+      "__typename": "Bot"
+     },
+     "body": "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n<!-- review_stack_entry_start -->\n\n<a href=\"https://app.coderabbit.ai/change-stack/FalkorDB/FalkorDB/pull/3063\"><img src=\"https:/",
+     "createdAt": "2026-09-25T04:57:45Z",
+     "url": "https://github.com/FalkorDB/FalkorDB/pull/3063#issuecomment-5827005240"
+    },
+    {
+     "id": "IC_kwDOJ9smgc8AAAABW1lk8g",
+     "author": {
+      "login": "codecov",
+      "__typename": "Bot"
+     },
+     "body": "## [Codecov](https://app.codecov.io/gh/FalkorDB/FalkorDB/pull/3063?dropdown=coverage&src=pr&el=h1&utm_medium=referral&utm_source=github&utm_content=comment&utm_campaign=pr+comments&utm_term=FalkorDB) ",
+     "createdAt": "2026-09-25T05:53:53Z",
+     "url": "https://github.com/FalkorDB/FalkorDB/pull/3063#issuecomment-5827552498"
+    }
+   ]
+  }
+ },
+ {
+  "number": 3344,
+  "title": "chore(deps): bump the cargo-deps group across 1 directory with 5 updates",
+  "body": "Bumps the cargo-deps group with 5 updates in the / directory:\n\n| Package | From | To |\n| --- | --- | --- |\n| [lazy_static](https://github.com/rust-lang-nursery/lazy-static.rs) | `1.5.0` | `1.5.1` |\n| [libc](https://github.com/rust-lang/libc) | `0.2.189` | `0.2.190` |\n| [thin-vec](https://github.com/mozilla/thin-vec) | `0.2.20` | `0.2.21` |\n| [smallvec](https://github.com/servo/rust-smallvec) | `1.",
+  "url": "https://github.com/FalkorDB/FalkorDB/pull/3344",
+  "state": "OPEN",
+  "createdAt": "2026-10-15T05:26:21Z",
+  "updatedAt": "2026-10-15T05:26:34Z",
+  "closedAt": null,
+  "mergedAt": null,
+  "author": {
+   "login": "dependabot",
+   "__typename": "Bot"
+  },
+  "labels": {
+   "nodes": [
+    {
+     "name": "dependencies"
+    },
+    {
+     "name": "rust"
+    }
+   ]
+  },
+  "mergeCommit": null,
+  "closingIssuesReferences": {
+   "nodes": []
+  },
+  "commits": {
+   "nodes": [
+    {
+     "commit": {
+      "oid": "2f041d3f6e1dc2d104d3a4c80f112caa6b3e6454"
+     }
+    }
+   ]
+  },
+  "reviews": {
+   "nodes": []
+  },
+  "comments": {
+   "nodes": [
+    {
+     "id": "IC_kwDOJ9smgc8AAAABcKlnNA",
+     "author": {
+      "login": "coderabbitai",
+      "__typename": "Bot"
+     },
+     "body": "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n\n> [!IMPORTANT]\n> ## Review skipped\n> \n> Bot user detect",
+     "createdAt": "2026-10-15T05:26:33Z",
+     "url": "https://github.com/FalkorDB/FalkorDB/pull/3344#issuecomment-6185117492"
+    }
+   ]
+  }
+ }
+]

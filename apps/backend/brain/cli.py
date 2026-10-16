@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from brain import config, db, pipeline, schema
+from brain.adapters.github.client import GithubError
 
 app = typer.Typer(help="Company Brain: a company's engineering activity as one FalkorDB graph.")
 
@@ -105,8 +106,11 @@ SOURCE_OPT = typer.Option(None, "--source", help="Only this source type, e.g. gi
 def fetch(slug: str, source: str = SOURCE_OPT) -> None:
     """Network step: pull raw data for each source into data/raw/<slug>/ (cached, resumable)."""
     _company(slug)
-    for line in pipeline.fetch(slug, only=source):
-        typer.echo(f"fetch {line}")
+    try:
+        for line in pipeline.fetch(slug, only=source):
+            typer.echo(f"fetch {line}")
+    except (PermissionError, GithubError) as e:
+        _fail(str(e))
 
 
 @app.command()
@@ -118,7 +122,10 @@ def ingest(
     """Transform step: cache/local files -> canonical records -> graph brain_<slug>."""
     cfg = _company(slug)
     _connected()
-    report = pipeline.ingest(slug, full=full, only=source)
+    try:
+        report = pipeline.ingest(slug, full=full, only=source)
+    except PermissionError as e:
+        _fail(str(e))
     for s in report.sources:
         if s.skipped_reason:
             typer.secho(f"skipped {s.key}: {s.skipped_reason}", fg="yellow")
