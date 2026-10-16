@@ -401,18 +401,7 @@ the snapshot it is given; the page feeds it live and passes the buttons in `acti
 		padding-top: var(--space-5);
 		border-top: var(--border-hair) solid var(--color-line);
 	}
-	.panel :global(.spin) {
-		animation: spin 1s linear infinite;
-	}
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
 	@media (prefers-reduced-motion: reduce) {
-		.panel :global(.spin) {
-			animation: none;
-		}
 		.meter > div {
 			transition: none;
 		}

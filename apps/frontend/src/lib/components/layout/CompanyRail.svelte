@@ -212,17 +212,4 @@ accessible name says the same in words. The tile list scrolls; the add tile stay
 		background: var(--color-surface-sunken);
 		color: var(--color-text-muted);
 	}
-	.badge :global(.spin) {
-		animation: spin 1s linear infinite;
-	}
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.badge :global(.spin) {
-			animation: none;
-		}
-	}
 </style>

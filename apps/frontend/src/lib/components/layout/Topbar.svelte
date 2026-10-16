@@ -162,19 +162,6 @@ nothing to ask (building, empty, unreachable, invalid) and says why in its place
 		color: var(--color-danger);
 		font-weight: var(--weight-semibold);
 	}
-	.status :global(.spin) {
-		animation: spin 1s linear infinite;
-	}
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.status :global(.spin) {
-			animation: none;
-		}
-	}
 	@media (max-width: 900px) {
 		.menu-button {
 			display: grid;

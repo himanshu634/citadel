@@ -88,7 +88,22 @@ svg {
 	font-variant-numeric: tabular-nums;
 }
 
+/* A turning icon (a build in progress). Still under reduced motion: the words say it too. */
+.spin {
+	animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
 @media (prefers-reduced-motion: reduce) {
+	.spin {
+		animation: none;
+	}
+
 	*,
 	*::before,
 	*::after {

@@ -89,17 +89,4 @@ in progress); the default is the tone's. It is announced politely (`role="status
 			grid-column: 2;
 		}
 	}
-	.banner :global(.spin) {
-		animation: spin 1s linear infinite;
-	}
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.banner :global(.spin) {
-			animation: none;
-		}
-	}
 </style>
