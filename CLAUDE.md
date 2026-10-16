@@ -41,8 +41,8 @@ make fe-install | fe-dev | fe-check | fe-test | fe-build   # frontend: pnpm inst
 
 Configuration comes from `.env` (see `.env.example`): FalkorDB host/port/credentials and
 `FALKORDB_TLS` (the same code runs against local Docker or FalkorDB Cloud), `GITHUB_TOKEN`
-(falls back to `gh auth token`), and Vertex AI embedding settings. `EMBEDDING_DIM` must match the
-embedding model because the vector index is created with it. `ANTHROPIC_API_KEY`,
+(falls back to `gh auth token`). `EMBEDDING_DIM` sets the vector index size and must match
+whichever embedding model is used later. `ANTHROPIC_API_KEY`,
 `ANTHROPIC_MODEL` (default `claude-sonnet-5-5`) and `ANTHROPIC_EFFORT` (default `medium`) drive
 `brain ask`.
 
