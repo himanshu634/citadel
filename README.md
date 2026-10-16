@@ -164,8 +164,9 @@ Dependencies run one way: backend, then agents, then brain (checked by
 `apps/brain/tests/test_package_boundaries.py`).
 
 `make test` runs the suites of all three packages (graph tests are skipped when FalkorDB is not
-running), `make lint` runs ruff. The same code runs against FalkorDB Cloud: set `FALKORDB_HOST/PORT/USERNAME/PASSWORD`
-(and `FALKORDB_TLS=true` when the instance uses TLS) in `.env`.
+running), `make lint` runs ruff. The same code runs against FalkorDB Cloud: set
+`FALKORDB_HOST/PORT/USERNAME/PASSWORD` (and `FALKORDB_TLS=true` when the instance uses TLS) in
+`.env`.
 
 ## AI usage
 
