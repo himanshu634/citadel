@@ -89,7 +89,7 @@ def _field_errors(errors: list[registry.FieldError]) -> JSONResponse:
     )
 
 
-def _read(slug: str) -> CompanyConfig:
+def read_config(slug: str) -> CompanyConfig:
     try:
         return registry.read(slug)
     except (ValueError, yaml.YAMLError) as exc:  # the file exists but does not validate
@@ -141,7 +141,7 @@ def create_company(draft: Annotated[dict, Body()], runner: Runner):
 
 @router.get("/{slug}")
 def get_company(slug: Annotated[str, Depends(company_slug)], runner: Runner) -> CompanyDetail:
-    return _detail(_read(slug), runner)
+    return _detail(read_config(slug), runner)
 
 
 @router.put(
@@ -167,7 +167,7 @@ def save_company(
     if cfg.slug != slug:
         msg = f"must be {slug}: a company's slug cannot change"
         return _field_errors([registry.FieldError(loc=["slug"], msg=msg)])
-    change = config_diff.diff(_read(slug), cfg)
+    change = config_diff.diff(read_config(slug), cfg)
     if dry_run:
         return change
     if not change.changed and not rebuild:

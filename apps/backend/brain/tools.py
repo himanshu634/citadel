@@ -264,6 +264,30 @@ class SystemSummary(_Model):
     owners: list[str]
 
 
+class RecentParams(_Model):
+    limit: int = Field(10, ge=1, le=100)
+
+
+class RecentWorkItem(_Model):
+    uid: str
+    kind: str
+    number: int | None
+    title: str
+    state: str
+    url: str | None
+    author: str | None
+    at: str | None  # latest of created / closed / merged (ISO, as stored)
+    systems: list[str]
+
+
+class PersonActivity(_Model):
+    login: str
+    name: str | None
+    teams: list[str]
+    prs: int
+    reviews: int
+
+
 class NoParams(_Model):
     pass
 
@@ -386,6 +410,18 @@ TOOLS: dict[str, Tool] = {
             ListParams,
             SystemSummary,
         ),
+        Tool(
+            "recent_work_items",
+            "Most recent PRs, issues and threads, newest first.",
+            RecentParams,
+            RecentWorkItem,
+        ),
+        Tool(
+            "people_activity",
+            "People with how many PRs they authored and reviewed.",
+            ListParams,
+            PersonActivity,
+        ),
         Tool("graph_stats", "Node and relationship counts in the company graph.", NoParams, Stat),
     ]
 }
@@ -457,6 +493,14 @@ def get_entity(slug: str, uid: str, limit: int = 25) -> Entity | None:
 
 def list_systems(slug: str, limit: int = 100) -> list[SystemSummary]:
     return call(slug, "list_systems", limit=limit)
+
+
+def recent_work_items(slug: str, limit: int = 10) -> list[RecentWorkItem]:
+    return call(slug, "recent_work_items", limit=limit)
+
+
+def people_activity(slug: str, limit: int = 100) -> list[PersonActivity]:
+    return call(slug, "people_activity", limit=limit)
 
 
 def graph_stats(slug: str) -> list[Stat]:

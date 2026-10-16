@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from brain.jobs import BuildSummary
 from brain.registry import FieldError
+from brain.tools import PersonActivity, RecentWorkItem, Stat, SystemSummary
 
 Status = Literal["ready", "building", "failed", "empty", "invalid"]
 
@@ -39,3 +40,21 @@ class ValidateOut(BaseModel):
     errors: list[FieldError]
     yaml: str | None = None  # the file Save would write; only when the draft is valid
     slug_taken: bool = False  # true whenever the draft's slug is valid and already a company
+
+
+class Overview(BaseModel):
+    """What a company's overview page draws; every list comes from one named tool."""
+
+    slug: str
+    name: str
+    since: str  # the YAML's window.since, an ISO date
+    counts: list[Stat]  # node kinds only
+    recent: list[RecentWorkItem]
+    systems: list[SystemSummary]
+    people: list[PersonActivity]
+
+
+class ToolInfo(BaseModel):
+    name: str
+    description: str
+    params_schema: dict[str, Any]

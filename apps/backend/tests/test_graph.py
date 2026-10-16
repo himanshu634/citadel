@@ -88,6 +88,25 @@ def test_profile_entity_and_systems(synthetic_graph):
     }
 
 
+def test_recent_work_items_newest_first(synthetic_graph):
+    rows = tools.call(synthetic_graph, "recent_work_items", limit=5)
+    assert len(rows) == 5 and rows[0].uid == "synthetic:issue:14"
+    assert [r.at for r in rows] == sorted([r.at for r in rows], reverse=True)
+    assert rows[1].uid == "synthetic:pr:10" and rows[1].at == "2026-09-05T12:00:00Z"
+    assert rows[0].author == "erin" and rows[0].number == 14 and rows[0].state == "open"
+    everything = tools.call(synthetic_graph, "recent_work_items", limit=50)
+    assert "Billing" in next(r for r in everything if r.uid == "synthetic:pr:3").systems
+
+
+def test_people_activity_excludes_bots(synthetic_graph):
+    rows = tools.call(synthetic_graph, "people_activity")
+    by_login = {r.login: r for r in rows}
+    assert "ci-bot" not in by_login and {"alice", "erin"} <= by_login.keys()
+    assert by_login["erin"].prs == 3 and by_login["erin"].teams == ["payments"]
+    assert by_login["alice"].reviews >= 1
+    assert len(tools.call(synthetic_graph, "people_activity", limit=2)) == 2
+
+
 def test_unknown_tool_and_bad_params(synthetic_graph):
     with pytest.raises(KeyError):
         tools.call(synthetic_graph, "drop_everything")
