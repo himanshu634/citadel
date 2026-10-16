@@ -99,6 +99,8 @@ def test_status_shows_building(client, company):
     listed = client.get("/api/companies").json()[0]
     assert listed["status"] == "building"
     assert listed["build"]["state"] == "running" and listed["build"]["stage"] == "prepare"
+    assert listed["build"]["kind"] == "build"
+    assert listed["build"]["stages"] == ["prepare", "fetch", "records", "normalize", "load"]
 
 
 def test_failed_build_shows_failed_with_the_error(api_root, company, tmp_path):
@@ -237,13 +239,32 @@ async def test_status_stream_reports_building_then_the_end(company, runner, gate
 
 
 @pytest.mark.anyio
+async def test_status_message_is_the_company_as_the_list_shows_it(client, company, runner, gate):
+    out = await statuses_until_idle(runner, gate)
+    listed = client.get("/api/companies").json()[0]
+    assert out[-1] == listed  # CompanyOut: the same fields and values as GET /api/companies
+    assert "config" not in out[-1] and out[-1]["name"] == "Acme Labs"
+    assert out[0]["build"]["kind"] == "build"
+    assert out[0]["build"]["stages"] == ["prepare", "fetch", "records", "normalize", "load"]
+
+
+@pytest.mark.anyio
+async def test_status_stream_reports_a_broken_yaml_as_invalid(company, runner, gate):
+    (config.companies_dir() / f"{company}.yaml").write_text("slug: [\n")
+    out = await statuses_until_idle(runner, gate)
+    assert {s["status"] for s in out} == {"invalid"} and out[-1]["error"]
+    assert out[-1]["build"]["state"] == "done"
+
+
+@pytest.mark.anyio
 async def test_status_stream_survives_the_graph_going_down(company, runner, gate, monkeypatch):
     def down(slug):
         raise RedisConnectionError("down")
 
     monkeypatch.setattr("brain.api.companies.status_of", down)
     out = await statuses_until_idle(runner, gate)
-    assert out[-1]["status"] == "empty" and out[-1]["build"]["state"] == "done"
+    assert out[0]["status"] == "building" and out[0]["graph_reachable"] is False
+    assert out[-1]["status"] == "unknown" and out[-1]["build"]["state"] == "done"
 
 
 # --- Settings save (PUT) ---------------------------------------------------------------------

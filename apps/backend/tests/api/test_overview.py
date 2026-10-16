@@ -7,6 +7,8 @@ from brain import db, schema, tools
 from brain.api import create_app
 from conftest import needs_graph
 from fastapi.testclient import TestClient
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from .conftest import write
 
@@ -82,3 +84,18 @@ def test_unknown_tool_is_404_and_bad_params_are_422(api_client_with, monkeypatch
     assert bad.status_code == 422
     bad = client.post("/api/companies/acme/tools/recent_work_items", json={"limit": 0})
     assert bad.status_code == 422
+
+
+@pytest.mark.parametrize("error", [RedisConnectionError, RedisTimeoutError])
+def test_overview_and_tools_are_503_when_the_graph_is_down(api_client_with, monkeypatch, error):
+    client = api_client_with("acme")
+
+    def down(slug):
+        raise error("unreachable")
+
+    monkeypatch.setattr(db, "graph_exists", down)
+    for r in (
+        client.get("/api/companies/acme/overview"),
+        client.post("/api/companies/acme/tools/graph_stats", json={}),
+    ):
+        assert r.status_code == 503 and r.json() == {"detail": "FalkorDB is not reachable"}

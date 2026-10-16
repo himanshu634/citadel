@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from brain import config, db, loader
+from brain.api import create_app
 from brain.api.companies import status_of
-from conftest import needs_graph
+from brain.jobs import JobRunner
+from conftest import FakeSteps, needs_graph
+from fastapi.testclient import TestClient
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
@@ -135,23 +140,83 @@ def test_create_non_object_body_is_422(client, api_root):
     assert client.post("/api/companies", json=["not", "an", "object"]).status_code == 422
 
 
-@pytest.mark.parametrize("error", [RedisConnectionError, RedisTimeoutError])
-def test_create_succeeds_when_the_graph_is_down(client, api_root, monkeypatch, error):
+# --- FalkorDB unreachable: status from the builds, else `unknown`; never 503 -----------------
+
+
+@pytest.fixture(params=[RedisConnectionError, RedisTimeoutError])
+def graph_down(request, monkeypatch):
+    """FalkorDB refuses (ConnectionError) or never answers (TimeoutError). Returns the slugs whose
+    graph was asked for."""
+    asked: list[str] = []
+
     def down(slug):
-        raise error("unreachable")
+        asked.append(slug)
+        raise request.param("unreachable")
 
     monkeypatch.setattr("brain.api.companies.status_of", down)
+    return asked
+
+
+def test_reachable_graph_is_reported(client, api_root):
+    write(api_root, "acme_labs", name="Acme Labs")
+    body = client.get("/api/companies").json()[0]
+    assert body["status"] == "empty" and body["graph_reachable"] is True
+
+
+def test_list_when_the_graph_is_down_is_unknown_and_asks_once(client, api_root, graph_down):
+    write(api_root, "acme_labs", name="Acme Labs")
+    write(api_root, "zeta", name="Zeta")
+    r = client.get("/api/companies")
+    assert r.status_code == 200
+    assert [(c["status"], c["graph_reachable"]) for c in r.json()] == [("unknown", False)] * 2
+    assert graph_down == ["acme_labs"]  # one timeout per request, not one per company
+
+
+def test_get_when_the_graph_is_down_is_unknown(client, api_root, graph_down):
+    write(api_root, "acme_labs", name="Acme Labs")
+    r = client.get("/api/companies/acme_labs")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "unknown" and body["graph_reachable"] is False
+    assert body["last_synced_at"] is None and body["config"]["slug"] == "acme_labs"
+
+
+def test_create_when_the_graph_is_down_is_unknown(client, api_root, graph_down):
     r = client.post("/api/companies", json=VALID_DRAFT)
-    assert r.status_code == 201 and r.json()["status"] == "empty"
+    assert r.status_code == 201
+    assert r.json()["status"] == "unknown" and r.json()["graph_reachable"] is False
     assert config.load_company("acme_labs").name == "Acme Labs"
 
 
-def test_graph_connect_timeout_is_503(client, api_root, monkeypatch):
+def test_put_when_the_graph_is_down_saves_and_is_unknown(client, api_root, graph_down):
     write(api_root, "acme_labs", name="Acme Labs")
+    cfg = client.get("/api/companies/acme_labs").json()["config"]
+    r = client.put("/api/companies/acme_labs", json={**cfg, "name": "Acme"})
+    assert r.status_code == 200 and r.json()["status"] == "unknown"
+    assert config.load_company("acme_labs").name == "Acme"
 
-    def timeout(slug):
-        raise RedisTimeoutError("Timeout connecting to server")
 
-    monkeypatch.setattr("brain.api.companies.status_of", timeout)
-    r = client.get("/api/companies")
-    assert r.status_code == 503 and r.json() == {"detail": "FalkorDB is not reachable"}
+def test_building_when_the_graph_is_down_is_building(client, api_root, graph_down):
+    write(api_root, "acme_labs", name="Acme Labs")
+    client.post("/api/companies/acme_labs/builds", json={})  # held at the gate
+    body = client.get("/api/companies/acme_labs").json()
+    assert body["status"] == "building" and body["graph_reachable"] is False
+
+
+def test_failed_build_when_the_graph_is_down_is_failed(api_root, tmp_path, graph_down):
+    write(api_root, "acme_labs", name="Acme Labs")
+    runner = JobRunner(steps=FakeSteps(fail_on="ingest"), jobs_dir=tmp_path / "jobs")
+    client = TestClient(create_app(runner))
+    client.post("/api/companies/acme_labs/builds", json={})
+    deadline = time.monotonic() + 5
+    while runner.current("acme_labs").state != "failed" and time.monotonic() < deadline:
+        time.sleep(0.01)
+    body = client.get("/api/companies/acme_labs").json()
+    assert body["status"] == "failed" and body["error"] == "boom"
+    assert body["graph_reachable"] is False
+
+
+def test_invalid_company_reports_graph_reachable(client, api_root):
+    (api_root / "companies" / "broken.yaml").write_text("slug: [\n")
+    body = client.get("/api/companies").json()[0]
+    assert body["status"] == "invalid" and body["graph_reachable"] is True

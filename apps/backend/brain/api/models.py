@@ -1,7 +1,9 @@
 """Response models for the HTTP API.
 
-Why: the frontend types are generated from these, so each field the UI reads is named here once.
-`status` is one fixed set so the company rail can switch on it.
+Why: each field the UI reads is named here once; the frontend's types in src/lib/types.ts are
+written by hand to match them. `status` is one fixed set so the company rail can switch on it:
+`unknown` means FalkorDB could not be asked and no build says otherwise (`graph_reachable` is
+then false); it is never guessed as `empty`.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from brain.jobs import BuildSummary
 from brain.registry import FieldError
 from brain.tools import PersonActivity, RecentWorkItem, Stat, SystemSummary
 
-Status = Literal["ready", "building", "failed", "empty", "invalid"]
+Status = Literal["ready", "building", "failed", "empty", "unknown", "invalid"]
 
 
 class CompanyOut(BaseModel):
@@ -22,9 +24,10 @@ class CompanyOut(BaseModel):
     name: str
     data_permission: Literal["public", "synthetic", "own"] | None  # None: the file is invalid
     status: Status
-    last_synced_at: str | None = None
-    error: str | None = None
+    last_synced_at: str | None = None  # the latest SyncState update, also while building
+    error: str | None = None  # the YAML's problem (`invalid`) or the last build's (`failed`)
     build: BuildSummary | None = None  # the company's current or last build
+    graph_reachable: bool  # false: FalkorDB did not answer, so the graph part is unknown
 
 
 class CompanyDetail(CompanyOut):

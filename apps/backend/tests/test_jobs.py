@@ -303,6 +303,33 @@ def test_summary(runner, gate):
         time.sleep(0.01)
     s = runner.summary("a")
     assert (s.state, s.stage) == ("running", "prepare") and s.started_at
+    assert s.kind == "build" and s.stages == ["prepare", "fetch", "records", "normalize", "load"]
+
+
+def test_snapshot_carries_its_planned_stages(runner_recording, tmp_path):
+    snap = runner_recording.start("a", "rebuild", refetch=set())  # nothing to fetch
+    assert snap.stages == ["reset", "prepare", "records", "normalize", "load"]
+    wait_done(runner_recording, "a")
+    fresh = JobRunner(steps=FakeSteps(), jobs_dir=tmp_path)
+    assert fresh.summary("a").stages == snap.stages  # survives a restart
+
+
+def test_snapshot_file_without_stages_gets_the_full_plan(tmp_path):
+    (tmp_path / "a.json").write_text(json.dumps(RUNNING_SNAPSHOT))
+    snap = JobRunner(jobs_dir=tmp_path, steps=FakeSteps()).current("a")
+    assert snap.stages == ["prepare", "fetch", "records", "normalize", "load"]
+
+
+def test_restart_uses_the_planned_stages(tmp_path):
+    snap = {
+        **RUNNING_SNAPSHOT,
+        "stages": ["prepare", "records", "normalize", "load"],  # a build that fetched nothing
+        "events": [{"slug": "a", "stage": "prepare", "status": "done"}],
+    }
+    (tmp_path / "a.json").write_text(json.dumps(snap))
+    r = JobRunner(jobs_dir=tmp_path, steps=FakeSteps())
+    r.recover()
+    assert pairs(r.current("a"), 1) == [("records", "stopped", None)]
 
 
 def test_jobs_dir_defaults_under_repo_root(tmp_path, monkeypatch):

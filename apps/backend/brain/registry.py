@@ -62,15 +62,21 @@ def describe(exc: Exception) -> str:
     return str(exc)
 
 
+def entry(slug: str) -> CompanyConfig | InvalidCompany:
+    """One company as the list reports it: its config, or why the file cannot be read."""
+    try:
+        return config.load_company(slug)
+    except (OSError, yaml.YAMLError, ValueError) as exc:  # ValidationError is a ValueError
+        return InvalidCompany(slug=slug, error=describe(exc))
+
+
 def list_companies() -> list[CompanyConfig | InvalidCompany]:
     """Every companies/*.yaml: valid ones by name, then invalid ones by slug."""
     valid: list[CompanyConfig] = []
     invalid: list[InvalidCompany] = []
     for file in config.companies_dir().glob("*.yaml"):
-        try:
-            valid.append(config.load_company(file.stem))
-        except (OSError, yaml.YAMLError, ValueError) as exc:  # ValidationError is a ValueError
-            invalid.append(InvalidCompany(slug=file.stem, error=describe(exc)))
+        company = entry(file.stem)
+        (invalid if isinstance(company, InvalidCompany) else valid).append(company)
     valid.sort(key=lambda c: (c.name.lower(), c.slug))
     invalid.sort(key=lambda c: c.slug)
     return [*valid, *invalid]

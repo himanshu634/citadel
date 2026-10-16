@@ -9,6 +9,7 @@ the files. A Settings save that changes what the graph holds needs the user's co
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Annotated, NamedTuple
 
@@ -25,7 +26,11 @@ from brain.config import CompanyConfig
 from brain.config_diff import ConfigDiff
 from brain.jobs import ACTIVE, BuildSnapshot, BuildSummary, JobRunner, JobRunning
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/companies", tags=["companies"])
+
+GRAPH_DOWN = (RedisConnectionError, RedisTimeoutError)  # refused, or no answer to the connect
 
 
 Runner = Annotated[JobRunner, Depends(get_runner)]
@@ -37,10 +42,10 @@ def status_of(slug: str) -> tuple[Status, str | None]:
     ingested, else `empty`. `company_status` puts the build jobs on top."""
     if not db.graph_exists(slug):
         return "empty", None
-    row = db.run(slug, "load/sync_state_latest", read_only=True)[0]
-    if not row["sources"]:
+    rows = db.run(slug, "load/sync_state_latest", read_only=True)
+    if not rows or not rows[0]["sources"]:  # no rows: a rebuild deleted the graph just now
         return "empty", None
-    return "ready", row["last_synced_at"]
+    return "ready", rows[0]["last_synced_at"]
 
 
 class CompanyStatus(NamedTuple):
@@ -48,38 +53,59 @@ class CompanyStatus(NamedTuple):
     last_synced_at: str | None
     error: str | None  # the last build's error, when it failed
     build: BuildSummary | None
+    graph_reachable: bool
 
 
 def company_status(runner: JobRunner, slug: str, graph: bool = True) -> CompanyStatus:
     """A queued or running build -> `building`; a last build that failed -> `failed`; else the
-    graph decides. `graph=False` skips FalkorDB (it is down) and reports `empty` instead."""
+    graph decides, or `unknown` when FalkorDB does not answer. The graph is asked in every case,
+    so `last_synced_at` says whether a building company already has data. `graph=False` means
+    the caller already found FalkorDB down in this request, so it is not asked again."""
     snap = runner.current(slug)
     build = BuildSummary.of(snap) if snap is not None else None
+    status: Status = "unknown"
+    last_synced_at: str | None = None
+    reachable = False
+    if graph:
+        try:
+            status, last_synced_at = status_of(slug)
+            reachable = True
+        except GRAPH_DOWN:
+            log.warning("FalkorDB is not reachable; status of %s from its builds only", slug)
     if snap is not None and snap.state in ACTIVE:
-        return CompanyStatus("building", None, None, build)
-    status, last_synced_at = status_of(slug) if graph else ("empty", None)
+        return CompanyStatus("building", last_synced_at, None, build, reachable)
     if snap is not None and snap.state == "failed":
-        return CompanyStatus("failed", last_synced_at, snap.error, build)
-    return CompanyStatus(status, last_synced_at, None, build)
+        return CompanyStatus("failed", last_synced_at, snap.error, build, reachable)
+    return CompanyStatus(status, last_synced_at, None, build, reachable)
 
 
-def _out(cfg: CompanyConfig, runner: JobRunner, graph: bool = True) -> CompanyOut:
-    state = company_status(runner, cfg.slug, graph)
+def company_out(
+    runner: JobRunner, company: CompanyConfig | registry.InvalidCompany, graph: bool = True
+) -> CompanyOut:
+    """A company as the list, the detail routes and the /api/events stream report it."""
+    state = company_status(runner, company.slug, graph)
+    common = {
+        "slug": company.slug,
+        "last_synced_at": state.last_synced_at,
+        "build": state.build,
+        "graph_reachable": state.graph_reachable,
+    }
+    if isinstance(company, registry.InvalidCompany):
+        return CompanyOut(
+            **common, name=company.slug, data_permission=None, status="invalid", error=company.error
+        )
     return CompanyOut(
-        slug=cfg.slug,
-        name=cfg.name,
-        data_permission=cfg.data_permission,
+        **common,
+        name=company.name,
+        data_permission=company.data_permission,
         status=state.status,
-        last_synced_at=state.last_synced_at,
         error=state.error,
-        build=state.build,
     )
 
 
-def _detail(cfg: CompanyConfig, runner: JobRunner, graph: bool = True) -> CompanyDetail:
-    return CompanyDetail(
-        **_out(cfg, runner, graph).model_dump(), config=cfg.model_dump(mode="json")
-    )
+def _detail(cfg: CompanyConfig, runner: JobRunner) -> CompanyDetail:
+    out = company_out(runner, cfg)
+    return CompanyDetail(**out.model_dump(), config=cfg.model_dump(mode="json"))
 
 
 def _field_errors(errors: list[registry.FieldError]) -> JSONResponse:
@@ -98,12 +124,12 @@ def read_config(slug: str) -> CompanyConfig:
 
 @router.get("")
 def list_companies(runner: Runner) -> list[CompanyOut]:
-    return [
-        CompanyOut(slug=c.slug, name=c.slug, data_permission=None, status="invalid", error=c.error)
-        if isinstance(c, registry.InvalidCompany)
-        else _out(c, runner)
-        for c in registry.list_companies()
-    ]
+    out: list[CompanyOut] = []
+    graph = True  # after one company finds FalkorDB down, the rest do not wait for it again
+    for company in registry.list_companies():
+        out.append(company_out(runner, company, graph))
+        graph = out[-1].graph_reachable
+    return out
 
 
 def _slug_taken(draft: dict) -> bool:
@@ -133,10 +159,7 @@ def create_company(draft: Annotated[dict, Body()], runner: Runner):
     except FileExistsError as exc:
         detail = f"{cfg.slug} is already a company. Pick another name"
         raise HTTPException(status_code=409, detail=detail) from exc
-    try:
-        return _detail(cfg, runner)
-    except (RedisConnectionError, RedisTimeoutError):
-        return _detail(cfg, runner, graph=False)  # the file is saved; onboarding needs no graph
+    return _detail(cfg, runner)
 
 
 @router.get("/{slug}")

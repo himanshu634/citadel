@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from brain import config, db, pipeline, schema
 from brain.events import BuildEvent, BuildStopped, OnEvent, Stage
@@ -50,28 +50,46 @@ def _now() -> str:
 
 
 class BuildSnapshot(BaseModel):
-    """One build of one company. The UI derives its stage table from `events`."""
+    """One build of one company. The UI derives its stage table from `events`; `stages` is the
+    planned order (the ingest stages run once per source), for rows not reached yet."""
 
     slug: str
     kind: Kind
     state: State
     started_at: str
+    stages: list[Stage] = []
     ended_at: str | None = None
     events: list[BuildEvent] = []
     error: str | None = None
 
+    @model_validator(mode="after")
+    def _full_plan_for_old_files(self) -> BuildSnapshot:
+        """Snapshots written before `stages` existed: assume every source was fetched."""
+        if not self.stages:
+            self.stages = list(_plan(self.kind, None))
+        return self
+
 
 class BuildSummary(BaseModel):
-    """The short form the company list shows: state and the stage of the latest event."""
+    """The short form the company list shows: kind, state, the stage of the latest event, and
+    the planned stages (so the UI can say "step 2 of 5")."""
 
+    kind: Kind
     state: State
     stage: Stage | None
+    stages: list[Stage]
     started_at: str
 
     @classmethod
     def of(cls, snap: BuildSnapshot) -> BuildSummary:
         stage = snap.events[-1].stage if snap.events else None
-        return cls(state=snap.state, stage=stage, started_at=snap.started_at)
+        return cls(
+            kind=snap.kind,
+            state=snap.state,
+            stage=stage,
+            stages=snap.stages,
+            started_at=snap.started_at,
+        )
 
 
 class JobRunning(Exception):
@@ -196,9 +214,12 @@ class JobRunner:
         and is skipped when `refetch` is empty. Raises JobRunning if the slug has a job."""
         self._path(slug)  # validates the slug
         # Validate everything before taking a slot, so a bad argument cannot leak one.
-        snap = BuildSnapshot(slug=slug, kind=kind, state="queued", started_at=_now())
         keys = set(refetch) if refetch is not None else None
-        job = _Job(snap, full, keys, _plan(kind, keys))
+        plan = _plan(kind, keys)
+        snap = BuildSnapshot(
+            slug=slug, kind=kind, state="queued", started_at=_now(), stages=list(plan)
+        )
+        job = _Job(snap, full, keys, plan)
         with self._lock:
             current = self._jobs.get(slug)
             if current is not None and current.snapshot.state in ACTIVE:
@@ -279,7 +300,7 @@ class JobRunner:
                 snap = _read(path)
                 if snap is None or snap.state not in ACTIVE:
                     continue
-                event = _closing_event(snap, "stopped", _plan(snap.kind, None))
+                event = _closing_event(snap, "stopped", tuple(snap.stages))
                 if event is not None:
                     snap.events.append(event)
                 snap.state = "stopped"
