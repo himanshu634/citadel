@@ -12,6 +12,7 @@
 		Checkbox,
 		ChoiceCard,
 		CitedAnswer,
+		CompanyForm,
 		CompanyRail,
 		ConfigPreview,
 		Dialog,
@@ -36,6 +37,7 @@
 		NODE_LABELS,
 		type CitedAnswer as Answer,
 		type Company,
+		type CompanyConfig,
 		type CompanyStatus,
 		type NodeType,
 		type SourceConfig,
@@ -185,8 +187,51 @@
 		''
 	].join('\n');
 	const noop = () => {};
+	// CompanyForm drafts. Local-folder sources only, so the gallery never asks GitHub anything.
+	const formDraft = (over: Partial<CompanyConfig> = {}): CompanyConfig => ({
+		slug: 'acme_labs',
+		name: 'Acme Labs',
+		data_permission: 'own',
+		window: { since: '2026-04-15' },
+		sources: [{ type: 'local_docs', path: 'data/inbox/acme_labs/docs' }],
+		systems: {
+			rules: [{ match: 'services/auth/**', system: 'Auth' }],
+			fallback: 'depth_2',
+			ignore: ['**/*.lock']
+		},
+		people: { bots: ['dependabot[bot]'], aliases: { 'A. Lee': 'alice' } },
+		...over
+	});
+	let formNew = $state<CompanyConfig>({
+		slug: '',
+		name: '',
+		data_permission: 'public',
+		window: { since: '2025-10-16' },
+		sources: [],
+		systems: { rules: [], fallback: 'depth_2', ignore: [] },
+		people: { bots: [], aliases: {} }
+	});
+	let formErrors = $state<CompanyConfig>(formDraft({ window: { since: '2026-13-45' } }));
+	let formLocked = $state<CompanyConfig>(formDraft());
+	// A hand-edited config can hold the same tag twice; Settings must still open and edit it.
+	let formAll = $state<CompanyConfig>(
+		formDraft({
+			systems: {
+				rules: [{ match: 'services/auth/**', system: 'Auth' }],
+				fallback: 'depth_2',
+				ignore: ['**/*.lock', '**/*.lock', 'dist/**']
+			},
+			people: { bots: ['dependabot[bot]', 'dependabot[bot]'], aliases: {} }
+		})
+	);
+	const formErrorList = [
+		{ loc: ['slug'], msg: 'acme_labs is already a company. Pick another name' },
+		{ loc: ['name'], msg: 'Name is required' },
+		{ loc: ['window', 'since'], msg: 'Enter a date like 2026-04-15' }
+	];
 	let globs = $state<string[]>(['apps/web/**', 'services/billing/**']);
 	let logins = $state<string[]>([]);
+	let dupes = $state<string[]>(['*.lock', '*.lock', 'dist/**']);
 	let aliases = $state<string[]>([
 		'dependabot[bot]',
 		'a-very-long-login-that-would-not-fit-on-one-line-without-wrapping-inside-the-field-xyz'
@@ -423,6 +468,7 @@
 				<TagInput label="Bot aliases" bind:values={aliases} mono />
 				<TagInput label="Paths" values={['docs/**']} disabled hint="Disabled" />
 				<TagInput label="Paths" values={[]} error="Add at least one path" mono />
+				<TagInput label="Paths" bind:values={dupes} mono hint="The same tag twice, as a hand-edited file can hold it" />
 			</div>
 		</Card>
 	</div>
@@ -486,6 +532,33 @@
 				onremove={noop}
 				checks={checksFound}
 			/>
+		</div>
+	</Card>
+
+	<Card title="Company form">
+		<p class="note">
+			The fields of a company file. One step at a time in the add-company wizard (company,
+			sources, rules) and all three on one page in Settings, where the graph name is read-only.
+			Errors show under their field; the form never calls the API. The last form holds duplicate
+			tags, as a hand-edited file can.
+		</p>
+		<div class="forms">
+			<figure>
+				<CompanyForm bind:draft={formNew} section="company" errors={[]} />
+				<figcaption>Company step, empty</figcaption>
+			</figure>
+			<figure>
+				<CompanyForm bind:draft={formErrors} section="company" errors={formErrorList} />
+				<figcaption>Company step, with errors</figcaption>
+			</figure>
+			<figure>
+				<CompanyForm bind:draft={formLocked} section="company" errors={[]} slugLocked />
+				<figcaption>Company step, graph name locked (an existing company)</figcaption>
+			</figure>
+			<figure>
+				<CompanyForm bind:draft={formAll} section="all" errors={[]} slugLocked />
+				<figcaption>All sections, as in Settings</figcaption>
+			</figure>
 		</div>
 	</Card>
 
@@ -645,6 +718,21 @@
 		margin: var(--space-5) 0 var(--space-3);
 		font-size: var(--text-sm);
 		font-variation-settings: 'wdth' var(--width-label);
+	}
+	.forms {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+		gap: var(--space-6);
+		align-items: start;
+	}
+	.forms figure {
+		margin: 0;
+		min-width: 0;
+	}
+	.forms figcaption {
+		margin-top: var(--space-2);
+		color: var(--color-text-muted);
+		font-size: var(--text-xs);
 	}
 	.sources {
 		display: grid;
