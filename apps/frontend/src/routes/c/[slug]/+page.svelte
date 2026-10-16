@@ -68,6 +68,7 @@ so a slow answer for the company you just left is never drawn under the one you 
 		void attempt;
 		void syncedAt; // a finished sync or build refreshes the numbers
 		if (!fetchable) return;
+		problem = null; // a new fetch starts: show the skeleton, not an old error
 		let live = true;
 		api.overview(slug).then(
 			(answer) => {
@@ -116,7 +117,7 @@ so a slow answer for the company you just left is never drawn under the one you 
 					<code>brain_{company.slug}</code>.
 				</p>
 			</div>
-			{#if view.kind === 'data'}
+			{#if view.kind === 'data' && !view.building}
 				<div class="head-actions">
 					<Tooltip text="Pull new activity from every source">
 						{#snippet trigger(props)}
@@ -149,6 +150,11 @@ so a slow answer for the company you just left is never drawn under the one you 
 				description="Counts, recent work and people show up here once Citadel has loaded {company.name}'s activity into the graph."
 			/>
 		{:else}
+			{#if view.building}
+				<Banner tone="warning" title={buildingTitle(company)} icon={LoaderCircle} spin>
+					{#snippet action()}<Button href={buildPath}>See progress</Button>{/snippet}
+				</Banner>
+			{/if}
 			{#if view.failure}
 				<Banner tone="danger" title="Last build failed">
 					{view.failure}

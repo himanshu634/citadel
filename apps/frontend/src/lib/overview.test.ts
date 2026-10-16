@@ -35,19 +35,24 @@ const build = (over: Partial<BuildSummary> = {}): BuildSummary => ({
 
 describe('viewOf', () => {
 	test('ready shows the data with no failure', () => {
-		expect(viewOf(company())).toEqual({ kind: 'data', failure: null });
+		expect(viewOf(company())).toEqual({ kind: 'data', failure: null, building: false });
 	});
 
 	test('failed shows the data with the last build error above it', () => {
 		expect(viewOf(company({ status: 'failed', error: 'fetch failed: 403' }))).toEqual({
 			kind: 'data',
-			failure: 'fetch failed: 403'
+			failure: 'fetch failed: 403',
+			building: false
 		});
 	});
 
 	test('failed without an error text still says what happened', () => {
 		const view = viewOf(company({ status: 'failed' }));
-		expect(view).toEqual({ kind: 'data', failure: 'The last build failed.' });
+		expect(view).toEqual({
+			kind: 'data',
+			failure: 'The last build failed.',
+			building: false
+		});
 	});
 
 	test('invalid shows the YAML error and no data', () => {
@@ -63,8 +68,18 @@ describe('viewOf', () => {
 		});
 	});
 
-	test('building and empty wait for the first build', () => {
-		expect(viewOf(company({ status: 'building' })).kind).toBe('waiting');
+	test('building a company that never loaded waits for the first build', () => {
+		expect(viewOf(company({ status: 'building', last_synced_at: null }))).toEqual({
+			kind: 'waiting'
+		});
+	});
+
+	test('building over an already loaded graph keeps the overview, with the building flag', () => {
+		const synced = company({ status: 'building', last_synced_at: '2026-10-16T09:12:00Z' });
+		expect(viewOf(synced)).toEqual({ kind: 'data', failure: null, building: true });
+	});
+
+	test('empty waits for a first build', () => {
 		expect(viewOf(company({ status: 'empty' })).kind).toBe('waiting');
 	});
 });

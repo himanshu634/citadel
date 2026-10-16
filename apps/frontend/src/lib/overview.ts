@@ -19,9 +19,12 @@ import type {
 } from './types';
 
 export type OverviewView =
-	/** The graph holds data: fetch the overview. `failure` is the last build's error, if it failed. */
-	| { kind: 'data'; failure: string | null }
-	/** Nothing is loaded yet: a build is running or has never run. No overview fetch. */
+	/**
+	 * The graph holds data: fetch the overview. `failure` is the last build's error, if it failed;
+	 * `building` is a rebuild or sync running over a graph that already has data (the banner says so).
+	 */
+	| { kind: 'data'; failure: string | null; building: boolean }
+	/** Nothing is loaded yet: the first build is running or has never run. No overview fetch. */
 	| { kind: 'waiting' }
 	| { kind: 'invalid'; error: string }
 	/** FalkorDB did not answer: no overview fetch. */
@@ -33,13 +36,18 @@ export function viewOf(company: Company): OverviewView {
 			return { kind: 'invalid', error: company.error ?? 'The config file could not be read.' };
 		case 'unknown':
 			return { kind: 'unreachable' };
-		case 'building':
 		case 'empty':
 			return { kind: 'waiting' };
+		case 'building':
+			// `last_synced_at` stays set during a build (spec 6.1): a graph that was loaded before still
+			// has an overview to show; only a company that never finished a load waits.
+			return company.last_synced_at
+				? { kind: 'data', failure: null, building: true }
+				: { kind: 'waiting' };
 		case 'failed':
-			return { kind: 'data', failure: company.error ?? 'The last build failed.' };
+			return { kind: 'data', failure: company.error ?? 'The last build failed.', building: false };
 		default:
-			return { kind: 'data', failure: null };
+			return { kind: 'data', failure: null, building: false };
 	}
 }
 
