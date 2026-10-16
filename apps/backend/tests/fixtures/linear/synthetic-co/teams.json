@@ -1,0 +1,56 @@
+[
+ {
+  "id": "team-idn",
+  "key": "IDN",
+  "name": "Identity",
+  "members": {
+   "nodes": [
+    {
+     "id": "u-alice",
+     "displayName": "alice",
+     "name": "Alice Anders",
+     "active": true
+    },
+    {
+     "id": "u-bob",
+     "displayName": "bob",
+     "name": "Bob Brandt",
+     "active": true
+    },
+    {
+     "id": "u-carol",
+     "displayName": "carol",
+     "name": "Carol Chen",
+     "active": false
+    },
+    {
+     "id": "u-blank",
+     "displayName": "",
+     "name": "No Handle",
+     "active": true
+    }
+   ]
+  }
+ },
+ {
+  "id": "team-pay",
+  "key": "PAY",
+  "name": "Payments",
+  "members": {
+   "nodes": [
+    {
+     "id": "u-dave",
+     "displayName": "dave",
+     "name": "Dave Diaz",
+     "active": true
+    },
+    {
+     "id": "u-bob",
+     "displayName": "bob",
+     "name": "Bob Brandt",
+     "active": true
+    }
+   ]
+  }
+ }
+]

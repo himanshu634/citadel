@@ -1,0 +1,45 @@
+[
+ {
+  "id": "i-7",
+  "identifier": "PAY-4",
+  "number": 4,
+  "title": "Move billing consent",
+  "description": null,
+  "url": "https://linear.app/synthetic-co/issue/PAY-4",
+  "priority": 0,
+  "dueDate": null,
+  "createdAt": "2026-10-01T09:00:00.000Z",
+  "updatedAt": "2026-10-15T09:00:00.000Z",
+  "completedAt": null,
+  "canceledAt": null,
+  "state": {
+   "name": "In Progress",
+   "type": "started"
+  },
+  "team": {
+   "key": "PAY",
+   "name": "Payments"
+  },
+  "creator": {
+   "displayName": "bob"
+  },
+  "assignee": {
+   "displayName": "dave"
+  },
+  "labels": {
+   "nodes": []
+  },
+  "relations": {
+   "nodes": []
+  },
+  "inverseRelations": {
+   "nodes": []
+  },
+  "attachments": {
+   "nodes": []
+  },
+  "comments": {
+   "nodes": []
+  }
+ }
+]
