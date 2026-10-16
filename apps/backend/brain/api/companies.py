@@ -196,6 +196,8 @@ def save_company(
     if not change.changed and not rebuild:
         return _detail(cfg, runner)
     with lock:  # check, write and start as one step; POST /builds takes the same lock
+        # Read again under the lock: a save that finished a moment ago changed the file.
+        change = config_diff.diff(read_config(slug), cfg)
         snap = runner.current(slug)
         if snap is not None and snap.state in ACTIVE:
             raise HTTPException(status_code=409, detail=str(JobRunning(slug)))

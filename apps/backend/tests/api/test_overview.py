@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 from brain import db, schema, tools
 from brain.api import create_app
-from conftest import needs_graph
+from brain.api.companies import status_of
+from conftest import falkordb_up, needs_graph
 from fastapi.testclient import TestClient
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -99,3 +100,37 @@ def test_overview_and_tools_are_503_when_the_graph_is_down(api_client_with, monk
         client.post("/api/companies/acme/tools/graph_stats", json={}),
     ):
         assert r.status_code == 503 and r.json() == {"detail": "FalkorDB is not reachable"}
+
+
+@pytest.fixture
+def graph_deleted_after_the_check(monkeypatch):
+    """graph_exists says yes once (the route's check), then the truth: a rebuild deleted it."""
+    if falkordb_up():
+        real, asked = db.graph_exists, []
+
+    def racy(slug):
+        asked.append(slug)
+        return len(asked) == 1 or real(slug)
+
+    monkeypatch.setattr(db, "graph_exists", racy)
+
+
+@needs_graph
+def test_overview_of_a_graph_deleted_mid_request_is_empty(
+    api_client_with, graph_deleted_after_the_check
+):
+    body = api_client_with("test_gone").get("/api/companies/test_gone/overview").json()
+    assert body["recent"] == [] and body["people"] == [] and body["counts"] == []
+
+
+@needs_graph
+def test_tool_call_on_a_graph_deleted_mid_request_is_empty(
+    api_client_with, graph_deleted_after_the_check
+):
+    r = api_client_with("test_gone").post("/api/companies/test_gone/tools/recent_work_items")
+    assert r.status_code == 200 and r.json() == []
+
+
+@needs_graph
+def test_status_of_a_graph_deleted_mid_request_is_empty(graph_deleted_after_the_check):
+    assert status_of("test_gone") == ("empty", None)

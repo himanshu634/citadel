@@ -6,10 +6,12 @@ The synthetic data is designed with known answers (see examples/synthetic_compan
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 from brain import db, tools
 from conftest import load_company, needs_graph, synthetic_company
+from redis.exceptions import ResponseError
 
 pytestmark = needs_graph
 
@@ -159,3 +161,17 @@ def test_two_companies_stay_isolated(synthetic_graph, tmp_path):
     finally:
         db.delete_graph(slug)
     assert stats(synthetic_graph)["node:Change"] == 25  # deleting one graph leaves the other
+
+
+def test_read_on_a_missing_graph_has_no_rows():
+    """A rebuild may delete the graph between a caller's graph_exists check and its read."""
+    slug = "test_never_created"
+    db.delete_graph(slug)
+    assert db.run(slug, "tools/recent_work_items", {"limit": 3}, read_only=True) == []
+    assert not db.graph_exists(slug)  # the read did not create it
+
+
+def test_a_broken_read_on_an_existing_graph_still_raises(synthetic_graph, monkeypatch):
+    monkeypatch.setattr(db.queries, "get", lambda name: SimpleNamespace(body="NOT CYPHER"))
+    with pytest.raises(ResponseError):
+        db.run(synthetic_graph, "tools/anything", read_only=True)

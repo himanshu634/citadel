@@ -12,6 +12,7 @@ from typing import Any
 
 from falkordb import FalkorDB, Graph
 from langchain_falkordb.checkpoint import FalkorDBSaver
+from redis.exceptions import ResponseError
 
 from brain import queries
 from brain.config import agent_graph_name, get_settings, graph_name
@@ -70,10 +71,20 @@ def rows(result) -> list[dict[str, Any]]:
 def run(
     slug: str, name: str, params: dict[str, Any] | None = None, read_only: bool = False
 ) -> list[dict[str, Any]]:
-    """Run the named query (a single statement) against brain_<slug>."""
+    """Run the named query (a single statement) against brain_<slug>.
+
+    A read of a graph that does not exist has no rows. FalkorDB answers it with an error, and a
+    rebuild can delete the graph between a caller's `graph_exists` check and its read. Any other
+    error, such as a broken query on a graph that exists, is raised.
+    """
     q = queries.get(name)
     g = graph(slug)
-    result = g.ro_query(q.body, params) if read_only else g.query(q.body, params)
+    try:
+        result = g.ro_query(q.body, params) if read_only else g.query(q.body, params)
+    except ResponseError:
+        if read_only and not graph_exists(slug):
+            return []
+        raise
     return rows(result)
 
 

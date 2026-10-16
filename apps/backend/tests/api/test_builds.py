@@ -8,7 +8,7 @@ import json
 import time
 
 import pytest
-from brain import config
+from brain import config, config_diff
 from brain.api import builds, create_app
 from brain.jobs import BuildSnapshot, JobRunner
 from conftest import FakeSteps
@@ -359,3 +359,19 @@ def test_put_invalid_config_is_422_with_field_errors(client, company):
 def test_put_unknown_company_is_404(client, company):
     cfg = current_config(client, company)
     assert client.put("/api/companies/nope", json={**cfg, "slug": "nope"}).status_code == 404
+
+
+def test_put_decides_on_the_file_read_under_the_start_lock(client, company, monkeypatch):
+    """Two saves at once: the second must compare against what the first wrote, so the file is
+    read and diffed while the lock is held (dry runs and no-op saves may answer without it)."""
+    held: list[bool] = []
+    real = config_diff.diff
+
+    def spy(old, new):
+        held.append(client.app.state.start_lock.locked())
+        return real(old, new)
+
+    monkeypatch.setattr(config_diff, "diff", spy)
+    cfg = current_config(client, company)
+    assert client.put(f"/api/companies/{company}", json={**cfg, "name": "Acme"}).status_code == 200
+    assert held[-1] is True
