@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     falkordb_tls: bool = False  # FalkorDB Cloud offers TLS from the Startup tier up
 
     github_token: str | None = None
+    linear_api_key: str | None = None
 
     embedding_dim: int = 768
 
@@ -64,7 +65,12 @@ class Settings(BaseSettings):
     anthropic_max_tokens: int = 64000
 
     @field_validator(
-        "falkordb_username", "falkordb_password", "github_token", "anthropic_api_key", mode="before"
+        "falkordb_username",
+        "falkordb_password",
+        "github_token",
+        "linear_api_key",
+        "anthropic_api_key",
+        mode="before",
     )
     @classmethod
     def _empty_is_none(cls, v: str | None) -> str | None:
