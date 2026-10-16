@@ -3,6 +3,7 @@
 	import { CloudOff, Inbox, LoaderCircle, Plus, Search, Trash2 } from '@lucide/svelte';
 	import {
 		ActivityBars,
+		AddCompanyDialog,
 		Avatar,
 		Badge,
 		Banner,
@@ -31,6 +32,7 @@
 		Tooltip,
 		WorkItemRow
 	} from '$lib';
+	import { AddCompany, type Lookup } from '$lib/addCompany.svelte';
 	import { RepoChecks, type RepoResult } from '$lib/repochecks.svelte';
 	import * as builds from './build-samples';
 	import {
@@ -40,6 +42,7 @@
 		type CompanyConfig,
 		type CompanyStatus,
 		type NodeType,
+		type RepoLookup,
 		type SourceConfig,
 		type WorkItem
 	} from '$lib/types';
@@ -144,6 +147,85 @@
 			return Promise.resolve();
 		}
 	}
+	/** The add-company dialog in one fixed state: typing never calls the API from the gallery. */
+	class FixedAdd extends AddCompany {
+		constructor(text: string, lookup: Lookup | null = null) {
+			super();
+			this.text = text;
+			if (lookup) this.result = { repo: this.repo ?? '', lookup };
+		}
+		override input(text: string) {
+			this.text = text;
+		}
+		override async retry() {}
+		override async create() {
+			return null;
+		}
+		override async addTo() {
+			return null;
+		}
+	}
+	const repoLookup = (over: Partial<RepoLookup> = {}): Lookup => ({
+		kind: 'found',
+		lookup: {
+			repo: 'acme-labs/platform',
+			exists: true,
+			private: false,
+			owner_name: 'Acme Labs',
+			name: 'Acme Labs',
+			slug: 'acme_labs',
+			since: '2025-10-16',
+			company: null,
+			owner_company: null,
+			...over
+		}
+	});
+	const addStates: { label: string; ctl: FixedAdd }[] = [
+		{ label: 'Empty', ctl: new FixedAdd('') },
+		{ label: 'Typing', ctl: new FixedAdd('acme-labs') },
+		{ label: 'Checking', ctl: new FixedAdd('acme-labs/platform', { kind: 'checking' }) },
+		{ label: 'Ready', ctl: new FixedAdd('https://github.com/acme-labs/platform', repoLookup()) },
+		{
+			label: 'Owner has a brain',
+			ctl: new FixedAdd(
+				'FalkorDB/falkordb-py',
+				repoLookup({
+					repo: 'FalkorDB/falkordb-py',
+					name: 'FalkorDB falkordb-py',
+					slug: 'falkordb_py',
+					owner_company: { slug: 'falkordb', name: 'FalkorDB' }
+				})
+			)
+		},
+		{
+			label: 'Already read',
+			ctl: new FixedAdd(
+				'FalkorDB/FalkorDB',
+				repoLookup({ repo: 'FalkorDB/FalkorDB', company: { slug: 'falkordb', name: 'FalkorDB' } })
+			)
+		},
+		{
+			label: 'Private',
+			ctl: new FixedAdd('acme-labs/billing', { kind: 'private', repo: 'acme-labs/billing' })
+		},
+		{
+			label: 'Not found',
+			ctl: new FixedAdd('acme-labs/platfrom', { kind: 'missing', repo: 'acme-labs/platfrom' })
+		},
+		{ label: 'No token', ctl: new FixedAdd('acme-labs/platform', { kind: 'no_token' }) },
+		{ label: 'GitHub down', ctl: new FixedAdd('acme-labs/platform', { kind: 'unreachable' }) },
+		{
+			label: 'Long name',
+			ctl: new FixedAdd(
+				'the-international-consortium-of-very-long-organisation-names/a-repository-with-an-equally-long-name',
+				repoLookup({
+					name: 'The International Consortium of Very Long Organisation Names and Friends',
+					slug: 'the_international_consortium_of_very_long_organisation_names'
+				})
+			)
+		}
+	];
+
 	const checksFound = new FixedChecks('env', { 'acme-labs/platform': { kind: 'found', private: false } });
 	const checksNoToken = new FixedChecks(null);
 	const checksPrivate = new FixedChecks('gh', { 'acme-labs/secret': { kind: 'found', private: true } });
@@ -501,6 +583,19 @@
 			</div>
 		</Card>
 	</div>
+
+	<Card title="Add-company dialog">
+		<p class="note">
+			The rail's + opens it: one field for a public GitHub repository, then what Citadel will make.
+			Each button opens one state; typing here never calls the API.
+		</p>
+		<div class="row">
+			{#each addStates as state (state.label)}
+				<Button size="sm" onclick={() => (state.ctl.open = true)}>{state.label}</Button>
+				<AddCompanyDialog ctl={state.ctl} />
+			{/each}
+		</div>
+	</Card>
 
 	<Card title="Source card">
 		<p class="note">

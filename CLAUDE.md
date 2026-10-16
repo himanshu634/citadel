@@ -98,7 +98,10 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   round-trip so hand-written comments survive; writes are atomic), `config_diff.py` (says if a
   saved change needs a graph rebuild or a new download), and `jobs.py` (one build per company,
   at most two at once, progress as SSE events, last build kept in `data/jobs/<slug>.json`, a
-  build cut off by a restart is marked `stopped`).
+  build cut off by a restart is marked `stopped`). `/api/onboard/github` adds a company from one
+  public GitHub repo (the rail's + dialog): `brain/onboard.py` derives name, slug and window; the
+  create re-checks visibility (private repos are refused) and writes and starts under the
+  start lock.
 
 ### Agents (`brain/agents`)
 

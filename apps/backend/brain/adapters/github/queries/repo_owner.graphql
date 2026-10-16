@@ -1,0 +1,15 @@
+# What the add-a-company dialog needs about a pasted repository: its exact name, whether it is
+# private (Citadel onboards public repositories only), and the owner's display name, which
+# becomes the company name. `name` is null or empty when the owner never set one.
+query RepoOwner($owner: String!, $name: String!) {
+  rateLimit { remaining resetAt cost }
+  repository(owner: $owner, name: $name) {
+    nameWithOwner
+    isPrivate
+    owner {
+      login
+      ... on Organization { name }
+      ... on User { name }
+    }
+  }
+}

@@ -9,9 +9,10 @@ are none yet. Why: every company page lives under `/c/<slug>/`, so `/` only deci
 	import { getCompanies } from '$lib/companies.svelte';
 	import { Plus } from '@lucide/svelte';
 	import { Button, EmptyState } from '$lib';
+	import { getAddCompany } from '$lib/addCompany.svelte';
 
 	const companies = getCompanies();
-	const newCompany = resolve('/new');
+	const adding = getAddCompany();
 
 	function lastUsed(): string | null {
 		try {
@@ -39,7 +40,9 @@ are none yet. Why: every company page lives under `/c/<slug>/`, so `/` only deci
 			description="Add a company and Citadel builds a graph of its engineering activity."
 		>
 			{#snippet action()}
-				<Button variant="primary" href={newCompany}><Plus aria-hidden="true" />Add a company</Button>
+				<Button variant="primary" aria-haspopup="dialog" onclick={() => adding.show()}>
+					<Plus aria-hidden="true" />Add a company
+				</Button>
 			{/snippet}
 		</EmptyState>
 		<p class="demo">Want demo data first? Run <code>make synthetic</code> to load a small made-up company.</p>

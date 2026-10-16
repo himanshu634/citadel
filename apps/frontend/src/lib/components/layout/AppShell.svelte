@@ -8,7 +8,11 @@ tooltip context for everything inside.
 	import { page } from '$app/state';
 	import { Tooltip } from 'bits-ui';
 	import type { Snippet } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { AddCompany, setAddCompany } from '$lib/addCompany.svelte';
 	import { getCompanies } from '$lib/companies.svelte';
+	import AddCompanyDialog from '../brain/AddCompanyDialog.svelte';
 	import CompanyRail from './CompanyRail.svelte';
 	import Sidebar from './Sidebar.svelte';
 	import Topbar from './Topbar.svelte';
@@ -17,6 +21,15 @@ tooltip context for everything inside.
 	const companies = getCompanies();
 	let navOpen = $state(false);
 	const close = () => (navOpen = false);
+	// One add-a-company dialog for the app: the rail's + and "Add another" both open it.
+	const adding = new AddCompany();
+	setAddCompany(adding);
+
+	async function created(slug: string) {
+		await companies.load();
+		// The build page is its own route; resolve() has no entry for it yet.
+		await goto(`${resolve('/c/[slug]', { slug })}/build`);
+	}
 </script>
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && navOpen && close()} />
@@ -29,6 +42,10 @@ tooltip context for everything inside.
 				current={companies.current}
 				pathname={page.url.pathname}
 				onnavigate={close}
+				onadd={() => {
+					close();
+					adding.show();
+				}}
 			/>
 			<div class="sidebar-slot"><Sidebar onnavigate={close} /></div>
 		</div>
@@ -42,6 +59,7 @@ tooltip context for everything inside.
 			</main>
 		</div>
 	</div>
+	<AddCompanyDialog ctl={adding} oncreated={created} />
 </Tooltip.Provider>
 
 <style>

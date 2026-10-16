@@ -224,6 +224,9 @@ describe('repositories', () => {
 		expect(normalizeRepo('acme/plat')).toBe('acme/plat');
 		expect(normalizeRepo('acme/')).toBe('acme/');
 		expect(normalizeRepo('a')).toBe('a');
+		expect(normalizeRepo('https://github.com/acme/platform/tree/main/src')).toBe('acme/platform');
+		expect(normalizeRepo('https://github.com/acme/platform?tab=readme')).toBe('acme/platform');
+		expect(normalizeRepo('https://github.com/acme/platform.git#readme')).toBe('acme/platform');
 	});
 
 	test('a private repository is an error unless the data is the company\'s own', () => {

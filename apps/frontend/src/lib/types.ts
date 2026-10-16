@@ -202,6 +202,42 @@ export interface GithubRepoCheck {
 	private: boolean | null;
 }
 
+export interface CompanyRef {
+	slug: string;
+	name: string;
+}
+
+/** GET /api/onboard/github/{owner}/{name}: what the add-a-company dialog shows for a repo. */
+export interface RepoLookup {
+	/** owner/name as GitHub spells it (as asked, when it does not exist). */
+	repo: string;
+	exists: boolean;
+	private: boolean | null;
+	owner_name: string | null;
+	/** The suggestion (name, slug, since) is only made for a public repo that exists. */
+	name: string | null;
+	slug: string | null;
+	/** ISO date the window would start at. */
+	since: string | null;
+	/** The company that already reads this repo. */
+	company: CompanyRef | null;
+	/** A company that reads another repo of the same owner. */
+	owner_company: CompanyRef | null;
+}
+
+export interface OnboardRequest {
+	repo: string;
+	name?: string;
+	slug?: string;
+}
+
+/** POST /api/onboard/github, 201. `build` is null when the company was saved but did not start. */
+export interface OnboardResult {
+	company: CompanyDetail;
+	build: BuildSnapshot | null;
+	build_error: string | null;
+}
+
 export interface Stat {
 	kind: string;
 	type: string;
