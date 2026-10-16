@@ -9,7 +9,8 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from brain import db, tools
+from brain import db, loader, tools
+from brain.canonical import Document
 from brain.testing import load_company, needs_graph, synthetic_company
 from redis.exceptions import ResponseError
 
@@ -175,3 +176,46 @@ def test_a_broken_read_on_an_existing_graph_still_raises(synthetic_graph, monkey
     monkeypatch.setattr(db.queries, "get", lambda name: SimpleNamespace(body="NOT CYPHER"))
     with pytest.raises(ResponseError):
         db.run(synthetic_graph, "tools/anything", read_only=True)
+
+
+def test_bodies_and_documents_become_chunks(synthetic_graph):
+    issue = tools.get_entity(synthetic_graph, uid="synthetic:issue:14")
+    chunks = [n for n in issue.neighbours if n.label == "Chunk" and n.rel == "FROM"]
+    assert {n.uid for n in chunks} == {"chunk:synthetic:issue:14:body", "chunk:synthetic:comment:7"}
+    doc = tools.get_entity(synthetic_graph, uid="synthetic:doc:docs/billing-runbook.md")
+    assert any(n.uid == "chunk:synthetic:doc:docs/billing-runbook.md:0" for n in doc.neighbours)
+    node_rows = db.run(
+        synthetic_graph, "graph/nodes", {"labels": ["WorkItem", "Document"]}, read_only=True
+    )
+    rows = {r["uid"]: r for r in node_rows}
+    assert rows["synthetic:issue:14"]["comments"] == 1  # its body chunk is not a comment
+    assert rows["synthetic:pr:3"]["comments"] == 2
+
+
+def test_chunks_carry_a_text_hash_of_their_text(synthetic_graph):
+    rows = db.run_text(
+        synthetic_graph,
+        "MATCH (c:Chunk) RETURN c.kind AS kind, count(c) AS n, count(c.text_hash) AS hashed",
+    )
+    got = {kind: (n, hashed) for kind, n, hashed in rows.result_set}
+    assert set(got) == {"comment", "work_item", "document"}
+    assert all(n == hashed for n, hashed in got.values())
+
+
+def test_shrunk_document_leaves_no_stale_chunks():
+    slug = "test_doc_shrink"
+    db.delete_graph(slug)
+    try:
+        long = "\n\n".join(f"para{i} " * 200 for i in range(3))  # several chunks at 1200 chars
+
+        def doc(body):
+            return Document(uid="t:doc:a.md", source="t", path="a.md", title="A", body=body)
+
+        chunks = "MATCH (c:Chunk)-[:FROM]->(:Document) RETURN c.uid AS uid"
+        loader.load(slug, [doc(long)])
+        assert len(db.run_text(slug, chunks).result_set) > 1  # it is cut into several
+        loader.load(slug, [doc("one short paragraph")])
+        rows = db.run_text(slug, chunks)
+        assert [r[0] for r in rows.result_set] == ["chunk:t:doc:a.md:0"]
+    finally:
+        db.delete_graph(slug)

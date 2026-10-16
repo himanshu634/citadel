@@ -39,6 +39,7 @@ from brain.canonical import (
     team_uid,
     to_utc,
 )
+from brain.chunking import split_text, text_hash
 
 BATCH_SIZE = 500
 
@@ -100,6 +101,11 @@ def _priority_rank(w: WorkItem) -> int | None:
     if w.status_category is None:
         return None
     return PRIORITY_RANK.get(w.priority or "", NO_PRIORITY_RANK)
+
+
+def _titled(title: str, body: str) -> str:
+    """The text a work item or document is searched by: its title, then its body."""
+    return f"{title}\n\n{body}" if body.strip() else title
 
 
 def _base(r: CanonicalRecord) -> dict[str, Any]:
@@ -201,6 +207,7 @@ def load(slug: str, records: Iterable[CanonicalRecord], origin: str | None = Non
         ],
         rep,
     )
+    _load_body_chunks(slug, of(WorkItem), of(Document), rep)
     _run(
         slug,
         "load/change",
@@ -289,6 +296,7 @@ def load(slug: str, records: Iterable[CanonicalRecord], origin: str | None = Non
                 "work_item_uid": c.work_item_uid,
                 "author_uid": person_uid(c.author_login),
                 "text": c.body,
+                "text_hash": text_hash(c.body),
                 "created_at": iso(c.created_at),
                 "ts": epoch(c.created_at),
             }
@@ -320,6 +328,51 @@ def load(slug: str, records: Iterable[CanonicalRecord], origin: str | None = Non
         # not a row batch, so it is not counted in the report
         db.run(slug, "load/prune_blocks", {"origin": origin, "keep": kept_blocks})
     return rep
+
+
+def _load_body_chunks(
+    slug: str, items: list[WorkItem], docs: list[Document], rep: LoadReport
+) -> None:
+    """Chunks for the text of work items (one each) and documents (cut by `split_text`).
+
+    Only the records of this load are written, so an incremental ingest touches only what
+    changed. A document that now has fewer chunks loses the extra ones.
+    """
+    item_rows = []
+    for w in items:
+        text = _titled(w.title, w.body)
+        item_rows.append(
+            {
+                **_base(w),
+                "uid": f"chunk:{w.uid}:body",
+                "work_item_uid": w.uid,
+                "text": text,
+                "text_hash": text_hash(text),
+                "created_at": iso(w.created_at),
+                "ts": epoch(w.created_at),
+            }
+        )
+    _run(slug, "load/work_item_chunk", item_rows, rep)
+
+    doc_rows = []
+    prune_rows = []
+    for d in docs:
+        texts = split_text(_titled(d.title, d.body))
+        prune_rows.append({"doc_uid": d.uid, "keep": len(texts)})
+        for i, text in enumerate(texts):
+            doc_rows.append(
+                {
+                    **_base(d),
+                    "uid": f"chunk:{d.uid}:{i}",
+                    "document_uid": d.uid,
+                    "idx": i,
+                    "text": text,
+                    "text_hash": text_hash(text),
+                    "ts": epoch(d.updated_at),
+                }
+            )
+    _run(slug, "load/document_chunk", doc_rows, rep)
+    _run(slug, "load/prune_document_chunks", prune_rows, rep)
 
 
 def _load_ownership(slug: str, owns: list[Ownership], rep: LoadReport) -> None:
