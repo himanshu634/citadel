@@ -10,6 +10,7 @@ import threading
 
 import pytest
 from agents.history import MemoryChatStore
+from agents.keeper.store import MemoryKeeperStore
 from backend import registry
 from backend.api import create_app
 from backend.jobs import JobRunner
@@ -39,6 +40,14 @@ def history(monkeypatch):
     """Ask runs record into an in-memory history, never into a real agent_<slug> graph."""
     store = MemoryChatStore()
     monkeypatch.setattr("backend.api.ask.graph_history", lambda slug: store)
+    return store
+
+
+@pytest.fixture(autouse=True)
+def ledger(monkeypatch):
+    """Ask runs and thumbs open gaps on an in-memory ledger, never in a real keeper_<slug>."""
+    store = MemoryKeeperStore("synthetic")
+    monkeypatch.setattr("backend.api.ask.keeper_ledger", lambda slug: store)
     return store
 
 

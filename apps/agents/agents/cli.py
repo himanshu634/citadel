@@ -154,7 +154,9 @@ def _run_ask(slug: str, question: str, thread: str | None, client=None):
             return None
         ms = round((time.perf_counter() - started) * 1000)
         trace = new_trace(slug, question, thread, via="cli", ms=ms, **kw)
-        return trace.id if TraceStore(slug).add(trace) else None
+        added = TraceStore(slug).add(trace)
+        _note_gap(slug, trace)
+        return trace.id if added else None
 
     steps: list[dict] = []
     answer = None
@@ -188,6 +190,16 @@ def _run_ask(slug: str, question: str, thread: str | None, client=None):
     if recorder:
         recorder.answer(answer_out(answer, trace_id), answer.model)
     return answer
+
+
+def _note_gap(slug: str, trace) -> None:
+    """A failed turn becomes a gap on the Keeper's ledger (best effort, never raises)."""
+    from agents.keeper import gaps, store
+
+    try:
+        gaps.note_trace(store.KeeperStore(slug), trace, gaps.utc_now())
+    except Exception as e:  # even building the store must not fail an answer
+        typer.secho(f"keeper: no gap noted: {e!r}", err=True, dim=True)
 
 
 def _print_answer(answer) -> None:

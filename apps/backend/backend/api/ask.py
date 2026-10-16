@@ -34,8 +34,11 @@ from typing import Annotated, Any
 from agents import checkpoint, llm
 from agents.ask import Answer, answer_out, run_events
 from agents.history import ChatStore, GraphChatStore, Recorder
+from agents.keeper import gaps
+from agents.keeper.store import KeeperStore
 from agents.toolset import Toolset, graph_toolset
-from agents.traces import TraceStore, new_trace
+from agents.traces import Trace, TraceStore, new_trace
+from agents.work.store import WorkStore
 from brain import db
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -71,6 +74,7 @@ class Asker:
     graph_exists: Callable[[str], bool] = db.graph_exists
     traces: Callable[[str], TraceStore] = TraceStore
     history: Callable[[str], ChatStore] = lambda slug: graph_history(slug)  # noqa: E731
+    ledger: Callable[[str], WorkStore] = lambda slug: keeper_ledger(slug)  # noqa: E731
     claim_wait: float = CLAIM_WAIT_SECONDS
     _busy: set[str] = field(default_factory=set)
     _free: threading.Condition = field(default_factory=threading.Condition)
@@ -97,6 +101,19 @@ class Asker:
 def graph_history(slug: str) -> ChatStore:
     """The history store a default Asker uses (looked up at call time, so tests can swap it)."""
     return GraphChatStore(slug)
+
+
+def keeper_ledger(slug: str) -> WorkStore:
+    """The ledger a default Asker opens gaps on (looked up at call time, so tests can swap it)."""
+    return KeeperStore(slug)
+
+
+def note_gap(asker: Asker, slug: str, trace: Trace) -> None:
+    """Open a failed_question gap for a turn that failed. Best effort: never raises."""
+    try:
+        gaps.note_trace(asker.ledger(slug), trace, gaps.utc_now())
+    except Exception:
+        log.exception("could not note a gap for trace %s", trace.id)
 
 
 def get_asker(request: Request) -> Asker:
@@ -137,7 +154,9 @@ async def _events(asker: Asker, slug: str, question: str, thread_id: str) -> Asy
             trace = new_trace(
                 slug, question, thread_id, via="api", steps=steps, ms=ms, answer=answer, error=error
             )
-            return trace.id if asker.traces(slug).add(trace) else None
+            added = asker.traces(slug).add(trace)
+            note_gap(asker, slug, trace)
+            return trace.id if added else None
 
         try:
             for event in run_events(

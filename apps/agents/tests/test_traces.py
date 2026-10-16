@@ -12,6 +12,7 @@ from agents import ask as agent
 from agents import cli
 from agents.evals import cases, drafts
 from agents.history import MemoryChatStore
+from agents.keeper.store import MemoryKeeperStore
 from agents.testing import TOOLSET, FakeClient, reply, settings, submit, text, tool_use  # noqa: F401
 from agents.traces import Feedback, Trace, TraceStore, new_trace, summarize, window
 from brain import config
@@ -28,6 +29,7 @@ def root(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
     (tmp_path / "companies").mkdir()
     write_company(synthetic_company("synthetic"))
+    monkeypatch.setattr("agents.keeper.store.KeeperStore", MemoryKeeperStore)  # gaps, not FalkorDB
     return tmp_path
 
 
@@ -177,6 +179,18 @@ def test_cli_ask_keeps_a_trace_and_offline_does_not(root, monkeypatch):
     out = CliRunner().invoke(cli.app, ["traces", "synthetic"])
     assert out.exit_code == 0 and "1 turns in the last 7 days (1 answered)" in out.output
     assert "zero_source" in out.output and "100%" in out.output
+
+
+def test_cli_ask_without_sources_opens_a_gap(root, monkeypatch):
+    ledger = MemoryKeeperStore("synthetic")
+    monkeypatch.setattr("agents.keeper.store.KeeperStore", lambda slug: ledger)
+    monkeypatch.setattr("agents.checkpoint.checkpointer", lambda slug: InMemorySaver())
+    monkeypatch.setattr("agents.history.GraphChatStore", lambda slug: MemoryChatStore())
+    monkeypatch.setattr("agents.llm.client", lambda: FakeClient(reply(submit("t1", "None.", []))))
+    cli._run_ask("synthetic", "Who knows Auth?", None)
+    [t] = TraceStore("synthetic").read()
+    [gap] = ledger.gaps.values()
+    assert (gap.kind, gap.trace_ids, gap.norm) == ("failed_question", [t.id], "who knows auth")
 
 
 # --- thumbs-down drafts -----------------------------------------------------------------------
