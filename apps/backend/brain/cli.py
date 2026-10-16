@@ -157,6 +157,50 @@ def stats(slug: str) -> None:
     _print_stats(slug, f"{config.graph_name(slug)}:")
 
 
+@app.command()
+def ask(
+    slug: str,
+    question: str,
+    thread: str = typer.Option(None, "--thread", help="Continue an earlier conversation."),
+) -> None:
+    """Ask brain_<slug> a question. Claude answers from the graph, with numbered sources."""
+    import anthropic
+
+    from brain.agents.ask import ask as run_ask
+
+    _company(slug)
+    _connected()
+    try:
+        answer = run_ask(slug, question, thread_id=thread, checkpointer=db.checkpointer(slug))
+    except anthropic.AuthenticationError:
+        _fail("Anthropic rejected the credentials. Set ANTHROPIC_API_KEY in .env.")
+    except anthropic.APIConnectionError as e:
+        _fail(f"Cannot reach the Anthropic API: {e}")
+    except anthropic.APIStatusError as e:
+        _fail(f"Anthropic API error {e.status_code}: {e.message}")
+    if answer.text is None:
+        reason = {"refusal": "Claude declined to answer", "max_tokens": "hit the output limit"}
+        detail = (answer.stop_details or {}).get("explanation") or ""
+        typer.secho(
+            f"No answer: {reason.get(answer.stop, 'no answer submitted')}. {detail}", fg="yellow"
+        )
+    else:
+        typer.echo(answer.text)
+        if answer.sources:
+            typer.echo("\nSources:")
+            for i, src in enumerate(answer.sources, 1):
+                typer.echo(f"  [{i}] {src.title or src.uid}  {src.url or src.uid}")
+        if answer.path:
+            typer.echo("\nPath: " + " -> ".join(p.title or p.uid for p in answer.path))
+    u = answer.usage
+    typer.secho(
+        f"\n{answer.model} · in {u.get('input_tokens', 0)} (cache read "
+        f"{u.get('cache_read_input_tokens', 0)}) · out {u.get('output_tokens', 0)} · "
+        f"follow up with --thread {answer.thread_id}",
+        dim=True,
+    )
+
+
 def _print_stats(slug: str, title: str) -> None:
     rows = db.run(slug, "tools/graph_stats", read_only=True)
     typer.echo(title)
