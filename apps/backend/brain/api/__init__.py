@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from brain.api import builds, checks, companies, onboard, overview, tools
+from brain.api import builds, checks, companies, graph, onboard, overview, tools
 from brain.jobs import JobRunner
 
 DEV_ORIGIN = "http://localhost:5173"
@@ -46,6 +46,7 @@ def create_app(runner: JobRunner | None = None) -> FastAPI:
     app.include_router(onboard.router, prefix="/api")
     app.include_router(overview.router, prefix="/api")
     app.include_router(tools.router, prefix="/api")
+    app.include_router(graph.router, prefix="/api")
     return app
 
 

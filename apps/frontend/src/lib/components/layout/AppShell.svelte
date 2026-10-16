@@ -18,6 +18,8 @@ tooltip context for everything inside.
 	import Topbar from './Topbar.svelte';
 
 	let { children }: { children: Snippet } = $props();
+	// The Graph page is a full-bleed canvas: no content width cap, no padding (design-system.md).
+	const bleed = $derived(page.url.pathname.endsWith('/graph'));
 	const companies = getCompanies();
 	let navOpen = $state(false);
 	const close = () => (navOpen = false);
@@ -54,7 +56,7 @@ tooltip context for everything inside.
 		{/if}
 		<div class="main">
 			<Topbar onmenu={() => (navOpen = !navOpen)} menuOpen={navOpen} />
-			<main class="content">
+			<main class={['content', { bleed }]}>
 				{@render children()}
 			</main>
 		</div>
@@ -95,6 +97,10 @@ tooltip context for everything inside.
 		.content {
 			padding-inline: var(--space-8);
 		}
+	}
+	.content.bleed {
+		max-width: none;
+		padding: 0;
 	}
 	.scrim {
 		display: none;

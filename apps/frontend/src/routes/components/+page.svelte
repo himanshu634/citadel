@@ -23,18 +23,22 @@
 		Input,
 		Menu,
 		NodeChip,
+		NodeInspector,
 		Select,
 		SourceCard,
 		Stat,
 		Stepper,
 		Tabs,
 		TagInput,
+		TerritoryMap,
 		Tooltip,
 		WorkItemRow
 	} from '$lib';
 	import { AddCompany, type Lookup } from '$lib/addCompany.svelte';
+	import { layoutMap, neighbourhood } from '$lib/graph';
 	import { RepoChecks, type RepoResult } from '$lib/repochecks.svelte';
 	import * as builds from './build-samples';
+	import { syntheticGraph } from './graph-samples';
 	import {
 		NODE_LABELS,
 		type CitedAnswer as Answer,
@@ -353,6 +357,29 @@
 		['--text-sm', '13', 'Secondary rows'],
 		['--text-xs', '12', 'Meta and chips']
 	];
+
+	// The graph map and inspector, on the synthetic company's real graph view.
+	const mapLayout = layoutMap(syntheticGraph, { ticks: 300 });
+	let mapSelected = $state<string | null>('person:alice');
+	const graphNode = (uid: string) => syntheticGraph.nodes.find((n) => n.uid === uid);
+	const territoryOf = (uid: string) =>
+		syntheticGraph.territories.find((t) => t.id === graphNode(uid)?.territory) ?? null;
+	const alice = graphNode('person:alice')!;
+	const ciBot = graphNode('person:ci-bot')!;
+	const longPr = syntheticGraph.nodes
+		.filter((n) => n.label === 'WorkItem')
+		.toSorted((a, b) => (b.title ?? '').length - (a.title ?? '').length)[0];
+	const aliceEntity = {
+		uid: 'person:alice',
+		label: 'Person',
+		title: 'alice',
+		kind: null,
+		state: null,
+		url: null,
+		date: null,
+		body: '',
+		neighbour_count: neighbourhood(syntheticGraph, 'person:alice').uids.size - 1
+	};
 </script>
 
 <svelte:head><title>Components | Citadel</title></svelte:head>
@@ -791,6 +818,65 @@
 			<BuildProgress snapshot={builds.stopped} />
 		</div>
 	</Card>
+
+	<Card title="Territory map">
+		<p class="note">
+			The Graph page's map: one tonal territory per system, ink routes between them, a selection
+			lights its neighbours and outlines the territories it reaches. Click a node, drag, use the
+			buttons or pinch to zoom (scroll zooms on the Graph page). Synthetic company, bots shown.
+		</p>
+		<div class="map-sample">
+			<TerritoryMap
+				view={syntheticGraph}
+				layout={mapLayout}
+				selected={mapSelected}
+				onselect={(uid) => (mapSelected = uid)}
+				scrollZoom={false}
+			/>
+		</div>
+		<h3 class="sub">Nothing selected</h3>
+		<div class="map-sample short">
+			<TerritoryMap view={syntheticGraph} layout={mapLayout} scrollZoom={false} />
+		</div>
+	</Card>
+
+	<Card title="Node inspector">
+		<p class="note">
+			What the Graph page says about a selected node. Counts come from the links the map draws;
+			fields come from <code>get_entity</code>.
+		</p>
+		<div class="inspectors">
+			<div>
+				<h3 class="sub">Fields read</h3>
+				<NodeInspector
+					node={alice}
+					hood={neighbourhood(syntheticGraph, alice.uid)}
+					territory={territoryOf(alice.uid)}
+					entity={aliceEntity}
+					lookup={graphNode}
+				/>
+			</div>
+			<div>
+				<h3 class="sub">Reading fields, long title</h3>
+				<NodeInspector
+					node={longPr}
+					hood={neighbourhood(syntheticGraph, longPr.uid)}
+					territory={territoryOf(longPr.uid)}
+					lookup={graphNode}
+				/>
+			</div>
+			<div>
+				<h3 class="sub">A bot, fields failed</h3>
+				<NodeInspector
+					node={ciBot}
+					hood={neighbourhood(syntheticGraph, ciBot.uid)}
+					territory={territoryOf(ciBot.uid)}
+					error="FalkorDB is not reachable"
+					lookup={graphNode}
+				/>
+			</div>
+		</div>
+	</Card>
 </div>
 
 <style>
@@ -813,6 +899,26 @@
 		margin: var(--space-5) 0 var(--space-3);
 		font-size: var(--text-sm);
 		font-variation-settings: 'wdth' var(--width-label);
+	}
+	.map-sample {
+		height: 30rem;
+		border: var(--border-hair) solid var(--color-line);
+		border-radius: var(--radius-md);
+		overflow: hidden;
+	}
+	.map-sample.short {
+		height: 18rem;
+	}
+	.inspectors {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+		gap: var(--space-5);
+		align-items: start;
+	}
+	.inspectors > div > :global(.inspector) {
+		height: auto;
+		border: var(--border-hair) solid var(--color-line);
+		border-radius: var(--radius-md);
 	}
 	.forms {
 		display: grid;

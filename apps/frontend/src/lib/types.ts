@@ -284,3 +284,76 @@ export interface Overview {
 	systems: SystemSummary[];
 	people: PersonActivity[];
 }
+
+/** A node label as the brain graph spells it; `LABEL_TYPES` maps it to a NodeType. */
+export type GraphLabel = 'Person' | 'Team' | 'System' | 'WorkItem' | 'Change' | 'Document';
+
+export const LABEL_TYPES: Record<GraphLabel, NodeType> = {
+	Person: 'person',
+	Team: 'team',
+	System: 'system',
+	WorkItem: 'work-item',
+	Change: 'change',
+	Document: 'document'
+};
+
+/** One node of `GET /api/companies/<slug>/graph` (apps/backend/brain/graph_view.py). */
+export interface GraphNode {
+	uid: string;
+	label: GraphLabel;
+	title: string | null;
+	/** Work item: pull_request, issue, ...; change: feat, fix, ... */
+	kind: string | null;
+	/** Work item: open, closed, merged. */
+	state: string | null;
+	number: number | null;
+	url: string | null;
+	is_bot: boolean;
+	/** Comment chunks folded into this node. */
+	comments: number;
+	/** Links drawn to it in this view. */
+	degree: number;
+	/** A `Territory.id`. */
+	territory: string;
+}
+
+export interface GraphEdge {
+	source: string;
+	rel: string;
+	target: string;
+}
+
+export interface Territory {
+	/** The system's uid, `other` (the smaller systems) or `none` (not linked to code). */
+	id: string;
+	name: string;
+	system_uid: string | null;
+	size: number;
+	systems: number;
+}
+
+export interface GraphView {
+	slug: string;
+	nodes: GraphNode[];
+	edges: GraphEdge[];
+	/** Biggest first, then `other`, then `none`. */
+	territories: Territory[];
+	/** Bot accounts in the graph, shown or not. */
+	bots: number;
+	bots_shown: boolean;
+	/** Comment chunks folded into their work items. */
+	comments: number;
+}
+
+/** The `get_entity` tool's row: one node's fields (its neighbours come from the graph view). */
+export interface Entity {
+	uid: string;
+	label: string;
+	title: string | null;
+	kind: string | null;
+	state: string | null;
+	url: string | null;
+	date: string | null;
+	body: string;
+	neighbour_count: number;
+}
