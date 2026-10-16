@@ -6,10 +6,12 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "anthropic>=1.15.0",
     "brain",
+    "falkordb>=1.8.0",
     "langchain-falkordb[langgraph]>=0.2.0",
     "langgraph>=1.2.15",
     "pydantic>=2",
     "pyyaml>=6.0.3",
+    "redis>=7",
     "typer>=0.27.3",
 ]
 

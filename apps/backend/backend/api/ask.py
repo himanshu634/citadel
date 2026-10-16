@@ -13,6 +13,11 @@ and forwards each event as it comes: `start`, then `step` / `step_done` per tool
 - Every turn leaves a trace (`agents/traces.py`, data/traces/<slug>.jsonl), written by the worker
   before the `answer` event goes out, so a stopped turn is kept too and a thumbs click
   (`api/traces.py`) always finds it. The event carries its `trace_id`; None when the write failed.
+- Every turn is also kept in the chat history (`agents/history.py`, graph agent_<slug>) as it
+  runs: each event is recorded after it is sent, `start` and the answer before, so the chat
+  list has the chat as soon as the page knows its id, and a reload right after the answer finds
+  it done (`api/threads.py`). Each Claude response goes out as an
+  `llm` event (its text, thinking and the tools it asked for, MCP calls included).
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from typing import Annotated, Any
 
 from agents import checkpoint, llm
 from agents.ask import Answer, answer_out, run_events
+from agents.history import ChatStore, GraphChatStore, Recorder
 from agents.toolset import Toolset, graph_toolset
 from agents.traces import TraceStore, new_trace
 from brain import db
@@ -36,7 +42,7 @@ from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
 from backend.api.deps import company_slug
-from backend.api.models import AskAnswer, AskError, AskIn, AskStart, AskStep, AskStepDone
+from backend.api.models import AskAnswer, AskError, AskIn, AskLlm, AskStart, AskStep, AskStepDone
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["ask"])
@@ -47,6 +53,7 @@ Slug = Annotated[str, Depends(company_slug)]
 
 _MODELS: dict[str, type[BaseModel]] = {
     "start": AskStart,
+    "llm": AskLlm,
     "step": AskStep,
     "step_done": AskStepDone,
     "answer": AskAnswer,
@@ -63,6 +70,7 @@ class Asker:
     checkpointer: Callable[[str], Any] = checkpoint.checkpointer
     graph_exists: Callable[[str], bool] = db.graph_exists
     traces: Callable[[str], TraceStore] = TraceStore
+    history: Callable[[str], ChatStore] = lambda slug: graph_history(slug)  # noqa: E731
     claim_wait: float = CLAIM_WAIT_SECONDS
     _busy: set[str] = field(default_factory=set)
     _free: threading.Condition = field(default_factory=threading.Condition)
@@ -80,6 +88,15 @@ class Asker:
         with self._free:
             self._busy.discard(thread_id)
             self._free.notify_all()
+
+    def busy(self, thread_id: str) -> bool:
+        with self._free:
+            return thread_id in self._busy
+
+
+def graph_history(slug: str) -> ChatStore:
+    """The history store a default Asker uses (looked up at call time, so tests can swap it)."""
+    return GraphChatStore(slug)
 
 
 def get_asker(request: Request) -> Asker:
@@ -113,6 +130,7 @@ async def _events(asker: Asker, slug: str, question: str, thread_id: str) -> Asy
     def work() -> None:
         started = time.perf_counter()
         steps: list[dict] = []
+        recorder = Recorder(asker.history(slug), question)
 
         def keep(answer: Answer | None = None, error: str | None = None) -> str | None:
             ms = round((time.perf_counter() - started) * 1000)
@@ -132,17 +150,25 @@ async def _events(asker: Asker, slug: str, question: str, thread_id: str) -> Asy
                 stop=stop,
             ):
                 if isinstance(event, Answer):
-                    put(answer_out(event, keep(event)))
+                    payload = answer_out(event, keep(event))
+                    recorder.answer(payload, event.model)
+                    put(payload)
                     continue
                 if event.get("kind") == "step_done":
                     steps.append(dict(event))  # the sender pops "kind" from the original
-                put(event)
+                record = dict(event)  # likewise
+                if record["kind"] == "start":
+                    recorder.on(record)  # before the page hears of it, so its chat list has it
+                    put(event)
+                else:
+                    put(event)
+                    recorder.on(record)
         except Exception as exc:
             problem = llm.describe_error(exc)
             if problem is None:
                 log.exception("ask %s failed", slug)
                 problem = f"The answer failed: {type(exc).__name__}: {exc}"
-            keep(error=problem)
+            recorder.fail(problem, keep(error=problem))
             put({"kind": "error", "detail": problem})
         finally:
             asker.release(thread_id)

@@ -13,6 +13,7 @@
 		Card,
 		Checkbox,
 		ChoiceCard,
+		ChatList,
 		CitedAnswer,
 		CompanyForm,
 		CompanyRail,
@@ -34,6 +35,7 @@
 		TagInput,
 		TerritoryMap,
 		Tooltip,
+		TurnTimeline,
 		WalkAnswer,
 		WalkSteps,
 		WorkItemRow
@@ -44,6 +46,7 @@
 	import * as builds from './build-samples';
 	import { syntheticGraph } from './graph-samples';
 	import * as walks from './walk-samples';
+	import * as chatSamples from './chat-samples';
 	import { highlightFor } from '$lib/walk';
 	import {
 		NODE_LABELS,
@@ -798,6 +801,36 @@
 				<WalkAnswer answer={walks.stopped} />
 				<WalkAnswer answer={walks.refused} />
 				<figcaption>A failed call, an empty call, a rejected check; empty stage; no answer</figcaption>
+			</figure>
+		</div>
+	</Card>
+
+	<Card title="Chat list and answer timeline (Ask)">
+		<div class="walks">
+			<figure>
+				<ChatList
+					threads={chatSamples.chats}
+					current="c2"
+					hrefOf={(id) => `#${id}`}
+					more
+					now={chatSamples.NOW}
+					ondelete={() => {}}
+				/>
+				<figcaption>Answering, open, stopped, failed and older chats; more to read</figcaption>
+			</figure>
+			<figure>
+				<ChatList threads={[]} hrefOf={(id) => `#${id}`} />
+				<ChatList threads={[]} hrefOf={(id) => `#${id}`} loading />
+				<ChatList threads={chatSamples.chats.slice(1, 2)} hrefOf={(id) => `#${id}`} error="FalkorDB is not reachable" now={chatSamples.NOW} />
+				<figcaption>No chats yet; loading; a failed read</figcaption>
+			</figure>
+			<figure>
+				<TurnTimeline calls={chatSamples.timeline} steps={chatSamples.timelineSteps} running />
+				<figcaption>Timeline open: reasoning, text, graph tools, an MCP call with its result, the answer check</figcaption>
+			</figure>
+			<figure>
+				<TurnTimeline calls={chatSamples.timeline.slice(0, 1)} steps={walks.running} />
+				<figcaption>Folded; open it to see a graph call still running</figcaption>
 			</figure>
 		</div>
 	</Card>

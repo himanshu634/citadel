@@ -25,8 +25,13 @@ def test_events_come_in_order_and_number_the_graph_steps():
     )
     out = events(client)
     kinds = [e["kind"] for e in out]
-    assert kinds == ["start", "step", "step", "step_done", "step_done", "step", "step_done",
-                     "answer"]  # fmt: skip
+    assert kinds == ["start", "llm", "step", "step", "step_done", "step_done", "llm", "step",
+                     "step_done", "answer"]  # fmt: skip
+    llms = [e for e in out if e["kind"] == "llm"]
+    assert [e["seq"] for e in llms] == [1, 2]
+    assert [c["id"] for c in llms[0]["calls"]] == ["t1", "t2"]
+    assert [c["kind"] for c in llms[1]["calls"]] == ["submit"]
+    assert {e["call"] for e in out if e["kind"] == "step_done"} == {1, 2}
     steps = [e for e in out if e["kind"] == "step_done"]
     assert [(s["tool"], s["n"]) for s in steps] == [
         ("related_work_items", 1),

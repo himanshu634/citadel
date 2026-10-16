@@ -108,6 +108,9 @@ def ask_events(
     `start` {thread_id}; per tool call `step` {id, n, tool, input} when Claude asks for it and
     `step_done` {id, n, tool, input, ms, count, error, rows, nodes, rels} when it has run
     (submit_answer is a step without `n`: the answer check); last, `answer` (see `answer_out`).
+    Before its steps, each Claude response is an `llm` event {seq, text, thinking, model, stop,
+    ms, usage, calls} (`loop.llm_event`); steps carry `call`, the seq of the response that
+    asked for them.
     Setting `stop` ends the run at the next step, leaving the thread valid for a follow-up."""
     for event in _run(slug, question, thread_id, client, toolset, checkpointer, stop):
         yield answer_out(event) if isinstance(event, Answer) else event
@@ -172,14 +175,21 @@ def _run(slug, question, thread_id, client, toolset, checkpointer, stop) -> Iter
     }
     yield {"kind": "start", "thread_id": thread_id}
     numbers: dict[str, int] = {}  # tool_use id -> step number in this answer
+    calls: dict[str, int] = {}  # tool_use id -> seq of the Claude response that asked for it
+    seq = 0  # Claude responses in this answer
     state: dict[str, Any] = {}
     ended: str | None = None
     try:
         for mode, chunk in graph.stream(inputs, config, stream_mode=["values", "custom"]):
             if mode == "custom":
+                if chunk["kind"] == "llm":
+                    seq += 1
+                    calls.update((c["id"], seq) for c in chunk["calls"])
+                    yield {**chunk, "seq": seq}
+                    continue
                 if chunk["tool"] != SUBMIT:
                     numbers.setdefault(chunk["id"], len(numbers) + 1)
-                yield {**chunk, "n": numbers.get(chunk["id"])}
+                yield {**chunk, "n": numbers.get(chunk["id"]), "call": calls.get(chunk["id"])}
                 continue
             state = chunk
             # Stop only here, after a step is saved: leaving mid-step would drop that step's
@@ -196,7 +206,8 @@ def _run(slug, question, thread_id, client, toolset, checkpointer, stop) -> Iter
                 # The page saw this call asked for: tell it the call will never run.
                 n = None if use["name"] == SUBMIT else numbers.get(use["id"])
                 yield {"kind": "step_done", "id": use["id"], "n": n, "tool": use["name"],
-                       "input": use.get("input") or {}, "error": reason}  # fmt: skip
+                       "input": use.get("input") or {}, "error": reason,
+                       "call": calls.get(use["id"])}  # fmt: skip
             state = graph.get_state(config).values
         state = {**state, "answer": None, "stop": ended}
     elif checkpointer is not None:

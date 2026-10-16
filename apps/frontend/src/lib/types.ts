@@ -386,6 +386,45 @@ export interface AskStepEvent {
 	n: number | null;
 	tool: string;
 	input: Record<string, unknown> | null;
+	/** The seq of the Claude response (`AskLlmEvent`) that asked for it. */
+	call?: number | null;
+}
+
+/**
+ * Where a tool call ran: `graph` (a named graph tool), `submit` (the answer check), `mcp` (a tool
+ * on an MCP server, through the API's MCP connector) or `server` (an Anthropic server tool).
+ */
+export type CallKind = 'graph' | 'submit' | 'mcp' | 'server';
+
+/** A tool one Claude response used. MCP and server calls ran already and carry their result. */
+export interface AskCall {
+	id: string;
+	tool: string;
+	kind: CallKind;
+	/** The MCP server's name. */
+	server: string | null;
+	input: Record<string, unknown>;
+	error?: string | null;
+	result?: string | null;
+}
+
+export interface AskUsage {
+	input: number;
+	output: number;
+	cache_read: number;
+	cache_write: number;
+}
+
+/** One Claude response (`llm` event): what it said, its thinking when returned, what it asked for. */
+export interface AskLlmEvent {
+	seq: number;
+	text: string | null;
+	thinking: string | null;
+	model: string | null;
+	stop: string | null;
+	ms: number | null;
+	usage: AskUsage;
+	calls: AskCall[];
 }
 
 export interface AskStepDoneEvent extends AskStepEvent {
@@ -429,6 +468,71 @@ export interface WalkStep extends AskStepEvent {
 	rows?: unknown[];
 	nodes?: WalkNode[];
 	rels?: WalkRel[];
+}
+
+// --- Chat history (GET /api/companies/{slug}/threads...; brain/agents/history.py) -------------
+
+export type ChatStatus = 'running' | 'done' | 'stopped' | 'failed';
+
+/** A row of the chat list. Times are ISO strings. */
+export interface ThreadSummary {
+	id: string;
+	/** The first question, on one line. */
+	title: string;
+	created_at: string;
+	updated_at: string;
+	turns: number;
+	last_status: ChatStatus;
+}
+
+export interface ThreadPage {
+	threads: ThreadSummary[];
+	/** Pass as `before` for the next page; null when this was the last. */
+	next: number | null;
+}
+
+/** A saved tool call: the step shape plus where it ran. */
+export interface ChatStep extends AskStepDoneEvent {
+	kind: CallKind;
+	server: string | null;
+	status: string;
+	result: string | null;
+}
+
+export interface ChatLlmCall {
+	seq: number;
+	at: string | null;
+	model: string | null;
+	stop: string | null;
+	text: string | null;
+	thinking: string | null;
+	ms: number | null;
+	usage: AskUsage;
+}
+
+export interface ChatTurn {
+	n: number;
+	question: string;
+	status: ChatStatus;
+	started_at: string;
+	ended_at: string | null;
+	ms: number | null;
+	error: string | null;
+	answer: AskAnswer | null;
+	calls: ChatLlmCall[];
+	steps: ChatStep[];
+	rating: Rating | null;
+	note: string | null;
+}
+
+/** A whole chat, as the Ask page reopens it. */
+export interface Thread {
+	id: string;
+	title: string;
+	created_at: string;
+	updated_at: string;
+	last_status: ChatStatus;
+	turns: ChatTurn[];
 }
 
 /** A thumbs on one answer (POST .../traces/{trace_id}/feedback); null takes it back. */

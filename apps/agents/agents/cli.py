@@ -31,6 +31,41 @@ def ask(
     typer.secho(f"follow up with --thread {answer.thread_id}", dim=True)
 
 
+@app.command("chats-backfill")
+def chats_backfill(
+    slug: str,
+    all_threads: bool = typer.Option(
+        False,
+        "--all",
+        help="Also threads with no trace line: offline (--offline) chats, test and eval runs.",
+    ),
+) -> None:
+    """Write the chat history (the Ask page's chat list) for threads asked before it existed,
+    from their checkpoints in agent_<slug> and data/traces/<slug>.jsonl. Only threads someone
+    asked from the Ask page or `agents ask` (they have a trace line) unless --all. Safe to
+    re-run."""
+    from agents.backfill import backfill
+    from agents.history import GraphChatStore
+    from agents.traces import TraceStore
+
+    company(slug)
+    connected()
+    report = backfill(
+        slug,
+        GraphChatStore(slug),
+        checkpoint.checkpointer(slug),
+        TraceStore(slug),
+        traced_only=not all_threads,
+    )
+    typer.echo(f"{len(report.threads)} chats ({report.turns} questions) written to the history")
+    if report.untraced:
+        typer.echo(
+            f"{len(report.untraced)} threads without a trace line left out (--all adds them)"
+        )
+    if report.skipped:
+        typer.echo(f"skipped (no question in the checkpoint): {', '.join(report.skipped)}")
+
+
 @app.command("traces")
 def traces_cmd(
     slug: str,
@@ -99,39 +134,59 @@ def chat(
 
 def _run_ask(slug: str, question: str, thread: str | None, client=None):
     """One turn. A turn with the real Claude (no `client`) leaves a trace in
-    data/traces/<slug>.jsonl (`agents traces`); a scripted --offline turn does not."""
+    data/traces/<slug>.jsonl (`agents traces`) and is kept in the chat history (agent_<slug>,
+    the Ask page's chat list); a scripted --offline turn is not."""
     import time
     import uuid
 
     from agents import llm
-    from agents.ask import ask_traced
+    from agents.ask import Answer, answer_out, run_events
+    from agents.history import GraphChatStore, Recorder
     from agents.traces import TraceStore, new_trace
 
     thread = thread or uuid.uuid4().hex[:12]
     started = time.perf_counter()
+    live = client is None
+    recorder = Recorder(GraphChatStore(slug), question) if live else None
 
-    def keep(**kw) -> None:
-        if client is None:
-            ms = round((time.perf_counter() - started) * 1000)
-            TraceStore(slug).add(new_trace(slug, question, thread, via="cli", ms=ms, **kw))
+    def keep(**kw) -> str | None:
+        if not live:
+            return None
+        ms = round((time.perf_counter() - started) * 1000)
+        trace = new_trace(slug, question, thread, via="cli", ms=ms, **kw)
+        return trace.id if TraceStore(slug).add(trace) else None
 
+    steps: list[dict] = []
+    answer = None
     try:
-        answer, steps = ask_traced(
+        for event in run_events(
             slug,
             question,
             thread_id=thread,
             client=client,
             checkpointer=checkpoint.checkpointer(slug),
-        )
+        ):
+            if isinstance(event, Answer):
+                answer = event
+                break
+            if event.get("kind") == "step_done":
+                steps.append(event)
+            if recorder:
+                recorder.on(event)
     except Exception as e:
         problem = llm.describe_error(e)
-        keep(steps=[], error=problem or f"{type(e).__name__}: {e}")
+        trace_id = keep(steps=[], error=problem or f"{type(e).__name__}: {e}")
+        if recorder:
+            recorder.fail(problem or f"{type(e).__name__}: {e}", trace_id)
         if problem is None:
             raise
         if "No Anthropic credentials" in problem:
             problem += " Or try --offline."
         fail(problem)
-    keep(steps=steps, answer=answer)
+    assert answer is not None  # run_events always ends with one
+    trace_id = keep(steps=steps, answer=answer)
+    if recorder:
+        recorder.answer(answer_out(answer, trace_id), answer.model)
     return answer
 
 

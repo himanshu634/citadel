@@ -93,6 +93,9 @@ eval: ## Agent evals (calls the API; SLUG defaults to synthetic): CASE=id|tag RE
 		$(if $(REPEAT),--repeat $(REPEAT)) $(if $(MODEL),--model $(MODEL)) \
 		$(if $(EFFORT),--effort $(EFFORT)) $(if $(BASELINE),--baseline $(abspath $(BASELINE)))
 
+chats-backfill: ## Chat history for $(SLUG)'s threads asked before it existed (from checkpoints + traces); ALL=1 adds untraced ones
+	$(AGENTS) chats-backfill $(SLUG) $(if $(ALL),--all)
+
 traces: ## How the brain did on live questions (CLI + Ask page) for $(SLUG): rates, p50/p95; DAYS=7
 	$(AGENTS) traces $(SLUG) $(if $(DAYS),--days $(DAYS))
 

@@ -17,10 +17,12 @@ source = { editable = "apps/agents" }
 dependencies = [
     { name = "anthropic" },
     { name = "brain" },
+    { name = "falkordb" },
     { name = "langchain-falkordb", extra = ["langgraph"] },
     { name = "langgraph" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "redis" },
     { name = "typer" },
 ]
 
@@ -28,10 +30,12 @@ dependencies = [
 requires-dist = [
     { name = "anthropic", specifier = ">=1.15.0" },
     { name = "brain", editable = "apps/brain" },
+    { name = "falkordb", specifier = ">=1.8.0" },
     { name = "langchain-falkordb", extras = ["langgraph"], specifier = ">=0.2.0" },
     { name = "langgraph", specifier = ">=1.2.15" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "redis", specifier = ">=7" },
     { name = "typer", specifier = ">=0.27.3" },
 ]
 

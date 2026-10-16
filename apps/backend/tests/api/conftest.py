@@ -9,6 +9,7 @@ from __future__ import annotations
 import threading
 
 import pytest
+from agents.history import MemoryChatStore
 from backend import registry
 from backend.api import create_app
 from backend.jobs import JobRunner
@@ -31,6 +32,14 @@ def no_graph(monkeypatch):
     graphs left behind."""
     monkeypatch.setattr("backend.api.companies.status_of", lambda slug: ("empty", None))
     monkeypatch.setattr("agents.checkpoint.company_graphs", lambda slug: [])
+
+
+@pytest.fixture(autouse=True)
+def history(monkeypatch):
+    """Ask runs record into an in-memory history, never into a real agent_<slug> graph."""
+    store = MemoryChatStore()
+    monkeypatch.setattr("backend.api.ask.graph_history", lambda slug: store)
+    return store
 
 
 @pytest.fixture

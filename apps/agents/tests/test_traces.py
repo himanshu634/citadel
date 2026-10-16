@@ -11,6 +11,7 @@ import yaml
 from agents import ask as agent
 from agents import cli
 from agents.evals import cases, drafts
+from agents.history import MemoryChatStore
 from agents.testing import TOOLSET, FakeClient, reply, settings, submit, text, tool_use  # noqa: F401
 from agents.traces import Feedback, Trace, TraceStore, new_trace, summarize, window
 from brain import config
@@ -156,6 +157,8 @@ def test_an_empty_window_has_no_rates():
 
 def test_cli_ask_keeps_a_trace_and_offline_does_not(root, monkeypatch):
     monkeypatch.setattr("agents.checkpoint.checkpointer", lambda slug: InMemorySaver())
+    history = MemoryChatStore()
+    monkeypatch.setattr("agents.history.GraphChatStore", lambda slug: history)
     monkeypatch.setattr("agents.llm.client", lambda: FakeClient(reply(submit("t1", "None.", []))))
     answer = cli._run_ask("synthetic", "Who knows Auth?", None)
     offline = FakeClient(reply(submit("t1", "Scripted.", [])))
@@ -164,6 +167,12 @@ def test_cli_ask_keeps_a_trace_and_offline_does_not(root, monkeypatch):
     [t] = TraceStore("synthetic").read()
     assert (t.via, t.question, t.thread_id, t.text) == ("cli", "Who knows Auth?",
                                                         answer.thread_id, "None.")  # fmt: skip
+
+    [chat] = history.list_threads(2**62, 10)  # the offline turn is not kept either
+    turn = history.get_thread(chat.id).turns[0]
+    assert (chat.id, chat.turns, turn.status, turn.answer["text"]) == (
+        answer.thread_id, 1, "done", "None.")  # fmt: skip
+    assert turn.answer["trace_id"] == t.id
 
     out = CliRunner().invoke(cli.app, ["traces", "synthetic"])
     assert out.exit_code == 0 and "1 turns in the last 7 days (1 answered)" in out.output

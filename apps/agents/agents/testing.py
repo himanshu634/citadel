@@ -276,3 +276,20 @@ def fake_brain(slug: str, name: str, **p: Any) -> list[dict[str, Any]]:
     if name == "get_entity":
         return []
     raise KeyError(f"fake brain has no tool {name}")
+
+
+def record_run(store, question, client, thread_id=None, saver=None):
+    """One run recorded into a chat history store, the way the Ask API drives the Recorder.
+    Returns the Answer; its `answer` event goes in with trace id `tr1`."""
+    from agents import ask as agent
+    from agents.history import Recorder
+
+    rec = Recorder(store, question)
+    for event in agent.run_events(
+        "synthetic", question, thread_id, client=client, toolset=TOOLSET, checkpointer=saver
+    ):
+        if isinstance(event, agent.Answer):
+            rec.answer(agent.answer_out(event, "tr1"), event.model)
+            return event
+        rec.on(dict(event))
+    raise AssertionError("the run ended without an answer")
