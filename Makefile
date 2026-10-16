@@ -6,16 +6,17 @@
 #   make schema SLUG=synthetic     run a target for another company
 
 SLUG ?= falkordb
+API_PORT ?= 8000
 BRAIN := uv run brain
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask chat reset brain test lint fmt check clean synthetic fe-install fe-dev fe-check fe-build
+.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask chat reset brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
 	@echo ""
-	@echo "  Variables: SLUG=$(SLUG)  TOOL=<name>  P="k=v ..."  JSON=1  SOURCE=<type>  FULL=1  NAME=<display name>  CONFIRM=1  ARGS=\"...\""
+	@echo "  Variables: SLUG=$(SLUG)  TOOL=<name>  P="k=v ..."  JSON=1  SOURCE=<type>  FULL=1  NAME=<display name>  CONFIRM=1  ARGS=\"...\"  API_PORT=$(API_PORT)"
 
 # --- Environment ------------------------------------------------------------------------------
 
@@ -80,6 +81,14 @@ reset: ## Delete graph brain_$(SLUG); needs CONFIRM=1
 
 brain: ## Run any brain command: make brain ARGS="query falkordb graph_stats"
 	$(BRAIN) $(ARGS)
+
+# --- API ---------------------------------------------------------------------------------------
+
+api: ## API on http://127.0.0.1:$(API_PORT) (auto-reload)
+	uv run uvicorn brain.api:app --host 127.0.0.1 --port $(API_PORT) --reload
+
+dev: ## API + frontend dev server together
+	$(MAKE) -j2 api fe-dev
 
 # --- Frontend (apps/frontend, pnpm) ------------------------------------------------------------
 
