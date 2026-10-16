@@ -259,7 +259,7 @@ adapter's `source_model` themselves and report `["sources", i, <field>]`.
 
 | Method and path | Does |
 | --- | --- |
-| `GET /api/companies` | List from `companies/*.yaml`: `slug`, `name`, `data_permission`, `status` (`ready`, `building`, `failed`, `empty`), `last_synced_at`, `build` summary if one is running. |
+| `GET /api/companies` | List from `companies/*.yaml`: `slug`, `name`, `data_permission`, `status` (`ready`, `building`, `failed`, `empty`, `invalid` when the YAML no longer validates, with `error`), `last_synced_at`, `build` summary if one is running. |
 | `GET /api/companies/{slug}` | The full config plus status. |
 | `PUT /api/companies/{slug}` | Replace the config (Settings). Slug must match the path. With `?dry_run=1` it writes nothing and returns `{rebuild: bool, refetch: [source keys], reasons: [...]}`. Without it: if a rebuild is needed it requires `?rebuild=1` (else 409), writes the YAML and starts the rebuild job (5.7); otherwise it writes the YAML only. |
 
