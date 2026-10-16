@@ -20,8 +20,11 @@ export { default as Tooltip } from './components/ui/Tooltip.svelte';
 
 export { default as ActivityBars } from './components/brain/ActivityBars.svelte';
 export { default as CitedAnswer } from './components/brain/CitedAnswer.svelte';
+export { default as CompanyForm } from './components/brain/CompanyForm.svelte';
+export { default as ConfigPreview } from './components/brain/ConfigPreview.svelte';
 export { default as EntityRow } from './components/brain/EntityRow.svelte';
 export { default as GraphPath } from './components/brain/GraphPath.svelte';
+export { default as SourceCard } from './components/brain/SourceCard.svelte';
 export { default as WorkItemRow } from './components/brain/WorkItemRow.svelte';
 
 export { default as AppShell } from './components/layout/AppShell.svelte';

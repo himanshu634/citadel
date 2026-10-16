@@ -1,7 +1,9 @@
 <!--
 @component
 Text field with a visible label. `hint` explains the field; `error` replaces the hint and marks
-the field invalid. Put an icon in `leading` (for example a search glass).
+the field invalid. Put an icon in `leading` (for example a search glass). `prefix` shows fixed text
+before what is typed (`brain_`, `github.com/`); it is set in the mono face, as is the whole field,
+so the typed text starts exactly after it. `mono` sets the field in the mono face alone (paths, ids).
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
@@ -15,6 +17,9 @@ the field invalid. Put an icon in `leading` (for example a search glass).
 		error?: string;
 		value?: string;
 		leading?: Snippet;
+		/** Fixed text before the typed value; implies `mono`. Decoration only: say it in the label or hint too. */
+		prefix?: string;
+		mono?: boolean;
 		size?: 'md' | 'lg';
 	} & Omit<HTMLInputAttributes, 'size' | 'value'>;
 
@@ -25,6 +30,8 @@ the field invalid. Put an icon in `leading` (for example a search glass).
 		error,
 		value = $bindable(''),
 		leading,
+		prefix,
+		mono = false,
 		size = 'md',
 		id,
 		...rest
@@ -35,10 +42,11 @@ the field invalid. Put an icon in `leading` (for example a search glass).
 	const noteId = $derived(`${inputId}-note`);
 </script>
 
-<div class={['field', size, { invalid: !!error }]}>
+<div class={['field', size, { invalid: !!error, mono: mono || !!prefix }]}>
 	<label for={inputId} class={{ 'sr-only': hideLabel }}>{label}</label>
-	<div class="control">
+	<div class="control" style:--prefix-chars={prefix ? prefix.length : undefined}>
 		{#if leading}<span class="leading" aria-hidden="true">{@render leading()}</span>{/if}
+		{#if prefix}<span class="prefix" aria-hidden="true">{prefix}</span>{/if}
 		<input
 			id={inputId}
 			bind:value
@@ -98,6 +106,24 @@ the field invalid. Put an icon in `leading` (for example a search glass).
 	}
 	.leading + input {
 		padding-left: calc(var(--space-3) * 2 + 1rem);
+	}
+	.mono input,
+	.prefix {
+		font-family: var(--font-mono);
+	}
+	.prefix {
+		position: absolute;
+		left: var(--space-3);
+		color: var(--color-text-muted);
+		font-size: var(--text-md);
+		pointer-events: none;
+	}
+	.lg .prefix {
+		font-size: var(--text-lg);
+	}
+	/* The typed text starts after the prefix: its width in characters of the same mono face. */
+	.prefix + input {
+		padding-left: calc(var(--space-3) + var(--prefix-chars) * 1ch);
 	}
 	input::placeholder {
 		color: var(--color-text-faint);

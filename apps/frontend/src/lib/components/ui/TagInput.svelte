@@ -1,14 +1,14 @@
 <!--
 @component
 A list of short values typed into one field (path globs, logins, aliases). Enter or a comma adds
-what is typed; pasting "a, b" adds both; Backspace on an empty field removes the last tag; text
+what is typed (a comma inside `{}` stays in the tag, so `*.{ts,tsx}` is one glob); pasting "a, b" adds both; Backspace on an empty field removes the last tag; text
 left in the field is added when focus leaves. Each tag has a button named "Remove <tag>". The rules
 (trim, no empty, no duplicates) are in `$lib/tags`. `mono` sets tags and text in the mono face for
 paths and ids.
 -->
 <script lang="ts">
 	import { X } from '@lucide/svelte';
-	import { addTags, hasSeparator, removeTag } from '$lib/tags';
+	import { addTags, hasSeparator, inOpenBrace, removeTag } from '$lib/tags';
 
 	type Props = {
 		label: string;
@@ -51,6 +51,8 @@ paths and ids.
 
 	function onkeydown(e: KeyboardEvent) {
 		if (e.isComposing) return;
+		// A comma inside an open `{` belongs to a brace glob (`*.{ts,tsx}`): let it be typed.
+		if (e.key === ',' && inOpenBrace(text)) return;
 		if (e.key === 'Enter' || e.key === ',') {
 			// Enter must not submit the surrounding form while the user is still typing tags.
 			e.preventDefault();

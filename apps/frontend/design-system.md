@@ -137,11 +137,11 @@ not add another component library.
 | `NodeChip`   | A graph node reference: type dot plus label. Type is in the accessible name.                   |
 | `Avatar`     | Initials on the node colour of what it stands for. Always next to the name.                    |
 | `Card`       | A titled panel. Title in wide type, optional description and actions. No nesting, no shadow.   |
-| `Input`      | Always has a label (`hideLabel` keeps it for screen readers). `hint` explains; `error` says what is wrong and how to fix it. Disabled: sunken fill, muted text, no hover change, `not-allowed` cursor. |
+| `Input`      | Always has a label (`hideLabel` keeps it for screen readers). `hint` explains; `error` says what is wrong and how to fix it. Disabled: sunken fill, muted text, no hover change, `not-allowed` cursor. `prefix` shows fixed mono text before the value (`brain_`, `github.com/`); `mono` sets the field in the mono face. |
 | `Select`     | Pick one of a short list (bits-ui). Label always visible; `hint` explains, `error` says what to fix. Two or three options that need explaining are `ChoiceCard`s instead. |
 | `ChoiceCard` | One option of a few that need a sentence each. A real radio in a label: selected = accent border, `--color-accent-soft` fill and a filled dot. Wrap the set in a `fieldset` with a `legend`. |
 | `Checkbox`   | One yes/no with its label beside it. Checked is an ink box with a check, never accent, so it does not compete with the one accent block. |
-| `TagInput`   | Several short values in one field. Enter or comma adds, paste splits, Backspace on empty removes the last; each tag has "Remove <tag>". `mono` for paths and ids. Rules live in `src/lib/tags.ts`. |
+| `TagInput`   | Several short values in one field. Enter or comma adds, paste splits, Backspace on empty removes the last; each tag has "Remove <tag>". `mono` for paths and ids. A comma inside `{}` stays in the tag (`*.{ts,tsx}`). Rules live in `src/lib/tags.ts`. |
 | `Stepper`    | The steps of a flow. The current step is the one solid accent block with square corners; done steps show a check in an ink circle, later steps their number. |
 | `Tabs`       | The selected tab is the solid accent block with square corners.                                |
 | `Menu`       | Pick one of a set or run a command. Selected item shows a check.                               |
@@ -151,6 +151,9 @@ not add another component library.
 | `EmptyState` | Says what will appear and how to get it, with one action.                                      |
 | `CitedAnswer`, `GraphPath` | The answer pattern from section 1. Citation chips link to the numbered source.   |
 | `EntityRow`, `WorkItemRow`, `ActivityBars` | List and comparison patterns for people, teams, systems and work items. |
+| `CompanyForm` | The fields of a company file for one wizard step or all three (Settings). Edits the draft; the page validates and hands back `errors`, which show under the field their `loc` names. Errors no field shows are listed at the foot of the step, so nothing blocks without a reason. Rules in `src/lib/onboarding.ts`. |
+| `SourceCard` | One source of a company. GitHub: repository, what to read, token note with "Check again", GitHub's answer; an error when the repository is not found or is private while the data is not `own`. Rate limits and outages are notes, never blockers. |
+| `ConfigPreview` | The YAML the server will write, with the top-level keys of the current step marked (bar, tint and a line of words). Shows the last valid text while the form has errors, and says so. |
 | `CompanyRail` | One tile per company brain; one click switches company and keeps the section you are on. Monogram 15px at width 118; ink for the current tile (section 3). Tooltip shows the name and `brain_<slug>` in mono. |
 | `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". |
 

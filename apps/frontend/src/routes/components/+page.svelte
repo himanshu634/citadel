@@ -12,6 +12,7 @@
 		ChoiceCard,
 		CitedAnswer,
 		CompanyRail,
+		ConfigPreview,
 		Dialog,
 		EmptyState,
 		EntityRow,
@@ -20,6 +21,7 @@
 		Menu,
 		NodeChip,
 		Select,
+		SourceCard,
 		Stat,
 		Stepper,
 		Tabs,
@@ -27,12 +29,14 @@
 		Tooltip,
 		WorkItemRow
 	} from '$lib';
+	import { RepoChecks, type RepoResult } from '$lib/repochecks.svelte';
 	import {
 		NODE_LABELS,
 		type CitedAnswer as Answer,
 		type Company,
 		type CompanyStatus,
 		type NodeType,
+		type SourceConfig,
 		type WorkItem
 	} from '$lib/types';
 
@@ -124,6 +128,61 @@
 	let level = $state('engineer');
 	let levelEmpty = $state('');
 	let levelLong = $state('long');
+	/** Fixed answers for the source cards: no calls to the API from the gallery. */
+	class FixedChecks extends RepoChecks {
+		constructor(token: 'env' | 'gh' | null, results: Record<string, RepoResult> = {}) {
+			super();
+			this.token = token;
+			for (const [repo, result] of Object.entries(results)) this.results.set(repo, result);
+		}
+		override async checkToken() {}
+		override check() {
+			return Promise.resolve();
+		}
+	}
+	const checksFound = new FixedChecks('env', { 'acme-labs/platform': { kind: 'found', private: false } });
+	const checksNoToken = new FixedChecks(null);
+	const checksPrivate = new FixedChecks('gh', { 'acme-labs/secret': { kind: 'found', private: true } });
+	const checksMissing = new FixedChecks('env', {
+		'acme-labs/typo': { kind: 'missing' },
+		'acme-labs/slow': { kind: 'rate_limited' }
+	});
+	const github = (repo: string): SourceConfig => ({
+		type: 'github',
+		repo,
+		include: ['commits', 'pull_requests', 'issues', 'reviews', 'codeowners', 'repo_docs']
+	});
+	let srcFound = $state(github('acme-labs/platform'));
+	let srcNoToken = $state(github('acme-labs/platform'));
+	let srcPrivate = $state(github('acme-labs/secret'));
+	let srcMissing = $state(github('acme-labs/typo'));
+	let srcSlow = $state(github('acme-labs/slow'));
+	let srcInvalid = $state<SourceConfig>({ type: 'github', repo: 'platform', include: ['commits'] });
+	let srcDocs = $state<SourceConfig>({ type: 'local_docs', path: 'data/inbox/acme_labs/docs' });
+	let srcJsonl = $state<SourceConfig>({ type: 'canonical_jsonl', path: '' });
+	const previewYaml = [
+		'slug: acme_labs',
+		'name: Acme Labs',
+		'data_permission: own',
+		'window:',
+		'  since: 2026-04-15',
+		'sources:',
+		'  - type: github',
+		'    repo: acme-labs/platform',
+		'    include: [commits, pull_requests, issues, reviews, codeowners, repo_docs]',
+		'  - type: local_docs',
+		'    path: data/inbox/acme_labs/docs',
+		'systems:',
+		'  rules:',
+		'    - { match: "services/auth/**", system: "Auth" }',
+		'  fallback: depth_2',
+		'  ignore: ["**/*.{lock,min.js}"]',
+		'people:',
+		'  bots: ["dependabot[bot]"]',
+		'  aliases: {}',
+		''
+	].join('\n');
+	const noop = () => {};
 	let globs = $state<string[]>(['apps/web/**', 'services/billing/**']);
 	let logins = $state<string[]>([]);
 	let aliases = $state<string[]>([
@@ -277,6 +336,9 @@
 			<div class="stack">
 				<Input label="Company name" placeholder="Acme Inc" hint="Shown in the top bar" bind:value={name} />
 				<Input label="Slug" value="acme inc" error="Use lowercase letters, digits and dashes only" />
+				<Input label="Graph name" prefix="brain_" value="acme_labs" hint="Fixed text before the value" />
+				<Input label="Repository" prefix="github.com/" placeholder="owner/name" error="Repo must look like 'owner/name'" />
+				<Input label="Folder" mono value="data/inbox/acme_labs/docs" />
 				<Input label="Search" hideLabel type="search" placeholder="Search people and systems">
 					{#snippet leading()}<Search />{/snippet}
 				</Input>
@@ -392,6 +454,52 @@
 		</Card>
 	</div>
 
+	<Card title="Source card">
+		<p class="note">
+			One card per source in the add-company form. GitHub: the repository, what to read, and what
+			GitHub said about it (found, rate limited), a note when no token exists, and an error when
+			GitHub cannot find the repository or when it is private while the data permission is not Own. Folder sources take one
+			path.
+		</p>
+		<div class="sources">
+			<SourceCard bind:source={srcFound} index={0} dataPermission="public" errors={[]} onremove={noop} checks={checksFound} />
+			<SourceCard bind:source={srcNoToken} index={1} dataPermission="public" errors={[]} onremove={noop} checks={checksNoToken} />
+			<SourceCard bind:source={srcPrivate} index={2} dataPermission="public" errors={[]} onremove={noop} checks={checksPrivate} />
+			<SourceCard bind:source={srcMissing} index={3} dataPermission="own" errors={[]} onremove={noop} checks={checksMissing} />
+			<SourceCard bind:source={srcSlow} index={4} dataPermission="own" errors={[]} onremove={noop} checks={checksMissing} />
+			<SourceCard
+				bind:source={srcInvalid}
+				index={5}
+				dataPermission="public"
+				errors={[{ loc: ['sources', 5, 'repo'], msg: "Value error, repo must look like 'owner/name'" }]}
+				onremove={noop}
+				checks={checksFound}
+			/>
+			<SourceCard bind:source={srcDocs} index={6} dataPermission="own" errors={[]} onremove={noop} checks={checksFound} />
+			<SourceCard
+				bind:source={srcJsonl}
+				index={7}
+				dataPermission="own"
+				errors={[{ loc: ['sources', 7, 'type'], msg: 'unknown source type' }]}
+				onremove={noop}
+				checks={checksFound}
+			/>
+		</div>
+	</Card>
+
+	<div class="two">
+		<Card title="Config preview">
+			<p class="note">Blocks the current step adds are marked with a bar, a tint and a line of words.</p>
+			<ConfigPreview yaml={previewYaml} highlight={['sources']} />
+		</Card>
+		<Card title="Config preview, other states">
+			<div class="stack">
+				<ConfigPreview yaml={previewYaml.split('systems:')[0]} highlight={['slug', 'name', 'data_permission', 'window']} stale />
+				<ConfigPreview yaml="" highlight={[]} />
+			</div>
+		</Card>
+	</div>
+
 	<Card title="Company rail">
 		<p class="note">
 			One tile per company. The current one is ink with a bar on its edge; building, failed,
@@ -497,6 +605,12 @@
 		margin: var(--space-5) 0 var(--space-3);
 		font-size: var(--text-sm);
 		font-variation-settings: 'wdth' var(--width-label);
+	}
+	.sources {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(min(22rem, 100%), 1fr));
+		gap: var(--space-4);
+		margin-top: var(--space-4);
 	}
 	.two {
 		display: grid;

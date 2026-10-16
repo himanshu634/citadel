@@ -31,8 +31,7 @@ accessible name says the same in words. The tile list scrolls; the add tile stay
 		unknown: { icon: CloudOff, tone: 'muted', words: 'graph unreachable' }
 	};
 
-	// The /new route arrives with onboarding; the cast goes when its route type exists.
-	const newCompany = resolve('/new' as '/');
+	const newCompany = resolve('/new');
 	const names = $derived(companies.map((c) => c.name));
 	const label = (c: Company) =>
 		`${c.name}, graph brain_${c.slug}${marks[c.status] ? `, ${marks[c.status]?.words}` : ''}`;

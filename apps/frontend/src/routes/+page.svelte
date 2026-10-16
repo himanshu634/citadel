@@ -11,8 +11,7 @@ are none yet. Why: every company page lives under `/c/<slug>/`, so `/` only deci
 	import { Button, EmptyState } from '$lib';
 
 	const companies = getCompanies();
-	// The /new route arrives with onboarding; the cast goes when its route type exists.
-	const newCompany = resolve('/new' as '/');
+	const newCompany = resolve('/new');
 
 	function lastUsed(): string | null {
 		try {
