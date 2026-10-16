@@ -1,0 +1,160 @@
+# Golden cases for brain_synthetic (`make synthetic` loads it). The data and the answers it is
+# built to give are described in examples/synthetic_company/generate.py.
+#
+# Schema: evals/cases.py. A uid is a literal string or a gold ref
+#   {tool: <name>, params: {...}, field: <row field>, top: <n>}
+# read from the graph when the run starts. Prefer gold refs for "the right answer" and literals
+# for "must never be cited" (a bot, a made-up node).
+
+# --- experts and ownership ------------------------------------------------------------------
+
+- id: auth-expert
+  tags: [experts]
+  why: alice wrote most Auth changes and her team owns it; owners and experts agree.
+  turns:
+    - question: Who knows the Auth code best?
+      expect:
+        cite_any: [{tool: experts_for_system, params: {system: Auth}, field: person_uid}]
+        tools_any: [experts_for_system, person_profile]
+        text_all: [alice]
+        max_steps: 6
+
+- id: billing-reviewer
+  tags: [experts]
+  why: bob is the top Billing expert (erin is close behind); either is a fair pick, a third person isn't.
+  turns:
+    - question: Who should review a change to the billing service?
+      expect:
+        cite_any: [{tool: experts_for_system, params: {system: Billing}, field: person_uid, top: 2}]
+        tools_any: [experts_for_system]
+        text_any: [bob, erin]
+        max_steps: 6
+
+- id: infra-expert-not-bot
+  tags: [experts, bots]
+  why: ci-bot has more Infra commits than dave, but bots don't count as experts.
+  turns:
+    - question: Who is the go-to person for Infra?
+      expect:
+        cite_any: [{tool: experts_for_system, params: {system: Infra}, field: person_uid}]
+        cite_none: [person:ci-bot]
+        text_all: [dave]
+        text_none: [ci-bot]
+        max_steps: 6
+
+- id: web-owners-vs-experts
+  tags: [ownership]
+  why: identity owns web/ in CODEOWNERS, but erin (payments) makes most Web app changes.
+  turns:
+    - question: Is the team that owns the Web app the one actually doing the work there?
+      expect:
+        cite_any: [person:erin, {tool: owners_vs_experts, field: system_uid}]
+        tools_any: [owners_vs_experts, experts_for_system]
+        text_all: [erin, identity]
+        max_steps: 8
+
+# --- impact and history ---------------------------------------------------------------------
+
+- id: billing-impact
+  tags: [impact]
+  why: Billing and Web app change together most often, so Web app is the first thing at risk.
+  turns:
+    - question: If we change the billing service, what other parts of the code are likely affected?
+      expect:
+        cite_any: [{tool: impact_of, params: {system: Billing}, field: system_uid}]
+        tools_any: [impact_of]
+        text_all: [web]
+        max_steps: 6
+
+- id: jwt-why-and-who
+  tags: [history, why]
+  why: PR 1 (alice) replaced sessions with JWTs because the session table loaded the DB (issue 11).
+  turns:
+    - question: Why did we switch sessions to JWT, and who did it?
+      expect:
+        cite_any: [synthetic:pr:1, synthetic:issue:11, "synthetic:doc:docs/auth-design.md"]
+        text_all: [alice]
+        text_any: [load, cpu, session table]
+        max_steps: 8
+
+- id: duplicate-invoices
+  tags: [history, why]
+  why: issue 14 is open; the runbook and bob's comment point at the batch job's retry (PR 4).
+  turns:
+    - question: Why are invoice emails sometimes sent twice?
+      expect:
+        cite_any: [synthetic:issue:14, synthetic:pr:4, "synthetic:doc:docs/billing-runbook.md"]
+        text_any: [retry, batch, idempot]
+        max_steps: 8
+
+- id: managed-postgres-decision
+  tags: [history, decisions]
+  why: ADR-001 and PR 8 (dave) moved to managed Postgres because self-hosted backups failed.
+  turns:
+    - question: Why did we move to managed Postgres?
+      expect:
+        cite_any: [synthetic:pr:8, "synthetic:doc:docs/adr/001-managed-postgres.md"]
+        text_any: [backup]
+        max_steps: 6
+
+- id: checkout-ownership-open
+  tags: [history, decisions]
+  why: a Slack thread proposes moving checkout to payments, but no decision was made.
+  turns:
+    - question: Has anyone proposed changing who owns the checkout page? Was it decided?
+      expect:
+        cite_any: ["synthetic:slack:thread:eng-2026-07-15"]
+        text_re: "\\b(no decision|not (yet )?(been )?decided|undecided|still open|open question|no final|not been made|hasn't been made|has not been made)\\b"
+        max_steps: 8
+
+# --- loose naming ---------------------------------------------------------------------------
+
+- id: login-code-loose-name
+  tags: [naming]
+  why: '"the login code" is not a System name; it should be mapped to Auth before asking for experts.'
+  turns:
+    - question: Who knows the login code?
+      expect:
+        cite_any: [{tool: experts_for_system, params: {system: Auth}, field: person_uid}, person:erin]
+        tools_any: [list_systems, experts_for_system, related_work_items]
+        max_steps: 8
+
+# --- abstention -----------------------------------------------------------------------------
+
+- id: no-such-system
+  tags: [abstain]
+  why: there is no mobile app in the graph; the answer must say so instead of guessing an owner.
+  turns:
+    - question: Who owns the iOS mobile app?
+      expect:
+        text_re: "\\b(no|not|isn't|doesn't|does not|couldn't|could not|can't|cannot|none)\\b"
+        cite_none: [person:alice, person:bob, person:carol, person:dave, person:erin]
+        max_steps: 6
+
+- id: no-such-person
+  tags: [abstain]
+  why: nobody called zoe is in the graph.
+  turns:
+    - question: What has zoe been working on lately?
+      expect:
+        text_re: "\\b(no|not|isn't|doesn't|does not|couldn't|could not|can't|cannot|none)\\b"
+        text_none: [zoe has been working, zoe worked on]
+        max_steps: 5
+
+# --- follow-ups in one thread ---------------------------------------------------------------
+
+- id: checkout-follow-up
+  tags: [thread]
+  why: the follow-up says "she"; the thread must carry erin over from the first turn.
+  turns:
+    - question: Who built the new checkout page?
+      expect:
+        cite_any: [synthetic:pr:5, person:erin]
+        text_all: [erin]
+        max_steps: 6
+    - question: What else has she worked on recently?
+      expect:
+        cite_any: [synthetic:pr:6, synthetic:pr:9, synthetic:issue:14, "synthetic:commit:e005", "synthetic:commit:e006", "synthetic:commit:e004"]
+        tools_any: [person_profile, related_work_items, recent_work_items, get_entity, work_history]
+        text_none: [alice wrote, bob wrote]
+        max_steps: 6

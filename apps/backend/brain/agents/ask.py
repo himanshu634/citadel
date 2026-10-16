@@ -73,6 +73,26 @@ def ask(
     raise AssertionError("the run ended without an answer")  # _run always ends with one
 
 
+def ask_traced(
+    slug: str,
+    question: str,
+    thread_id: str | None = None,
+    *,
+    client: anthropic.Anthropic | None = None,
+    toolset: Toolset | None = None,
+    checkpointer: BaseCheckpointSaver | None = None,
+) -> tuple[Answer, list[dict[str, Any]]]:
+    """`ask`, plus the run's `step_done` events (see `ask_events`), so evals can grade which
+    tools ran and how often an answer was rejected, with the token counts `ask_events` drops."""
+    steps: list[dict[str, Any]] = []
+    for event in _run(slug, question, thread_id, client, toolset, checkpointer, None):
+        if isinstance(event, Answer):
+            return event, steps
+        if event.get("kind") == "step_done":
+            steps.append(event)
+    raise AssertionError("the run ended without an answer")
+
+
 def ask_events(
     slug: str,
     question: str,

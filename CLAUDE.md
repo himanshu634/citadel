@@ -26,6 +26,7 @@ make tools                     # list the named query tools and their params
 make query TOOL=impact_of P="system=CI"   # run one (SLUG=..., JSON=1 for raw rows)
 make ask SLUG=synthetic Q="who knows Auth?"   # Claude answers from the graph (THREAD=<id> follows up)
 make chat SLUG=synthetic OFFLINE=1   # one scripted turn, no API key: router + tools + checkpointer
+make eval                      # agent evals on brain_synthetic (calls the API): CASE=id|tag REPEAT=3 MODEL=.. EFFORT=.. BASELINE=<file>
 make agents                    # list the agent roles, their jobs and read tools
 make sim SLUG=synthetic SCENARIO=sprint OFFLINE=1   # run the agents (sprint, race, regression)
 make reset SLUG=x CONFIRM=1    # delete brain_x, agent_x and its build history (frees the slug)
@@ -128,6 +129,17 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
   are `inferred`). A stop is honoured only between saved steps, so the thread stays valid.
 - Tests use a scripted fake client (`tests/test_agent.py`); nothing in `make test` calls the API.
   `agents/offline.py` is the same idea for `brain chat --offline`.
+
+### Evals (`apps/backend/evals`)
+
+`make eval` asks the real agent each question in `evals/cases/<slug>.yaml` against brain_<slug>
+and grades it with deterministic checks (`graders.py`): uids cited (`cite_any/all/none`), graph
+tools that ran, answer text (substrings or a regex) and a step budget. Expected uids are literals
+or gold refs (`{tool, params, field, top}`) read from the graph when the run starts, so cases
+follow the data. Each case runs `REPEAT` times and reports a pass rate; turns of one case share a
+thread. Results: `data/evals/<slug>/<time>-<model>-<effort>.jsonl`; `BASELINE=` diffs pass rates
+against an earlier file. It calls the API, so it is not part of `make test`;
+`tests/test_evals.py` checks the case files and the harness with the scripted client.
 
 ### Named Cypher queries
 
