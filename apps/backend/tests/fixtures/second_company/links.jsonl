@@ -1,0 +1,7 @@
+{"from_label": "Person", "from_uid": "person:mira", "rel": "MEMBER_OF", "to_label": "Team", "to_uid": "team:core_engine"}
+{"from_label": "Person", "from_uid": "person:pia", "rel": "MEMBER_OF", "to_label": "Team", "to_uid": "team:core_engine"}
+{"from_label": "WorkItem", "from_uid": "second:pr:3", "rel": "CLOSES", "to_label": "WorkItem", "to_uid": "second:issue:2"}
+{"from_label": "Change", "from_uid": "second:commit:b001", "rel": "PART_OF", "to_label": "WorkItem", "to_uid": "second:pr:1"}
+{"from_label": "Change", "from_uid": "second:commit:b002", "rel": "PART_OF", "to_label": "WorkItem", "to_uid": "second:pr:1"}
+{"from_label": "Change", "from_uid": "second:commit:b003", "rel": "PART_OF", "to_label": "WorkItem", "to_uid": "second:pr:3"}
+{"from_label": "Change", "from_uid": "second:commit:b004", "rel": "PART_OF", "to_label": "WorkItem", "to_uid": "second:pr:3"}

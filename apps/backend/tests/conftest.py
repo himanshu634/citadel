@@ -19,6 +19,7 @@ from brain.pipeline import IngestReport
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 SYNTHETIC = Path(__file__).resolve().parents[1] / "examples" / "synthetic_company"
+SECOND = Path(__file__).resolve().parent / "fixtures" / "second_company"  # no uid in common
 
 
 def falkordb_up() -> bool:
@@ -55,6 +56,27 @@ def synthetic_company(slug: str, folder: Path = SYNTHETIC) -> CompanyConfig:
     )
 
 
+def second_company(slug: str) -> CompanyConfig:
+    """A second small company (tests/fixtures/second_company): other people, teams, systems and
+    uids than the synthetic one, for isolation tests."""
+    return CompanyConfig.model_validate(
+        {
+            "slug": slug,
+            "name": slug,
+            "data_permission": "synthetic",
+            "window": {"since": "2026-01-01"},
+            "sources": [{"type": "canonical_jsonl", "path": str(SECOND)}],
+            "systems": {
+                "rules": [
+                    {"match": "engine/**", "system": "Engine"},
+                    {"match": "gateway/**", "system": "Gateway"},
+                ],
+                "fallback": "depth_1",
+            },
+        }
+    )
+
+
 def load_company(cfg: CompanyConfig) -> None:
     """schema + canonical_jsonl -> normalize -> loader, without the CLI or companies/ files."""
     schema.apply_schema(cfg.slug)
@@ -72,6 +94,18 @@ def synthetic_graph():
     slug = "test_synthetic"
     db.delete_graph(slug)
     load_company(synthetic_company(slug))
+    yield slug
+    db.delete_graph(slug)
+
+
+@pytest.fixture(scope="session")
+def second_graph():
+    """brain_test_second loaded once per test run; deleted afterwards."""
+    if not falkordb_up():
+        pytest.skip("FalkorDB not reachable (make up)")
+    slug = "test_second"
+    db.delete_graph(slug)
+    load_company(second_company(slug))
     yield slug
     db.delete_graph(slug)
 
