@@ -17,7 +17,7 @@ Everything goes through the Makefile (`make help`). Company-scoped targets take 
 
 ```bash
 make setup                     # uv sync + create .env from .env.example
-make up / make down            # FalkorDB in Docker (:6379, Browser UI on :3000)
+make up / make down            # FalkorDB in Docker; ports/password from .env (:6379, Browser UI :3000)
 make schema SLUG=synthetic     # create indexes on brain_synthetic (idempotent)
 make synthetic                 # regenerate synthetic JSONL, schema + full ingest into brain_synthetic
 make fetch | ingest | sync     # SOURCE=<type> limits to one source; FULL=1 ignores sync cursors
