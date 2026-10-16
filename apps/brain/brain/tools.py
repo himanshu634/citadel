@@ -336,6 +336,27 @@ class NoParams(_Model):
     pass
 
 
+class NodeParams(_Model):
+    uid: str = Field(description="uid of any node, e.g. 'system:Auth' or 'person:erin'.")
+
+
+class EvidenceRef(_Model):
+    uid: str
+    label: str
+    title: str | None = None
+    url: str | None = None
+
+
+class KeeperNote(_Model):
+    uid: str
+    kind: str
+    statement: str
+    value: str | None
+    valid_from: str | None
+    approved_by: str | None
+    evidence: list[EvidenceRef]
+
+
 class Stat(_Model):
     kind: str
     type: str
@@ -490,6 +511,13 @@ TOOLS: dict[str, Tool] = {
             PersonActivity,
         ),
         Tool("graph_stats", "Node and relationship counts in the company graph.", NoParams, Stat),
+        Tool(
+            "keeper_notes",
+            "Keeper notes about a node: accepted claims the sources don't state, with their "
+            "evidence.",
+            NodeParams,
+            KeeperNote,
+        ),
     ]
 }
 
@@ -584,3 +612,7 @@ def people_activity(slug: str, limit: int = 100) -> list[PersonActivity]:
 
 def graph_stats(slug: str) -> list[Stat]:
     return call(slug, "graph_stats")
+
+
+def keeper_notes(slug: str, uid: str) -> list[KeeperNote]:
+    return call(slug, "keeper_notes", uid=uid)

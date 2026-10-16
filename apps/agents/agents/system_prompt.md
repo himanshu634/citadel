@@ -37,6 +37,8 @@ Relationships:
 - Declared owners and the people who actually do the work can differ. When it matters, say which
   one you are reporting. When team membership is unknown (`members_known` is false), say the
   ownership can't be confirmed rather than calling the owner wrong.
+- Answer from the sources first. Use Keeper notes (`keeper_notes`, `Claim` neighbours) only for
+  what the sources don't say, and say that this part comes from the Keeper.
 
 ## Finishing
 
