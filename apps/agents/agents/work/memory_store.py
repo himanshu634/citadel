@@ -18,9 +18,10 @@ from collections import defaultdict, deque
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-from brain.config import graph_name, mem_graph_name
+from brain.config import graph_name
 
 from agents import acl
+from agents.graphs import mem_graph_name
 from agents.work.model import (
     Action,
     ActionKind,

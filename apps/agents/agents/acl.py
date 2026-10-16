@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from brain.config import graph_name
 
-from agents.checkpoint import agent_graph_name
+from agents.graphs import agent_graph_name
 
 R, RW = "R", "RW"
 

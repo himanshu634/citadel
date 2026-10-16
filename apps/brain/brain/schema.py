@@ -59,6 +59,6 @@ def _check_vector_dim(slug: str, dim: int) -> list[str]:
         if actual is not None and actual != dim:
             return [
                 f"Chunk.embedding vector index has dimension {actual}, but EMBEDDING_DIM={dim}. "
-                "Drop the index (or `brain reset`) and re-run `brain schema`."
+                "Drop the index (or `make reset`) and re-run `brain schema`."
             ]
     return []

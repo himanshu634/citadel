@@ -9,9 +9,10 @@ argument checks (slug, company config, FalkorDB reachable).
 from __future__ import annotations
 
 import typer
-from brain.cli import _company, _connected, _fail, _graph_name, _short
+from brain.cli_util import company, connected, fail, graph_name, short
 
 from agents import checkpoint
+from agents.graphs import agent_graph_name
 
 app = typer.Typer(help="Company Brain agents: ask the graph, run the agent roles and simulations.")
 
@@ -23,8 +24,8 @@ def ask(
     thread: str = typer.Option(None, "--thread", help="Continue an earlier conversation."),
 ) -> None:
     """Ask brain_<slug> a question. Claude answers from the graph, with numbered sources."""
-    _company(slug)
-    _connected()
+    company(slug)
+    connected()
     answer = _run_ask(slug, question, thread)
     _print_answer(answer)
     typer.secho(f"follow up with --thread {answer.thread_id}", dim=True)
@@ -39,7 +40,7 @@ def traces_cmd(
     Thumbs-down turns become draft eval cases with `make eval-drafts SLUG=<slug>`."""
     from agents.traces import TraceStore, summarize, window
 
-    _graph_name(slug)
+    graph_name(slug)
     since, until = window(days)
     s = summarize(TraceStore(slug).read(since=since), since, until)
     typer.echo(f"{s.turns} turns in the last {days} days ({s.answered} answered)")
@@ -68,8 +69,8 @@ def chat(
     ),
 ) -> None:
     """Talk to brain_<slug> in one thread. An empty line or Ctrl-D ends the chat."""
-    _company(slug)
-    _connected()
+    company(slug)
+    connected()
     if offline:
         from agents.offline import OfflineClient
 
@@ -77,7 +78,7 @@ def chat(
         _print_answer(answer)
         typer.secho(
             f"thread {answer.thread_id} holds {answer.thread_messages} messages in "
-            f"{checkpoint.agent_graph_name(slug)}; add a turn with --thread {answer.thread_id}",
+            f"{agent_graph_name(slug)}; add a turn with --thread {answer.thread_id}",
             dim=True,
         )
         return
@@ -129,7 +130,7 @@ def _run_ask(slug: str, question: str, thread: str | None, client=None):
             raise
         if "No Anthropic credentials" in problem:
             problem += " Or try --offline."
-        _fail(problem)
+        fail(problem)
     keep(steps=steps, answer=answer)
     return answer
 
@@ -197,17 +198,17 @@ def sim_run(
     (tasks, actions, decisions) is kept in memory until the FalkorDB store lands."""
     from agents.sim import scenarios
 
-    _company(slug)
-    _connected()
+    company(slug)
+    connected()
     build = scenarios.SCENARIOS.get(scenario)
     if build is None:
-        _fail(f"unknown scenario {scenario!r}; known: {', '.join(scenarios.SCENARIOS)}")
+        fail(f"unknown scenario {scenario!r}; known: {', '.join(scenarios.SCENARIOS)}")
     sim = build(slug, clients=scenarios.offline if offline else scenarios.online)
 
     def show(t) -> None:
         for a in t.actions:
             line = f"t{t.tick:<3} {a['agent']:<18} {a['kind']:<22} {a['task'] or '':<14}"
-            typer.echo(f"{line} {_short('summary', a['summary'], 70)}")
+            typer.echo(f"{line} {short('summary', a['summary'], 70)}")
 
     sim.run(ticks, on_tick=show)
     s = sim.store

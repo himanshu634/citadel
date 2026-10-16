@@ -11,11 +11,7 @@ from brain import db
 from brain.config import graph_name
 from langchain_falkordb.checkpoint import FalkorDBSaver
 
-
-def agent_graph_name(slug: str) -> str:
-    """Agent conversation checkpoints for one company: agent_<slug>, apart from its brain graph."""
-    graph_name(slug)  # same slug rules
-    return f"agent_{slug}"
+from agents.graphs import agent_graph_name
 
 
 def checkpointer(slug: str) -> FalkorDBSaver:

@@ -11,7 +11,7 @@ turns into draft cases for evals/cases/<slug>.yaml.
 Traces live in data/traces/<slug>.jsonl (beside data/jobs/ and data/evals/), append-only: a
 `turn` line per question and a `feedback` line per thumbs click; reading folds the latest
 feedback onto its turn. Only the CLI and the Ask API record: `ask`, `ask_traced` and the evals
-never do, so test and eval runs stay out of the live numbers. `brain reset` deletes the file.
+never do, so test and eval runs stay out of the live numbers. `backend reset` deletes the file.
 """
 
 from __future__ import annotations

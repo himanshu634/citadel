@@ -167,22 +167,6 @@ def graph_name(slug: str) -> str:
     return f"brain_{slug}"
 
 
-def mem_graph_name(slug: str, role: str) -> str:
-    """One agent role's own memory (lessons, findings) for one company: mem_<slug>_<role>."""
-    graph_name(slug)
-    if not re.fullmatch(r"[a-z]+", role):
-        raise ValueError(f"invalid role: {role!r}")
-    return f"mem_{slug}_{role}"
-
-
-def sim_graph_name(slug: str, run: str) -> str:
-    """A what-if fork of brain_<slug> for one simulation run: sim_<slug>_<run>."""
-    graph_name(slug)
-    if not re.fullmatch(r"[a-z0-9][a-z0-9_]*", run):
-        raise ValueError(f"invalid run id: {run!r}")
-    return f"sim_{slug}_{run}"
-
-
 def companies_dir() -> Path:
     return REPO_ROOT / "companies"
 
