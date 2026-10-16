@@ -224,8 +224,8 @@ HTTP for the frontend, `backend.api:app` (FastAPI, `make api`): its only way in.
 - **Dependency rule:** backend → agents → brain, never the reverse; enforced by
   `apps/brain/tests/test_package_boundaries.py`. Agents reach the graph only through
   `brain.tools`; only `brain/db.py` opens FalkorDB connections.
-- `brain.testing` and `agents.testing` are pytest helpers (graph fixtures, fake clients) shipped
-  inside the packages; production code never imports them.
+- `brain.testing`, `agents.testing` and `backend.testing` are pytest helpers (graph fixtures,
+  fake clients) shipped inside the packages; production code never imports them.
 
 ## Frontend architecture (`apps/frontend`)
 

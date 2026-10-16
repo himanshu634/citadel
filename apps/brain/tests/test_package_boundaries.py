@@ -4,16 +4,23 @@ Why: the split only means something while brain stays free of the agents and the
 import greps miss imports inside functions and module paths written as strings (mock patch
 targets, uvicorn targets), so this walks every syntax tree. It also checks that each package's
 pyproject lists the workspace packages and the third-party libraries it imports directly.
+The import and string checks cover each package's tests too, and production code never
+imports the pytest helpers (`<package>.testing`).
 """
 
 from __future__ import annotations
 
 import ast
+import re
 import sys
 import tomllib
+from pathlib import Path
 
 import pytest
-from brain.config import REPO_ROOT
+
+# Not brain.config.REPO_ROOT: the test must not depend on the code it guards.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+THIS_FILE = Path(__file__).resolve()
 
 PACKAGES = {
     "brain": REPO_ROOT / "apps" / "brain",
@@ -22,7 +29,14 @@ PACKAGES = {
 }
 WORKSPACE = set(PACKAGES)
 FORBIDDEN_IMPORTS = {"brain": {"agents", "backend"}, "agents": {"backend"}, "backend": set()}
-OLD_PATHS = ("brain.agents", "brain.api", "brain.work", "brain.sim")
+# Module paths from before the split, and strings that point up the stack (`backend:app`).
+OLD_PATHS = re.compile(r"^brain\.(agents|api|work|sim|acl|llm|registry|jobs|onboard|config_diff)\b")
+UP_STRINGS = {
+    "brain": re.compile(r"^(agents|backend)[.:]"),
+    "agents": re.compile(r"^backend[.:]"),
+    "backend": None,
+}
+TESTING_MODULES = {f"{name}.testing" for name in PACKAGES}
 
 # Import name -> distribution name, where they differ.
 DISTRIBUTION = {
@@ -36,9 +50,39 @@ DISTRIBUTION = {
 RUN_ONLY = {"backend": {"uvicorn"}}
 
 
+def parse_all(root: Path):
+    paths = sorted(p for p in root.rglob("*.py") if p.resolve() != THIS_FILE)
+    assert paths, f"no .py files under {root}: the scan would pass vacuously"
+    return [(path, ast.parse(path.read_text(), filename=str(path))) for path in paths]
+
+
 def sources(package: str):
-    for path in sorted((PACKAGES[package] / package).rglob("*.py")):
-        yield path, ast.parse(path.read_text(), filename=str(path))
+    """The package's production modules."""
+    return parse_all(PACKAGES[package] / package)
+
+
+def scan_tests(package: str):
+    """The package's tests."""
+    return parse_all(PACKAGES[package] / "tests")
+
+
+def everything(package: str):
+    return sources(package) + scan_tests(package)
+
+
+def imported_names(tree: ast.AST) -> set[str]:
+    """Dotted names of every import in the tree, inside functions too; relative imports are
+    written with a leading dot."""
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found |= {alias.name for alias in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            base = "." * node.level + (node.module or "")
+            found.add(base)
+            joiner = "" if base.endswith(".") or not base else "."
+            found |= {f"{base}{joiner}{alias.name}" for alias in node.names}
+    return found
 
 
 def imported_modules(tree: ast.AST) -> set[str]:
@@ -67,22 +111,36 @@ def declared(package: str) -> set[str]:
 def test_no_import_points_up_the_stack(package):
     bad = [
         f"{path.relative_to(REPO_ROOT)} imports {name}"
-        for path, tree in sources(package)
+        for path, tree in everything(package)
         for name in sorted(imported_modules(tree) & FORBIDDEN_IMPORTS[package])
     ]
     assert not bad, bad
 
 
 @pytest.mark.parametrize("package", PACKAGES)
+def test_production_code_never_imports_the_test_helpers(package):
+    bad = [
+        f"{path.relative_to(REPO_ROOT)} imports {name}"
+        for path, tree in sources(package)
+        if path.name != "testing.py"
+        for name in sorted(imported_names(tree))
+        if name in TESTING_MODULES or name.lstrip(".") == "testing"
+    ]
+    assert not bad, bad
+
+
+@pytest.mark.parametrize("package", PACKAGES)
 def test_no_module_path_names_the_old_layout(package):
-    """Mock patch targets and uvicorn targets are strings; none may use a pre-split path."""
+    """Mock patch targets and uvicorn targets are strings; none may use a pre-split path or
+    name a package above this one."""
+    up = UP_STRINGS[package]
     bad = [
         f"{path.relative_to(REPO_ROOT)}:{node.lineno} {node.value!r}"
-        for path, tree in sources(package)
+        for path, tree in everything(package)
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant)
         and isinstance(node.value, str)
-        and node.value.startswith(OLD_PATHS)
+        and (OLD_PATHS.match(node.value) or (up and up.match(node.value)))
     ]
     assert not bad, bad
 
