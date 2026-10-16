@@ -1,4 +1,4 @@
-"""The eval harness (apps/backend/evals) with a scripted client: no API, no database."""
+"""The eval harness (apps/brain/evals) with a scripted client: no API, no database."""
 
 from __future__ import annotations
 

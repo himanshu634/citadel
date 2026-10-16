@@ -61,7 +61,7 @@ wheels = [
 [[package]]
 name = "brain"
 version = "0.1.0"
-source = { editable = "apps/backend" }
+source = { editable = "apps/brain" }
 dependencies = [
     { name = "anthropic" },
     { name = "falkordb" },
@@ -160,7 +160,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "brain", editable = "apps/backend" }]
+requires-dist = [{ name = "brain", editable = "apps/brain" }]
 
 [package.metadata.requires-dev]
 dev = [

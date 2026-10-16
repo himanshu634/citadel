@@ -1,6 +1,6 @@
 """Online traces: one record per question asked of a company's brain, for watching live use.
 
-Why: a real company graph has no gold answers, so the offline evals (apps/backend/evals) cannot
+Why: a real company graph has no gold answers, so the offline evals (apps/brain/evals) cannot
 grade live use. Instead each turn asked from the CLI or the Ask page is kept as one `Trace` with
 what needs no reference answer: the tools called, failed tool calls, rejected submit_answer
 calls, nudges, how the turn stopped, tokens, latency and how many sources it cited. `summarize`

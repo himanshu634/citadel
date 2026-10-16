@@ -1,4 +1,4 @@
-"""Load named Cypher queries from apps/backend/queries/.
+"""Load named Cypher queries from apps/brain/queries/.
 
 Why: every query the product depends on lives in a .cypher file with a header comment
 (purpose, params, returns). Python never holds Cypher strings; it asks for a query by name,

@@ -6,9 +6,9 @@ window:
   since: 2026-01-01
 sources:
   - type: canonical_jsonl
-    path: apps/backend/examples/synthetic_company
+    path: apps/brain/examples/synthetic_company
   - type: canonical_jsonl
-    path: apps/backend/examples/synthetic_company/tickets
+    path: apps/brain/examples/synthetic_company/tickets
 systems:
   rules:
     - { match: "services/auth/**",    system: "Auth" }

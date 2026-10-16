@@ -17,7 +17,7 @@ answer:
 
 The tickets also seed a real Linear workspace (`tickets/linear_seed.json` names its teams).
 
-Run: `uv run python apps/backend/examples/synthetic_company/generate.py`
+Run: `uv run python apps/brain/examples/synthetic_company/generate.py`
 The JSONL files next to this script are the output; edit the data here, not the JSONL.
 """
 

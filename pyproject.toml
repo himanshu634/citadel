@@ -9,10 +9,14 @@ dependencies = ["brain"]
 package = false
 
 [tool.uv.workspace]
-members = ["apps/backend"]
+members = ["apps/brain"]
 
 [tool.uv.sources]
 brain = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["apps/brain/tests"]
+pythonpath = ["apps/brain"]  # the evals package (apps/brain/evals) sits next to brain
 
 [tool.ruff]
 line-length = 100

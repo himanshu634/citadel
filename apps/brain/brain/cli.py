@@ -125,7 +125,7 @@ def reset(slug: str, yes: bool = typer.Option(False, "--yes", help="Confirm dele
     typer.echo(f"Deleted {', '.join(deleted)}." if deleted else f"Nothing to delete for {slug}.")
 
 
-SEED_TICKETS = "apps/backend/examples/synthetic_company/tickets"
+SEED_TICKETS = "apps/brain/examples/synthetic_company/tickets"
 
 
 @app.command("linear-seed")

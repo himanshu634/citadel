@@ -1,7 +1,7 @@
 [project]
 name = "brain"
 version = "0.1.0"
-description = "Company Brain backend: ingestion, FalkorDB graph, named queries and agents."
+description = "Company Brain engine: adapters, ingestion, the FalkorDB graph and its named query tools."
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "anthropic>=1.15.0",
@@ -28,7 +28,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["brain"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["."]  # the evals package (apps/backend/evals) sits next to brain

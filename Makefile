@@ -66,7 +66,7 @@ chat: ## Chat with brain_$(SLUG) (OFFLINE=1: one scripted turn, no API key; THRE
 	$(BRAIN) chat $(SLUG) $(if $(filter 1 yes,$(OFFLINE)),--offline) $(if $(THREAD),--thread $(THREAD))
 
 synthetic: ## Regenerate the synthetic company JSONL and load it into brain_synthetic
-	uv run python apps/backend/examples/synthetic_company/generate.py
+	uv run python apps/brain/examples/synthetic_company/generate.py
 	$(BRAIN) schema synthetic
 	$(BRAIN) ingest synthetic --full
 
@@ -86,7 +86,7 @@ sim: ## Run agents on $(SLUG): make sim SLUG=synthetic SCENARIO=race OFFLINE=1 (
 EVAL_SLUG = $(if $(filter file,$(origin SLUG)),synthetic,$(SLUG))
 
 eval: ## Agent evals (calls the API; SLUG defaults to synthetic): CASE=id|tag REPEAT=3 MODEL=.. EFFORT=.. BASELINE=file
-	cd apps/backend && uv run python -m evals --slug $(EVAL_SLUG) $(foreach c,$(CASE),--case $(c)) \
+	cd apps/brain && uv run python -m evals --slug $(EVAL_SLUG) $(foreach c,$(CASE),--case $(c)) \
 		$(if $(REPEAT),--repeat $(REPEAT)) $(if $(MODEL),--model $(MODEL)) \
 		$(if $(EFFORT),--effort $(EFFORT)) $(if $(BASELINE),--baseline $(abspath $(BASELINE)))
 
@@ -94,7 +94,7 @@ traces: ## How the brain did on live questions (CLI + Ask page) for $(SLUG): rat
 	$(BRAIN) traces $(SLUG) $(if $(DAYS),--days $(DAYS))
 
 eval-drafts: ## Thumbs-down answers of $(SLUG) as draft eval cases (printed; WRITE=1 appends to the case file) DAYS=..
-	cd apps/backend && uv run python -m evals.drafts --slug $(SLUG) $(if $(DAYS),--days $(DAYS)) \
+	cd apps/brain && uv run python -m evals.drafts --slug $(SLUG) $(if $(DAYS),--days $(DAYS)) \
 		$(if $(filter 1 yes,$(WRITE)),--write)
 
 reset: ## Delete graphs brain_/agent_$(SLUG), its build history and Ask traces; needs CONFIRM=1
@@ -136,7 +136,7 @@ fe-test: ## Frontend unit tests (vitest)
 # --- Quality ----------------------------------------------------------------------------------
 
 test: ## Run pytest (needs FalkorDB up for graph tests)
-	uv run pytest apps/backend/tests $(ARGS)
+	uv run pytest apps/brain/tests $(ARGS)
 
 lint: ## Ruff lint + format check
 	uv run ruff check .

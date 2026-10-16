@@ -7,7 +7,7 @@ Why: two kinds of configuration exist and they must not mix.
   to map file paths to systems. Adding a company means adding one of these files.
 
 Relative paths inside a company YAML resolve from the repo root (the folder that holds
-`companies/`), so the CLI behaves the same from the root or from apps/backend.
+`companies/`), so the CLI behaves the same from the root or from apps/brain.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ def find_repo_root(start: Path | None = None) -> Path:
     for candidate in (here, *here.parents):
         if (candidate / "companies").is_dir():
             return candidate
-    # Fall back to the monorepo layout: apps/backend/brain/config.py -> repo root is 3 levels up.
+    # Fall back to the monorepo layout: apps/brain/brain/config.py -> repo root is 3 levels up.
     return Path(__file__).resolve().parents[3]
 
 
