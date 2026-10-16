@@ -36,8 +36,8 @@ logs: ## Follow FalkorDB logs
 ps: ## Show container status
 	docker compose ps
 
-browser: ## Open the FalkorDB Browser UI
-	open http://localhost:3000
+browser: ## Open the FalkorDB Browser UI (FALKORDB_BROWSER_PORT in .env, default 3000)
+	open http://localhost:$$(sed -n 's/^FALKORDB_BROWSER_PORT=\(.\{1,\}\)/\1/p' .env 2>/dev/null | grep . || echo 3000)
 
 # --- Company graph ----------------------------------------------------------------------------
 

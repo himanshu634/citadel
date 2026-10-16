@@ -1,16 +1,22 @@
-# Local FalkorDB for Company Brain.
-# 6379 = Redis protocol (the Python client talks to this), 3000 = FalkorDB Browser UI.
+# Local FalkorDB for Company Brain. Every setting comes from .env (see .env.example), the same
+# file the backend reads, so the app and the container always agree on port and password.
+# FALKORDB_PORT = Redis protocol (the Python client talks to this),
+# FALKORDB_BROWSER_PORT = FalkorDB Browser UI. FALKORDB_PASSWORD, when set, turns on
+# `requirepass`; leave it empty for an open local instance.
 # The named volume keeps graphs across `docker compose down`; `down -v` wipes them.
 services:
   falkordb:
-    image: falkordb/falkordb:latest
+    image: falkordb/falkordb:${FALKORDB_IMAGE_TAG:-latest}
     ports:
       - "${FALKORDB_PORT:-6379}:6379"
-      - "3000:3000"
+      - "${FALKORDB_BROWSER_PORT:-3000}:3000"
+    environment:
+      REDIS_ARGS: ${FALKORDB_PASSWORD:+--requirepass ${FALKORDB_PASSWORD}}
+      FALKORDB_PASSWORD: ${FALKORDB_PASSWORD:-}
     volumes:
       - falkordb_data:/var/lib/falkordb/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning $${FALKORDB_PASSWORD:+-a \"$$FALKORDB_PASSWORD\"} ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 10
