@@ -63,6 +63,7 @@ READS: tuple[str, ...] = (
     "ledger/get_claim",
     "ledger/claims",
     "ledger/claims_for_subject",
+    "ledger/claims_for_gap",
     "ledger/queue_follow_up",
     "ledger/followups",
 )
@@ -99,7 +100,7 @@ OPTIONAL: dict[str, dict[str, Any]] = {
         "value": None,
         "cites": [],
     },
-    "ledger/set_claim_status": {"by": None, "why": None, "valid_to": None},
+    "ledger/set_claim_status": {"by": None, "why": None, "valid_to": None, "conflict": None},
     "ledger/open_followup": {"body": "", "by": "pm"},
     "ledger/followups": {"status": None},
 }
@@ -119,6 +120,7 @@ RECORDS: dict[str, type[BaseModel]] = {
     "ledger/get_claim": Claim,
     "ledger/claims": Claim,
     "ledger/claims_for_subject": Claim,
+    "ledger/claims_for_gap": Claim,
     "ledger/queue_follow_up": Claim,
     "ledger/followups": FollowUp,
 }
@@ -487,6 +489,12 @@ class MemoryKeeperStore(_LedgerStore):
         )
         return [c.model_dump() for c in rows]
 
+    def _r_claims_for_gap(self, p: Mapping[str, Any]) -> list[Row]:
+        rows = self._newest(
+            [c for c in self.claims.values() if c.gap == p["gap"] and c.status in p["statuses"]]
+        )
+        return [c.model_dump() for c in rows]
+
     def _w_set_claim_status(self, p: Mapping[str, Any]) -> list[Row]:
         c = self.claims.get(p["uid"])
         if c is None or c.status not in p["from"]:
@@ -502,6 +510,8 @@ class MemoryKeeperStore(_LedgerStore):
             c.why = p["why"]
         if p["valid_to"] is not None:
             c.valid_to = p["valid_to"]
+        if p["conflict"] is not None:
+            c.conflict = p["conflict"]
         return [{"uid": c.uid, "status": c.status}]
 
     # --- follow-ups ---------------------------------------------------------------------------

@@ -3,9 +3,10 @@
 //          - accepted: valid_from is set (if not yet), approved_by = $by;
 //          - rejected: approved_by = $by (who decided);
 //          - $why, when given, replaces why (why the claim has its status now);
-//          - $valid_to, when given, is set (superseded).
+//          - $valid_to, when given, is set (superseded);
+//          - $conflict, when given, is set (conflicts_with_source: what the sources say).
 // params:  $uid, $from: [status], $to, $by (or null), $why (or null), $now (ISO),
-//          $valid_to (or null)
+//          $valid_to (or null), $conflict (or null)
 // returns: uid, status. No rows: the claim's status was not in $from (or there is no claim).
 // example: store.write("ledger/set_claim_status", "citadel_keeper", {"uid": "claim:1a2b3c4d5e6f",
 //          "from": ["pending_approval"], "to": "accepted", "by": "Dana", "why": "Checked.",
@@ -19,5 +20,6 @@ SET c.status = $to,
     c.approved_by = CASE WHEN $to IN ['accepted', 'rejected'] AND $by IS NOT NULL THEN $by
                          ELSE c.approved_by END,
     c.why = coalesce($why, c.why),
-    c.valid_to = coalesce($valid_to, c.valid_to)
+    c.valid_to = coalesce($valid_to, c.valid_to),
+    c.conflict = coalesce($conflict, c.conflict)
 RETURN c.uid AS uid, c.status AS status

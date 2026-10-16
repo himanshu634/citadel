@@ -9,7 +9,7 @@ from agents.keeper.store import MemoryKeeperStore
 from agents.policies import POLICIES, offline_client
 from agents.roles import ROLES, Ctx
 from agents.runner import missing_tools, run_job
-from agents.testing import ITEMS, fake_brain
+from agents.testing import ITEMS, FakeBrainFacts, fake_brain
 from agents.work.submits import SUBMITS, SubmitConsult, SubmitFollowUp, SubmitKeeperDecision
 from pydantic import ValidationError
 
@@ -54,6 +54,16 @@ def run(store, role: str, job: str, graph_run=fake_brain):
     return run_job(
         store, r, j, subject, ctx(role), client=offline_client(role, job), graph_run=graph_run
     )
+
+
+@pytest.fixture
+def facts(monkeypatch):
+    """The decide job's brain facts, faked (the job's apply has no brain argument)."""
+    from agents.keeper import decide
+
+    fake = FakeBrainFacts()
+    monkeypatch.setattr(decide, "DEFAULT_BRAIN", fake)
+    return fake
 
 
 def consults(store, gap):
@@ -197,8 +207,8 @@ def test_keeper_decide_needs_person():
     assert actions[0] == "episode"  # the runner's Episode, linked to the gap
 
 
-def test_keeper_decide_claim_reaches_apply():
-    """Grounded consults make the policy claim; the claim's writes are Task 8's."""
+def test_keeper_decide_claim_is_accepted(facts):
+    """Grounded consults make the policy claim; the deterministic check accepts it."""
     store = MemoryKeeperStore(SLUG)
     gap = seed_gap(store, "Why did the auth refresh token race happen?")
     run(store, "pm", "consult")
@@ -209,9 +219,11 @@ def test_keeper_decide_claim_reaches_apply():
     assert sub["subject_uid"] == "system:Auth" and sub["about"] == ["system:Auth"]
     assert set(sub["cites"]) <= FAKE_UIDS
     assert set(result.tools_called) == {"related_work_items", "get_entity"}
-    assert result.stop.startswith("error: NotImplementedError")
+    assert result.stop is None, result
     [g] = store.read("ledger/get_gap", {"uid": gap})
-    assert g["status"] == "in_review"
+    assert g["status"] == "resolved"
+    [c] = store.read("ledger/claims_for_gap", {"gap": gap, "statuses": ["accepted"]})
+    assert c["evidence"] == sub["cites"] and [p["uid"] for p in facts.projected] == [c["uid"]]
 
 
 def test_decide_dismiss_and_refused_write():
@@ -298,7 +310,7 @@ def test_consult_without_systems_falls_back_to_the_row():
     assert c["subject"] in FAKE_UIDS and c["subject"] == c["cites"][0]
 
 
-def test_keeper_decide_claims_from_the_search_alone():
+def test_keeper_decide_claims_from_the_search_alone(facts):
     """A brain that only answers the search (get_entity finds nothing) still grounds the claim."""
 
     def search_only(slug, name, **params):
@@ -310,4 +322,5 @@ def test_keeper_decide_claims_from_the_search_alone():
     run(store, "qa", "consult", graph_run=search_only)
     result = run(store, "keeper", "decide", graph_run=search_only)
     assert result.submit["outcome"] == "claim" and set(result.submit["cites"]) <= FAKE_UIDS
-    assert result.stop.startswith("error: NotImplementedError")
+    assert result.stop is None, result
+    assert len(facts.projected) == 1

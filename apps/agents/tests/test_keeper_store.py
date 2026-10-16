@@ -338,6 +338,35 @@ def test_claim_status_guard(store):
     assert (got["valid_to"], got["approved_by"], got["why"]) == (T3, "Dana", "Checked with Alice.")
 
 
+def test_claims_for_gap(store):
+    """The decide queue skips a gap whose claim waits for a lead."""
+    pending = write_claim(store, status="pending_approval", now=T1)
+    rejected = write_claim(store, "expert", "rejected", now=T2)
+    other = write_claim(store, status="pending_approval", now=T1)
+    store.write("ledger/set_claim_status", KEEPER, {
+        "uid": other.uid, "from": ["pending_approval"], "to": "rejected", "now": T3})  # fmt: skip
+    one = {"gap": "gap:1", "statuses": ["pending_approval"]}
+    assert [r["uid"] for r in store.read("ledger/claims_for_gap", one)] == [pending.uid]
+    both = {**one, "statuses": ["pending_approval", "rejected"]}
+    got = [r["uid"] for r in store.read("ledger/claims_for_gap", both)]
+    assert got == [other.uid, rejected.uid, pending.uid]  # most recently updated first
+    assert store.read("ledger/claims_for_gap", {**one, "gap": "gap:2"}) == []
+    assert store.read("ledger/claims_for_gap", both)[0]["gap"] == "gap:1"
+
+
+def test_claim_status_records_the_conflict(store):
+    """approve re-checks the sources: the move to conflicts_with_source carries what they say."""
+    c = write_claim(store, status="pending_approval")
+    move = {"uid": c.uid, "from": ["pending_approval"], "to": "conflicts_with_source", "now": T2}
+    out = store.write("ledger/set_claim_status", KEEPER, {**move, "conflict": "owners: team:x"})
+    assert out == [{"uid": c.uid, "status": "conflicts_with_source"}]
+    [got] = store.read("ledger/get_claim", {"uid": c.uid})
+    assert (got["status"], got["conflict"]) == ("conflicts_with_source", "owners: team:x")
+    back = {**move, "from": ["conflicts_with_source"], "to": "superseded", "now": T3}
+    store.write("ledger/set_claim_status", KEEPER, back)  # no conflict given: kept
+    assert store.read("ledger/get_claim", {"uid": c.uid})[0]["conflict"] == "owners: team:x"
+
+
 def test_queue_follow_up(store):
     owner = write_claim(store, "owner", "accepted", now=T1)
     conflict = write_claim(store, "fact", "conflicts_with_source", now=T2)

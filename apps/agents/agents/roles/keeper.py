@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agents.keeper import decide
 from agents.keeper.model import Gap, log_uid
 from agents.roles.base import Ctx, Job, Role, Subject, write
 from agents.work.store import Row, WorkStore
@@ -86,12 +87,17 @@ def consult_context(store: WorkStore, ctx: Ctx, s: Subject) -> dict[str, Any]:
 
 
 def queue_decide(store: WorkStore, ctx: Ctx) -> list[Subject]:
-    """Gaps in review whose consults (this attempt's) are all answered; at least one."""
+    """Gaps in review whose consults (this attempt's) are all answered, at least one, and that
+    have no claim waiting for a lead's approval."""
     out = []
     for g in store.read("ledger/gaps", {"statuses": ["in_review"], "limit": QUEUE_LIMIT}):
         consults = store.read("ledger/consults_for_gap", {"gap": g["uid"]})
-        if consults and all(c["status"] == "answered" for c in consults):
-            out.append(Subject("gap", g["uid"], g))
+        if not consults or any(c["status"] != "answered" for c in consults):
+            continue
+        waiting = {"gap": g["uid"], "statuses": ["pending_approval"]}
+        if store.read("ledger/claims_for_gap", waiting):
+            continue  # decided already: its claim waits for a lead
+        out.append(Subject("gap", g["uid"], g))
     return out
 
 
@@ -105,26 +111,17 @@ def decide_context(store: WorkStore, ctx: Ctx, s: Subject) -> dict[str, Any]:
     }
 
 
-def apply_outcome(store: WorkStore, ctx: Ctx, gap: Gap, sub: SubmitKeeperDecision) -> list[Row]:
-    """needs_person or dismiss: the gap leaves review, logged. A claim is Task 8's
-    (`keeper.decide.apply_decision` replaces this function)."""
-    if sub.outcome == "claim":
-        raise NotImplementedError("Task 8: claims are written by keeper.decide.apply_decision")
-    to, action = ("needs_person", "needs_person")
-    if sub.outcome == "dismiss":
-        to, action = ("dismissed", "gap_dismissed")
-    rows = write(
-        store, ctx, "ledger/set_gap_status", uid=gap.uid, to=to, reason=sub.reason,
-        **{"from": ["in_review"]},
-    )  # fmt: skip
-    if rows:
-        log(store, ctx, "keeper", action, gap=gap.uid, why=sub.reason, evidence=sub.cites)
-    return rows
-
-
-def apply_decide(store: WorkStore, ctx: Ctx, s: Subject, sub: SubmitKeeperDecision) -> list[Row]:
+def apply_decide(
+    store: WorkStore,
+    ctx: Ctx,
+    s: Subject,
+    sub: SubmitKeeperDecision,
+    brain: decide.BrainFacts | None = None,
+) -> list[Row]:
+    """The decision's writes are fixed code (`keeper.decide.apply_decision`); `brain` defaults
+    to `decide.DEFAULT_BRAIN`."""
     gap = _gap(store, s.uid)
-    return apply_outcome(store, ctx, Gap(**(gap or s.data)), sub)
+    return decide.apply_decision(store, ctx, Gap(**(gap or s.data)), sub, brain)
 
 
 ROLE = Role(
