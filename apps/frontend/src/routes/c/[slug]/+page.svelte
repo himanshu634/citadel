@@ -44,6 +44,7 @@ so a slow answer for the company you just left is never drawn under the one you 
 	const fetchable = $derived(view?.kind === 'data');
 	const syncedAt = $derived(company?.last_synced_at ?? null);
 	const buildPath = $derived(resolve(`/c/${data.slug}/build` as `/c/${string}`));
+	const graphPath = $derived(resolve(`/c/${data.slug}/graph` as `/c/${string}`));
 
 	/** The last answer, whichever company it was for; only the current slug's is ever shown. */
 	let loaded = $state<Overview | null>(null);
@@ -143,7 +144,7 @@ so a slow answer for the company you just left is never drawn under the one you 
 							</Button>
 						{/snippet}
 					</Tooltip>
-					<Button variant="primary"><Network aria-hidden="true" />Open graph</Button>
+					<Button variant="primary" href={graphPath}><Network aria-hidden="true" />Open graph</Button>
 				</div>
 			{/if}
 		</header>

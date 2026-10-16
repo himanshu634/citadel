@@ -42,6 +42,9 @@
 	--node-change: #2a6fb3;
 	--node-document: #6f6f75;
 	--graph-edge: #a9a6a0;
+	/* Graph territories: two tones that alternate, never a hue (design-system.md, Graph). */
+	--graph-territory: #ebe8e1;
+	--graph-territory-alt: #e3dfd6;
 
 	/* --- Type ----------------------------------------------------------------------------- */
 	--font-sans: 'Archivo Variable', 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -146,6 +149,8 @@
 		--node-change: #6fb0ff;
 		--node-document: #a2a2a8;
 		--graph-edge: #55555d;
+		--graph-territory: #26262b;
+		--graph-territory-alt: #2b2b31;
 		--shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.3);
 		--color-scrim: rgb(0 0 0 / 0.6);
 		color-scheme: dark;
@@ -180,6 +185,8 @@
 	--node-change: #6fb0ff;
 	--node-document: #a2a2a8;
 	--graph-edge: #55555d;
+	--graph-territory: #26262b;
+	--graph-territory-alt: #2b2b31;
 	--shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.3);
 	--color-scrim: rgb(0 0 0 / 0.6);
 	color-scheme: dark;

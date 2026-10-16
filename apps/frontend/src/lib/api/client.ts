@@ -14,6 +14,8 @@ import type {
 	Feedback,
 	GithubRepoCheck,
 	GithubTokenCheck,
+	Entity,
+	GraphView,
 	OnboardRequest,
 	OnboardResult,
 	Overview,
@@ -93,6 +95,15 @@ export const api = {
 	stopBuild: (slug: string) => request<BuildSnapshot>('DELETE', `${company(slug)}/builds/current`),
 	/** 503 while FalkorDB is down. */
 	overview: (slug: string) => request<Overview>('GET', `${company(slug)}/overview`),
+	/** The whole graph for the Graph page; `bots` adds the bot accounts and their links. */
+	graph: (slug: string, bots = false) =>
+		request<GraphView>('GET', `${company(slug)}/graph${bots ? '?bots=true' : ''}`),
+	/** One node's fields (the `get_entity` tool); null when the graph has no such node. */
+	entity: (slug: string, uid: string) =>
+		request<{ rows: Entity[] }>('POST', `${company(slug)}/tools/get_entity`, {
+			uid,
+			limit: 1
+		}).then((r) => r.rows[0] ?? null),
 	githubToken: () => request<GithubTokenCheck>('GET', '/checks/github'),
 	/** 424 without a token, 429 when rate limited, 502 when GitHub fails. */
 	githubRepo: (owner: string, name: string) =>
