@@ -35,7 +35,7 @@ Non-goals (this round)
 - Scheduled syncs. "Sync now" is manual.
 - Reordering, pinning or archiving companies in the rail.
 - Editing the slug after the first build (the graph name depends on it).
-- Deleting a company from the UI (stays `make reset SLUG=x CONFIRM=1`).
+- Deleting a company from the UI (stays `make reset SLUG=x CONFIRM=1`). Emptying a graph as part of a confirmed rebuild (5.7) is in scope.
 
 Anti-goals (would make this a failure even if it works)
 
@@ -183,8 +183,8 @@ Step 1, Company → `slug`, `name`, `data_permission`, `window.since`
   build." Errors: invalid pattern ("Use lowercase letters, digits and underscores only, like
   acme_labs"), already used ("acme_labs is already a company. Pick another name").
 - Data permission: three radio cards, Public / Own / Synthetic, with one-line explanations.
-- Read activity since: a date. Hint says changing it later rebuilds the graph from the start
-  (existing pipeline behaviour).
+- Read activity since: a date. Hint: "Older activity is skipped. Changing this later rebuilds
+  the graph." (See 5.7.)
 
 Step 2, Sources → `sources`
 
@@ -220,9 +220,32 @@ The same progress view is reachable later from the building banner and from Sett
 ### 5.7 Settings (`/c/[slug]/settings`)
 
 Steps 1–3 as one page for an existing company, saved with "Save", with the slug read-only.
-"Sync now" from here or the overview starts a build with the current config. My call: this is
-in scope because the onboarding forms make it nearly free; drop it if the build plan needs to
-shrink.
+"Sync now" from here or the overview starts an ordinary incremental build with the current
+config.
+
+**Rebuild on save (the user's decision).** The loader only adds and updates, so a config change
+that alters what belongs in the graph would leave stale nodes behind. Saving such a change
+therefore rebuilds the graph:
+
+- Changes that need a rebuild: `window.since`, removing a source or changing one (repo,
+  `include`, path), anything under `systems` or `people`. Changes that do not: `name`,
+  `data_permission` (my call: it only gates fetch), and adding a source (an ordinary build
+  picks it up).
+- Before saving, the server diffs old and new config (`PUT ... ?dry_run=1`, see 6.1) and the page
+  shows a `Dialog`: title "Rebuild Acme Labs' graph?", body saying the graph is emptied and
+  rebuilt from the cached data, that answers are unavailable until it finishes, and whether
+  anything must be downloaded again. Actions: "Cancel" and "Save and rebuild". Changes that
+  need no rebuild save without a dialog.
+- The rebuild job: save the YAML → `reset` (delete `brain_<slug>`) → `prepare` (schema) →
+  `fetch`, only for sources whose data the cache does not cover (the date moved earlier, a
+  source was added or its repo/`include` changed) → records, normalize, load with
+  `full=True`. Other sources rebuild from the cache with no API calls.
+- While it runs the company shows as building everywhere (rail badge, building banner,
+  disabled ask field), exactly like a first build.
+- Not allowed while a build for that company is running (409; the page says to wait or stop it).
+- If the rebuild fails, the YAML stays at the new config and the company shows as failed with
+  "Retry rebuild"; the old graph is not restored (my call: it is gone after `reset`, and a
+  retry is cheap because the cache is kept).
 
 ## 6. The API
 
@@ -238,7 +261,7 @@ adapter's `source_model` themselves and report `["sources", i, <field>]`.
 | --- | --- |
 | `GET /api/companies` | List from `companies/*.yaml`: `slug`, `name`, `data_permission`, `status` (`ready`, `building`, `failed`, `empty`), `last_synced_at`, `build` summary if one is running. |
 | `GET /api/companies/{slug}` | The full config plus status. |
-| `PUT /api/companies/{slug}` | Replace the config (Settings). Slug must match the path. Rewrites the YAML. |
+| `PUT /api/companies/{slug}` | Replace the config (Settings). Slug must match the path. With `?dry_run=1` it writes nothing and returns `{rebuild: bool, refetch: [source keys], reasons: [...]}`. Without it: if a rebuild is needed it requires `?rebuild=1` (else 409), writes the YAML and starts the rebuild job (5.7); otherwise it writes the YAML only. |
 
 `status` comes from: a running job → `building`; last job failed → `failed`; graph missing or
 no `SyncState` nodes → `empty`; otherwise `ready`. `last_synced_at` is the latest `SyncState`
@@ -268,7 +291,7 @@ files (`slug, name, data_permission, window, sources, systems, people`). Writes 
 | `GET /api/events` | One SSE stream of status changes for all companies, for the rail badges. |
 
 Build event: `{slug, stage, source, status, count, message, at}` where `stage` is one of
-`prepare`, `fetch`, `records`, `normalize`, `load`, `done`, and `status` one of `waiting`,
+`reset` (rebuilds only), `prepare`, `fetch`, `records`, `normalize`, `load`, `done`, and `status` one of `waiting`,
 `running`, `done`, `skipped`, `failed`, `stopped`. The final event carries the `LoadReport`
 totals, including dangling links dropped.
 
@@ -340,4 +363,4 @@ The overview reads through `brain.tools` (C10): `graph_stats` for counts, and th
    sidebar changes, first run.
 4. Onboarding `/new` and its components.
 5. Overview from the API (after the tool queries are agreed), building and failed states.
-6. Settings page.
+6. Settings page with rebuild on save (diff, dialog, rebuild job).
