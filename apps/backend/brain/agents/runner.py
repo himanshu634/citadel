@@ -162,6 +162,48 @@ def run_job(
         "route": "brain",
     }
     try:
+        _think_and_write(g, inputs, store, job, subject, ctx, result)
+    except Exception as e:  # an API or store failure: give the work back, log it, carry on
+        result.stop = f"error: {type(e).__name__}: {e}"[:300]
+    if not result.rows and subject.unclaim:  # give the work back for someone else
+        write(
+            store,
+            ctx,
+            subject.unclaim,
+            task=subject.uid,
+            summary=f"{ctx.agent} gave {subject.uid} back ({result.stop})",
+        )
+
+    actions = [r["action"] for r in result.rows if "action" in r]
+    # A read-only role (Risk) cannot write the brain; it logs its runs in its own memory graph.
+    own = acl.can(ctx.db_user, store.slug, graph_name(store.slug), "W")
+    episode = write(
+        store,
+        ctx,
+        "work/write_episode" if own else "memory/write_episode",
+        run_at=ctx.now,
+        tick=ctx.tick,
+        input=f"{role.name}.{job.name} {subject.uid}",
+        summary=_summary(result.submit, result.stop),
+        tools_called=result.tools_called,
+        actions=actions,
+        stop=result.stop,
+    )
+    result.episode = episode[0]["episode"] if episode else None
+    return result
+
+
+def _think_and_write(
+    g: StateGraph,
+    inputs: dict[str, Any],
+    store: WorkStore,
+    job: Job,
+    subject: Subject,
+    ctx: Ctx,
+    result: RunResult,
+) -> None:
+    """The brain loop, then the job's writes; fills in `result`."""
+    try:
         state = g.compile().invoke(inputs, {"recursion_limit": RECURSION_LIMIT})
     except GraphRecursionError:
         state = {"stop": "step_limit"}
@@ -184,32 +226,6 @@ def run_job(
         result.stop = None if result.rows else "write_refused"
     else:
         result.stop = state.get("stop") or "no_answer"
-    if not result.rows and subject.unclaim:  # give the work back for someone else
-        write(
-            store,
-            ctx,
-            subject.unclaim,
-            task=subject.uid,
-            summary=f"{ctx.agent} gave {subject.uid} back ({result.stop})",
-        )
-
-    actions = [r["action"] for r in result.rows if "action" in r]
-    # A read-only role (Risk) cannot write the brain; it logs its runs in its own memory graph.
-    own = acl.can(ctx.db_user, store.slug, graph_name(store.slug), "W")
-    episode = write(
-        store,
-        ctx,
-        "work/write_episode" if own else "memory/write_episode",
-        run_at=ctx.now,
-        tick=ctx.tick,
-        input=f"{role.name}.{job.name} {subject.uid}",
-        summary=_summary(answer, result.stop),
-        tools_called=result.tools_called,
-        actions=actions,
-        stop=result.stop,
-    )
-    result.episode = episode[0]["episode"] if episode else None
-    return result
 
 
 def _summary(answer: dict[str, Any] | None, stop: str | None) -> str:

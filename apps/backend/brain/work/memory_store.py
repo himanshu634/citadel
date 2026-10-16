@@ -48,6 +48,12 @@ def words(text: str) -> set[str]:
     return {w for w in _WORD.findall(text.lower()) if len(w) > 2 and w not in _STOP}
 
 
+def uid_key(uid: str) -> tuple[str, int]:
+    """Sort uids by prefix, then number: task:2 before task:10."""
+    prefix, _, n = uid.rpartition(":")
+    return (prefix, int(n)) if n.isdigit() else (uid, 0)
+
+
 def jaccard(a: Iterable[str], b: Iterable[str]) -> float:
     a, b = set(a), set(b)
     return len(a & b) / len(a | b) if a | b else 0.0
@@ -154,7 +160,7 @@ class MemoryStore:
         )
 
     def _by_priority(self, tasks: Iterable[Task], now: int) -> list[Row]:
-        ranked = sorted(tasks, key=lambda t: (-self._score(t, now), t.created_ts, t.uid))
+        ranked = sorted(tasks, key=lambda t: (-self._score(t, now), t.created_ts, uid_key(t.uid)))
         return [{**t.model_dump(), "score": round(self._score(t, now), 4)} for t in ranked]
 
     def _seed(self, now: int, **fields: Any) -> Task:
@@ -554,7 +560,7 @@ class MemoryStore:
         want = words(p["text"])
         scored = [(jaccard(want, words(t.title)), t) for t in self.tasks.values()]
         hits = [(s, t) for s, t in scored if s > 0]
-        hits.sort(key=lambda st: (-st[0], st[1].created_ts, st[1].uid))
+        hits.sort(key=lambda st: (-st[0], st[1].created_ts, uid_key(st[1].uid)))
         return [
             {
                 "uid": t.uid,

@@ -8,6 +8,7 @@ from collections import Counter
 from typing import Any
 
 from brain.agents.policies.base import Call, Results, uniq, words
+from brain.work.memory_store import uid_key
 
 DUPLICATE = 0.6  # word overlap with an earlier task's title that makes this one a duplicate
 _P0 = re.compile(r"crash|outage|data loss|security|corrupt|leak", re.I)
@@ -23,7 +24,10 @@ def _priority(text: str) -> str:
 
 
 def _earlier(row: dict[str, Any], task: dict[str, Any]) -> bool:
-    return (row["created_ts"], row["uid"]) < (task.get("created_ts", 0), task["uid"])
+    return (row["created_ts"], uid_key(row["uid"])) < (
+        task.get("created_ts", 0),
+        uid_key(task["uid"]),
+    )
 
 
 def triage(context: dict[str, Any], results: Results) -> list[Call] | dict[str, Any]:

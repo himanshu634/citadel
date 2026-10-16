@@ -43,6 +43,13 @@ def online(role: str, job: str):
     return llm.client()
 
 
+def model_of(clients: ClientFor) -> str:
+    """The model name recorded on each Agent node."""
+    from brain.config import get_settings
+
+    return get_settings().anthropic_model if clients is online else "offline-policy"
+
+
 def agents(roles: Iterable[str]) -> list[AgentSpec]:
     counts: dict[str, int] = {}
     out = []
@@ -120,7 +127,7 @@ def sprint(
 ) -> Orchestrator:
     """1. Ten issues go from open to released, with every core agent."""
     store = _store(slug, graph_run, issues(SPRINT_ISSUES))
-    return Orchestrator(store, agents(CORE), clients, graph_run=graph_run)
+    return Orchestrator(store, agents(CORE), clients, graph_run=graph_run, model=model_of(clients))
 
 
 RACE_TASKS = (
@@ -143,6 +150,7 @@ def race(
         graph_run=graph_run,
         parallel=True,
         steps=(("developer", "plan"),),
+        model=model_of(clients),
     )
 
 
@@ -162,7 +170,12 @@ def regression(
     seed_triaged(store, REGRESSION_TASKS)
     steps = (("developer", None), ("qa", "test"))
     return Orchestrator(
-        store, agents(["developer", "qa"]), clients, graph_run=graph_run, steps=steps
+        store,
+        agents(["developer", "qa"]),
+        clients,
+        graph_run=graph_run,
+        steps=steps,
+        model=model_of(clients),
     )
 
 

@@ -194,6 +194,20 @@ def test_a_run_without_a_decision_gives_the_claim_back():
     assert s.episodes[0].stop == result.stop
 
 
+def test_a_failing_api_call_gives_the_claim_back_and_is_logged():
+    s = qa_ready_store()
+    role = ROLES["qa"]
+
+    class Down:
+        beta = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: 1 / 0))
+
+    ctx = Ctx("agent:qa-1", role.db_user, 2_000_000)
+    [subject] = role.jobs[0].queue(s, ctx)
+    result = run_job(s, role, role.jobs[0], subject, ctx, client=Down(), graph_run=fake_brain)
+    assert result.stop.startswith("error: ZeroDivisionError")
+    assert s.tasks["task:1"].qa == "pending" and s.episodes[0].stop == result.stop
+
+
 # --- scenarios (offline policies + fake brain) ------------------------------------------------
 
 
