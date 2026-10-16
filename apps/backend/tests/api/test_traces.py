@@ -152,3 +152,28 @@ def test_a_broken_ledger_does_not_fail_the_answer_or_the_rating(company, runner)
     assert answer["text"] == "Nothing."
     url = f"/api/companies/{company}/traces/{answer['trace_id']}/feedback"
     assert client.post(url, json={"rating": "down"}).status_code == 200
+
+
+def test_the_answer_is_sent_before_the_gap_is_written(company, runner):
+    import threading
+    import time
+
+    gate = threading.Event()
+    wrote = []
+
+    class Slow:
+        def write(self, *_a, **_k):
+            wrote.append("write")
+            gate.wait(5)  # a ledger that hangs
+            return [{"uid": "gap:x"}]
+
+    client = make_client(runner, FakeClient(reply(submit("t1", "Nothing.", []))))
+    client.app.state.asker.ledger = lambda slug: Slow()
+    started = time.perf_counter()
+    try:
+        answer = ask(client)
+        took = time.perf_counter() - started
+    finally:
+        gate.set()
+    assert answer["text"] == "Nothing." and answer["trace_id"]
+    assert took < 2  # the stream ended while the write was still blocked

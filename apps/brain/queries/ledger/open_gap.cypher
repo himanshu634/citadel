@@ -1,6 +1,7 @@
 // purpose: Open a gap, or bump the live one it repeats. A gap that is open or in_review with the
 //          same kind and the same norm (for noticing kinds: the same subject) gets count + 1, the
-//          new trace id and any new `about` uids, and keeps its uid. Otherwise a new open gap is
+//          new trace id and any new `about` uids, and keeps its uid. A trace the gap already
+//          lists changes nothing but `about` (one turn is one sighting). Otherwise a new open gap is
 //          created with $uid. A resolved, dismissed or needs_person gap is never bumped.
 // params:  $uid (used only for a new gap), $kind, $text, $norm, $subject, $about: [uid],
 //          $trace_id (or null), $now (ISO)
@@ -31,8 +32,8 @@ FOREACH (_ IN CASE WHEN g IS NULL THEN [1] ELSE [] END |
         about: $about
     }))
 FOREACH (_ IN CASE WHEN g IS NULL THEN [] ELSE [1] END |
-    SET g.count = g.count + 1,
-        g.updated_at = $now,
+    SET g.count = g.count + CASE WHEN $trace_id IN g.trace_ids THEN 0 ELSE 1 END,
+        g.updated_at = CASE WHEN $trace_id IN g.trace_ids THEN g.updated_at ELSE $now END,
         g.trace_ids = g.trace_ids +
             CASE WHEN $trace_id IS NULL OR $trace_id IN g.trace_ids THEN [] ELSE [$trace_id] END,
         g.about = g.about + [a IN $about WHERE NOT a IN g.about])

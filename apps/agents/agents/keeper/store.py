@@ -325,10 +325,11 @@ class MemoryKeeperStore(_LedgerStore):
         trace = p["trace_id"]
         if live:
             g = live[0]
-            g.count += 1
-            g.updated_at = p["now"]
-            if trace is not None and trace not in g.trace_ids:
-                g.trace_ids.append(trace)
+            if trace is None or trace not in g.trace_ids:  # one trace is one sighting
+                g.count += 1
+                g.updated_at = p["now"]
+                if trace is not None:
+                    g.trace_ids.append(trace)
             g.about += [a for a in p["about"] if a not in g.about]
             return [{"uid": g.uid, "created": False, "count": g.count}]
         g = Gap(

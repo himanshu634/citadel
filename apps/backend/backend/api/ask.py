@@ -149,13 +149,15 @@ async def _events(asker: Asker, slug: str, question: str, thread_id: str) -> Asy
         steps: list[dict] = []
         recorder = Recorder(asker.history(slug), question)
 
+        late: list[Trace] = []  # traces whose gap is written once the answer has gone out
+
         def keep(answer: Answer | None = None, error: str | None = None) -> str | None:
             ms = round((time.perf_counter() - started) * 1000)
             trace = new_trace(
                 slug, question, thread_id, via="api", steps=steps, ms=ms, answer=answer, error=error
             )
             added = asker.traces(slug).add(trace)
-            note_gap(asker, slug, trace)
+            late.append(trace)
             return trace.id if added else None
 
         try:
@@ -192,6 +194,8 @@ async def _events(asker: Asker, slug: str, question: str, thread_id: str) -> Asy
         finally:
             asker.release(thread_id)
             put(None)
+            for trace in late:  # after the answer is queued and the thread is free
+                note_gap(asker, slug, trace)
 
     threading.Thread(target=work, name=f"ask-{slug}-{thread_id}", daemon=True).start()
     try:

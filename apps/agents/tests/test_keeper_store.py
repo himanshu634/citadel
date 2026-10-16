@@ -64,6 +64,16 @@ def test_names_are_listed():
     assert {"ledger/open_gap", "work/write_episode", "memory/write_episode"} <= set(WRITES)
 
 
+def test_the_same_trace_twice_is_one_sighting(store):
+    [first] = open_gap(store, "who owns billing", "t1", now=T1)
+    [again] = open_gap(store, "who owns billing", "t1", now=T2)
+    assert (again["uid"], again["created"], again["count"]) == (first["uid"], False, 1)
+    [gap] = store.read("ledger/gaps", {"statuses": ["open"], "limit": 10})
+    assert (gap["trace_ids"], gap["count"], gap["updated_at"]) == (["t1"], 1, T1)
+    [other] = open_gap(store, "who owns billing", "t2", now=T3)
+    assert other["count"] == 2
+
+
 def test_open_gap_dedupes_on_norm(store):
     [first] = open_gap(store, "who owns billing", "t1", now=T1)
     [second] = open_gap(store, "who owns billing", "t2", now=T2)
