@@ -43,7 +43,43 @@ describe('checkToken', () => {
 	});
 });
 
+describe('pending', () => {
+	test('a repository that can be checked is pending until answered, failures count as answers', async () => {
+		const checks = new RepoChecks();
+		expect(checks.pending('a/b')).toBe(true);
+		repo.mockRejectedValueOnce(new ApiError(424, 'no token'));
+		await checks.check('a/b');
+		expect(checks.pending('a/b')).toBe(false);
+	});
+
+	test('is pending while the check is in flight', async () => {
+		const checks = new RepoChecks();
+		let finish: (v: { exists: boolean; private: boolean }) => void = () => {};
+		repo.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+		const run = checks.check('a/b');
+		expect(checks.pending('a/b')).toBe(true);
+		finish({ exists: true, private: false });
+		await run;
+		expect(checks.pending('a/b')).toBe(false);
+	});
+
+	test('text that is not owner/name is never pending', () => {
+		expect(new RepoChecks().pending('nonsense')).toBe(false);
+		expect(new RepoChecks().pending('')).toBe(false);
+	});
+});
+
 describe('check', () => {
+	test('a forced check asks again about a repository GitHub could not find', async () => {
+		const checks = new RepoChecks();
+		repo.mockResolvedValueOnce({ exists: false, private: null });
+		await checks.check('a/new');
+		expect(checks.results.get('a/new')).toEqual({ kind: 'missing' });
+		repo.mockResolvedValueOnce({ exists: true, private: false });
+		await checks.check('a/new', true);
+		expect(checks.results.get('a/new')).toEqual({ kind: 'found', private: false });
+	});
+
 	test('stores a public and a private repository', async () => {
 		const checks = new RepoChecks();
 		repo.mockResolvedValueOnce({ exists: true, private: false });

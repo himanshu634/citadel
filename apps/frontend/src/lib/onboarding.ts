@@ -155,20 +155,23 @@ export function normalizeRepo(text: string): string {
 
 export const PRIVATE_REPO_MESSAGE =
 	'This repository is private. Set the data permission to Own, or the build will refuse to read it.';
+/** A warning, never an error: the check lets the form warn early, the build is what decides. */
 export const MISSING_REPO_MESSAGE =
 	'GitHub cannot find this repository. Check the spelling; a private one needs a token that can read it.';
 
 /** What GitHub definitely said about a repository; undefined while unknown or when the check failed. */
 export type RepoFact = 'private' | 'missing' | undefined;
 
-/** The error for a repository, or undefined. Private only counts when the data is not the company's own. */
+/**
+ * The error for a repository, or undefined. Only a private repository while the data is not the
+ * company's own is an error (the build refuses it); "not found" is a warning the card shows.
+ */
 export function repoErrorFor(fact: RepoFact, dataPermission: string): string | undefined {
-	if (fact === 'missing') return MISSING_REPO_MESSAGE;
 	if (fact === 'private' && dataPermission !== 'own') return PRIVATE_REPO_MESSAGE;
 	return undefined;
 }
 
-/** One error per GitHub source that the build could not read: not found, or private without `own`. */
+/** One error per GitHub source that the build would refuse: private while the data is not `own`. */
 export function repoErrors(draft: CompanyConfig, fact: (repo: string) => RepoFact): FieldError[] {
 	const out: FieldError[] = [];
 	draft.sources.forEach((s, i) => {
@@ -177,6 +180,91 @@ export function repoErrors(draft: CompanyConfig, fact: (repo: string) => RepoFac
 		if (msg) out.push({ loc: ['sources', i, 'repo'], msg });
 	});
 	return out;
+}
+
+/** What a repository's check is in the middle of: nothing answered yet, or a check in flight. */
+type RepoPending = (repo: string) => boolean;
+
+/** Everything the Continue, Save and Skip buttons depend on, so one pure function decides them. */
+export interface Gate {
+	draft: CompanyConfig;
+	/** API errors, slug-taken and rejected-create errors together. */
+	errors: FieldError[];
+	/** A validation of the latest edit is still on its way. */
+	validating: boolean;
+	/** At least one validation answer has arrived. */
+	answered: boolean;
+	/** The API cannot be reached (the page says so in a banner). */
+	unreachable: boolean;
+	fact: (repo: string) => RepoFact;
+	repoPending: RepoPending;
+}
+
+export interface GateResult {
+	blocked: boolean;
+	/** Why, as a sentence for the footer; null when open, or when a banner already says it. */
+	reason: string | null;
+}
+
+/** Errors that a field shows: a graph name nobody has typed yet is not an error to show. */
+export function visibleErrors(draft: CompanyConfig, errors: FieldError[]): FieldError[] {
+	if (draft.slug === '' && draft.name.trim() === '') return errors.filter((e) => e.loc[0] !== 'slug');
+	return errors;
+}
+
+type Why = { kind: 'incomplete'; text: string } | { kind: 'errors' } | { kind: 'checking' };
+
+const STEP_NAMES: Record<Section, string> = {
+	company: 'Company',
+	sources: 'Sources',
+	rules: 'Systems and people'
+};
+
+/** What stops a step: something missing, errors on screen, or a GitHub check not answered yet. */
+function why(g: Gate, section: Section): Why | null {
+	const text = incompleteReason(g.draft, section);
+	if (text) return { kind: 'incomplete', text };
+	if (errorsIn(visibleErrors(g.draft, g.errors), section).length > 0) return { kind: 'errors' };
+	if (section === 'sources') {
+		if (repoErrors(g.draft, g.fact).length > 0) return { kind: 'errors' };
+		const asking = g.draft.sources.some(
+			(s) => s.type === 'github' && typeof s.repo === 'string' && g.repoPending(s.repo.trim())
+		);
+		if (asking) return { kind: 'checking' };
+	}
+	return null;
+}
+
+function result(g: Gate, reason: string | null): GateResult {
+	if (g.unreachable) return { blocked: true, reason: null };
+	const pending = reason ?? (g.validating || !g.answered ? 'Checking' : null);
+	return { blocked: pending !== null, reason: pending };
+}
+
+/** Whether Continue is open on `section`, and if not, why. */
+export function continueGate(g: Gate, section: Section): GateResult {
+	const w = why(g, section);
+	if (!w) return result(g, null);
+	if (w.kind === 'incomplete') return result(g, w.text);
+	return result(g, w.kind === 'errors' ? 'Fix the fields marked above to continue.' : 'Checking GitHub');
+}
+
+/**
+ * Whether Save and build (or, with `skipRules`, Skip, use defaults) is open on the last step. It
+ * looks at every step the button saves, and says which one to go back to.
+ */
+export function saveGate(g: Gate, skipRules = false): GateResult {
+	const sections = skipRules ? SECTIONS.filter((s) => s !== 'rules') : SECTIONS;
+	for (const section of sections) {
+		const w = why(g, section);
+		if (!w) continue;
+		const here = section === SECTIONS[SECTIONS.length - 1];
+		const where = `${STEP_NAMES[section]} (step ${SECTIONS.indexOf(section) + 1})`;
+		if (w.kind === 'checking') return result(g, 'Checking GitHub');
+		if (w.kind === 'incomplete') return result(g, here ? w.text : `${where}: ${w.text}`);
+		return result(g, here ? 'Fix the fields marked above.' : `Fix the errors in ${where} first.`);
+	}
+	return result(g, null);
 }
 
 export interface AliasRow {

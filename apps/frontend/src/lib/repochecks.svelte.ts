@@ -4,8 +4,9 @@
  * Why: a card learns early that a repository is private (the fetch would refuse it unless the
  * data is the company's own) or that no token is configured. The wizard also needs the answers to
  * decide whether Continue is open, so they live here, keyed by `owner/name`, and not in a card.
- * Only a definite answer blocks (private without `own`, not found; see `repoErrors`): a missing
- * token, a rate limit or a GitHub outage must not stop someone from adding a company.
+ * Only a private repository without `own` blocks (see `repoErrors`): not found, a missing token,
+ * a rate limit or a GitHub outage are notes the card shows, and must not stop anyone from adding
+ * a company. A check that has no answer yet counts as pending (`pending`), so Continue waits.
  */
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { ApiError, api } from './api/client';
@@ -41,6 +42,11 @@ export class RepoChecks {
 		} catch {
 			this.token = undefined;
 		}
+	}
+
+	/** True while `repo` could be checked and has no answer yet, or its check is in flight. */
+	pending(repo: string): boolean {
+		return parseRepo(repo) !== null && (this.checking.has(repo) || !this.results.has(repo));
 	}
 
 	/** What GitHub definitely said about `repo`; undefined while unknown or when the check failed. */

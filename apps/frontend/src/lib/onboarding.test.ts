@@ -16,8 +16,11 @@ import {
 	parseRepo,
 	repoErrorFor,
 	repoErrors,
-	MISSING_REPO_MESSAGE,
 	PRIVATE_REPO_MESSAGE,
+	continueGate,
+	saveGate,
+	visibleErrors,
+	type Gate,
 	recordToAliasRows,
 	sectionOfLoc,
 	splitYamlBlocks,
@@ -224,14 +227,12 @@ describe('repositories', () => {
 		expect(repoErrors(draft({ sources, data_permission: 'own' }), fact)).toEqual([]);
 	});
 
-	test('a repository GitHub cannot find is an error whatever the permission', () => {
-		const sources = [{ type: 'github', repo: ' a/typo ' }];
-		const fact = (repo: string) => (repo === 'a/typo' ? ('missing' as const) : undefined);
+	test('a repository GitHub cannot find is not an error (the card warns)', () => {
+		const sources = [{ type: 'github', repo: 'a/typo' }];
 		for (const data_permission of ['public', 'own'] as const) {
-			expect(repoErrors(draft({ sources, data_permission }), fact)).toEqual([
-				{ loc: ['sources', 0, 'repo'], msg: MISSING_REPO_MESSAGE }
-			]);
+			expect(repoErrors(draft({ sources, data_permission }), () => 'missing')).toEqual([]);
 		}
+		expect(repoErrorFor('missing', 'public')).toBeUndefined();
 	});
 
 	test('repoErrorFor: unknown or failed checks never block', () => {
@@ -341,5 +342,128 @@ describe('blankSource', () => {
 	test('a folder source starts with an empty path', () => {
 		expect(blankSource('local_docs')).toEqual({ type: 'local_docs', path: '' });
 		expect(blankSource('canonical_jsonl')).toEqual({ type: 'canonical_jsonl', path: '' });
+	});
+});
+
+describe('gates', () => {
+	const slugPattern = err(['slug'], "String should match pattern '^[a-z0-9][a-z0-9_]*$'");
+
+	function gate(over: Partial<Gate> = {}): Gate {
+		return {
+			draft: draft(),
+			errors: [],
+			validating: false,
+			answered: true,
+			unreachable: false,
+			fact: () => undefined,
+			repoPending: () => false,
+			...over
+		};
+	}
+	const github = (repo: string) => draft({ sources: [{ type: 'github', repo }] });
+
+	test('the first screen asks for the name, not for fields that are not marked', () => {
+		const first = gate({ draft: defaultDraft(new Date(2026, 9, 16)), errors: [slugPattern] });
+		expect(visibleErrors(first.draft, first.errors)).toEqual([]);
+		expect(continueGate(first, 'company')).toEqual({
+			blocked: true,
+			reason: 'Enter the company name to continue.'
+		});
+	});
+
+	test('a slug error shows once a name is typed', () => {
+		const typed = gate({ draft: draft({ name: 'Acme', slug: '' }), errors: [slugPattern] });
+		expect(visibleErrors(typed.draft, typed.errors)).toEqual([slugPattern]);
+		expect(continueGate(typed, 'company').reason).toBe('Fix the fields marked above to continue.');
+	});
+
+	test('Continue is open when the step is complete and validated', () => {
+		expect(continueGate(gate(), 'company')).toEqual({ blocked: false, reason: null });
+		expect(continueGate(gate(), 'sources')).toEqual({ blocked: false, reason: null });
+	});
+
+	test('Continue waits for a validation in flight, and for the first answer', () => {
+		expect(continueGate(gate({ validating: true }), 'company')).toEqual({
+			blocked: true,
+			reason: 'Checking'
+		});
+		expect(continueGate(gate({ answered: false }), 'company').blocked).toBe(true);
+	});
+
+	test('an unreachable API blocks without a reason (the banner says it)', () => {
+		expect(continueGate(gate({ unreachable: true }), 'company')).toEqual({
+			blocked: true,
+			reason: null
+		});
+	});
+
+	test('a GitHub check not answered yet keeps Continue shut on Sources', () => {
+		const typing = gate({ draft: github('acme/platform'), repoPending: () => true });
+		expect(continueGate(typing, 'sources')).toEqual({ blocked: true, reason: 'Checking GitHub' });
+		const answered = gate({ draft: github('acme/platform') });
+		expect(continueGate(answered, 'sources').blocked).toBe(false);
+	});
+
+	test('a repository that is not ready to be checked is not pending', () => {
+		const asked: string[] = [];
+		const g = gate({
+			draft: github(' acme/platform '),
+			repoPending: (repo) => (asked.push(repo), false)
+		});
+		continueGate(g, 'sources');
+		expect(asked).toEqual(['acme/platform']);
+	});
+
+	test('a private repository under public data keeps Continue shut', () => {
+		const g = gate({ draft: github('a/secret'), fact: () => 'private' });
+		expect(continueGate(g, 'sources').reason).toBe('Fix the fields marked above to continue.');
+		const own = gate({ draft: { ...github('a/secret'), data_permission: 'own' }, fact: () => 'private' });
+		expect(continueGate(own, 'sources').blocked).toBe(false);
+	});
+
+	test('a repository GitHub cannot find does not shut anything', () => {
+		const g = gate({ draft: github('a/typo'), fact: () => 'missing' });
+		expect(continueGate(g, 'sources').blocked).toBe(false);
+		expect(saveGate(g).blocked).toBe(false);
+	});
+
+	test('on the last step, Save says which earlier step to fix', () => {
+		const secret = gate({ draft: github('a/secret'), fact: () => 'private' });
+		expect(saveGate(secret)).toEqual({
+			blocked: true,
+			reason: 'Fix the errors in Sources (step 2) first.'
+		});
+		const noSources = gate({ draft: draft({ sources: [] }) });
+		expect(saveGate(noSources).reason).toBe('Sources (step 2): Add at least one source to continue.');
+		const noName = gate({ draft: draft({ name: '' }) });
+		expect(saveGate(noName).reason).toBe('Company (step 1): Enter the company name to continue.');
+	});
+
+	test('a check that lands while on the last step is not silent', () => {
+		const pending = gate({ draft: github('a/new'), repoPending: () => true });
+		expect(saveGate(pending)).toEqual({ blocked: true, reason: 'Checking GitHub' });
+	});
+
+	test('Save also reads errors on its own step', () => {
+		const g = gate({ errors: [err(['systems', 'fallback'])] });
+		expect(saveGate(g)).toEqual({ blocked: true, reason: 'Fix the fields marked above.' });
+	});
+
+	test('Skip ignores rule errors but not the steps before it', () => {
+		const rules = gate({
+			errors: [err(['systems', 'fallback'])],
+			draft: draft({
+				systems: { rules: [{ match: 'a/**', system: '' }], fallback: 'depth_2', ignore: [] }
+			})
+		});
+		expect(saveGate(rules).blocked).toBe(true);
+		expect(saveGate(rules, true)).toEqual({ blocked: false, reason: null });
+		const noName = gate({ draft: draft({ name: ' ' }) });
+		expect(saveGate(noName, true).blocked).toBe(true);
+	});
+
+	test('Save waits for validation', () => {
+		expect(saveGate(gate({ validating: true }))).toEqual({ blocked: true, reason: 'Checking' });
+		expect(saveGate(gate())).toEqual({ blocked: false, reason: null });
 	});
 });

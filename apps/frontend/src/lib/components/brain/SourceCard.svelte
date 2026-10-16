@@ -1,11 +1,12 @@
 <!--
 @component
 One source of a company, edited in place. GitHub: the repository (with a fixed `github.com/` in
-front), the six things to read, a note when no GitHub token exists ("Check again"), what GitHub
-said about the repository, and an error when GitHub cannot find it, or when it is private while the
-data permission is not Own (the build refuses such a repository). Documents folder and JSONL
-records: one path, relative to the Citadel folder. Errors for this card (`loc` starting `['sources', index]`) show under the field
-they name; any other error of the card is listed at its foot.
+front), the six things to read, a note when no GitHub token exists, what GitHub said about the
+repository, and "Check again". "Not found", a rate limit and an outage are warnings; only a private
+repository while the data permission is not Own is an error (the build refuses it). Documents
+folder and JSONL records: one path, relative to the Citadel folder. Errors for this card (`loc`
+starting `['sources', index]`) show under the field they name; any other error of the card is
+listed at its foot.
 -->
 <script lang="ts">
 	import { FileJson, Folder, GitBranch, Trash2 } from '@lucide/svelte';
@@ -18,6 +19,7 @@ they name; any other error of the card is listed at its foot.
 		GITHUB_PARTS,
 		SOURCE_KINDS,
 		debounce,
+		MISSING_REPO_MESSAGE,
 		friendly,
 		messageAt,
 		normalizeRepo,
@@ -124,11 +126,13 @@ they name; any other error of the card is listed at its foot.
 				error={repoError}
 			/>
 			{#if !repoError}
-				<p class={['check', { warn: result?.kind === 'rate_limited' || result?.kind === 'unreachable' }]} role="status">
+				<p class={['check', { warn: result?.kind === 'missing' || result?.kind === 'rate_limited' || result?.kind === 'unreachable' }]} role="status">
 					{#if checking}
 						Checking GitHub
 					{:else if result?.kind === 'found'}
 						Found on GitHub, {result.private ? 'private' : 'public'}.
+					{:else if result?.kind === 'missing'}
+						{MISSING_REPO_MESSAGE}
 					{:else if result?.kind === 'rate_limited'}
 						GitHub is limiting checks right now. Press Check again in a minute.
 					{:else if result?.kind === 'unreachable'}
@@ -159,7 +163,7 @@ they name; any other error of the card is listed at its foot.
 					<Button size="sm" onclick={checkAgain}>Check again</Button>
 				{/snippet}
 			</Banner>
-		{:else if result && (result.kind === 'rate_limited' || result.kind === 'unreachable')}
+		{:else if result && ['missing', 'rate_limited', 'unreachable'].includes(result.kind)}
 			<div><Button size="sm" onclick={checkAgain}>Check again</Button></div>
 		{/if}
 	{:else}

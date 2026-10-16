@@ -17,12 +17,12 @@ the errors under the fields, the Continue button and the YAML preview. Nothing i
 		SECTIONS,
 		SECTION_KEYS,
 		cleanDraft,
+		continueGate,
 		debounce,
 		defaultDraft,
-		errorsIn,
 		firstSectionWithErrors,
-		incompleteReason,
-		repoErrors
+		saveGate,
+		type Gate
 	} from '$lib/onboarding';
 	import { repoChecks } from '$lib/repochecks.svelte';
 	import type { CompanyConfig, FieldError, ValidateResult } from '$lib/types';
@@ -78,31 +78,20 @@ the errors under the fields, the Continue button and the YAML preview. Nothing i
 		if (rejected && rejected.key === key()) out.push(...rejected.errors);
 		return out;
 	});
-	const repoProblems = $derived(
-		repoErrors(draft, (repo) => repoChecks.fact(repo))
-	);
-
-	/** Why the current step cannot be left yet, or null. */
-	function whyBlocked(s: (typeof SECTIONS)[number]): string | null {
-		if (apiProblem) return null; // the banner says it
-		if (errorsIn(errors, s).length > 0) return 'Fix the fields marked above to continue.';
-		if (s === 'sources' && repoProblems.length > 0) return 'Fix the fields marked above to continue.';
-		return incompleteReason(draft, s);
-	}
-	const here = $derived(whyBlocked(section));
-	const canContinue = $derived(!validating && !apiProblem && result !== null && here === null);
-	const ready = $derived(!validating && !apiProblem && result !== null && repoProblems.length === 0);
-	const canSave = $derived(
-		ready && errors.length === 0 && SECTIONS.every((s) => incompleteReason(draft, s) === null)
-	);
-	// "Skip, use defaults" drops the rules and people, so only errors in those do not matter.
-	const canSkip = $derived(
-		ready &&
-			errorsIn(errors, 'company').length === 0 &&
-			errorsIn(errors, 'sources').length === 0 &&
-			incompleteReason(draft, 'company') === null &&
-			incompleteReason(draft, 'sources') === null
-	);
+	const gate = $derived<Gate>({
+		draft,
+		errors,
+		validating,
+		answered: result !== null,
+		unreachable: apiProblem !== null,
+		fact: (repo) => repoChecks.fact(repo),
+		repoPending: (repo) => repoChecks.pending(repo)
+	});
+	const here = $derived(continueGate(gate, section));
+	const saveResult = $derived(saveGate(gate));
+	const skipResult = $derived(saveGate(gate, true));
+	// The footer line: why the button the person is looking at is shut.
+	const why = $derived(step < SECTIONS.length - 1 ? here.reason : saveResult.reason);
 
 	// --- Moving between steps ------------------------------------------------------------------------
 	let formEl: HTMLElement | undefined = $state();
@@ -113,7 +102,7 @@ the errors under the fields, the Continue button and the YAML preview. Nothing i
 	}
 	function onsubmit(event: SubmitEvent) {
 		event.preventDefault(); // Enter in a field moves on, but never saves
-		if (step < SECTIONS.length - 1 && canContinue) void go(step + 1);
+		if (step < SECTIONS.length - 1 && !here.blocked) void go(step + 1);
 	}
 
 	// --- Save and build ------------------------------------------------------------------------------
@@ -245,9 +234,7 @@ the errors under the fields, the Continue button and the YAML preview. Nothing i
 							{saveError}
 						</Banner>
 					{/if}
-					{#if here}<p class="why" role="status">{here}</p>{:else if validating}<p class="why" role="status">
-							Checking
-						</p>{/if}
+					{#if why}<p class="why" role="status">{why}</p>{/if}
 					<div class="foot">
 						{#if step === 0}
 							<Button variant="ghost" href={home}>Cancel</Button>
@@ -255,15 +242,15 @@ the errors under the fields, the Continue button and the YAML preview. Nothing i
 							<Button variant="ghost" onclick={() => go(step - 1)} disabled={saving}>Back</Button>
 						{/if}
 						{#if step < SECTIONS.length - 1}
-							<Button variant="primary" type="submit" disabled={!canContinue}>
+							<Button variant="primary" type="submit" disabled={here.blocked}>
 								Continue<ArrowRight aria-hidden="true" />
 							</Button>
 						{:else}
 							<div class="actions">
-								<Button onclick={() => save(true)} disabled={saving || !canSkip}>
+								<Button onclick={() => save(true)} disabled={saving || skipResult.blocked}>
 									Skip, use defaults
 								</Button>
-								<Button variant="primary" onclick={() => save()} loading={saving} disabled={!canSave}>
+								<Button variant="primary" onclick={() => save()} loading={saving} disabled={saveResult.blocked}>
 									Save and build<ArrowRight aria-hidden="true" />
 								</Button>
 							</div>

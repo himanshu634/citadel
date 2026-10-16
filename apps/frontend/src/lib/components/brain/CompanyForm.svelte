@@ -30,6 +30,7 @@ Settings should mount a new form when it loads another company.
 		messageAt,
 		recordToAliasRows,
 		unmatched,
+		visibleErrors,
 		type AliasRow,
 		type Loc,
 		type Section
@@ -68,10 +69,8 @@ Settings should mount a new form when it loads another company.
 		if (following) draft.slug = slugify(value);
 	}
 
-	// A graph name nobody has typed yet is not an error to show.
-	const slugErrors = $derived(
-		draft.slug === '' && draft.name.trim() === '' ? errors.filter((e) => e.loc[0] !== 'slug') : errors
-	);
+	// A graph name nobody has typed yet is not an error to show (the page's gates agree).
+	const slugErrors = $derived(visibleErrors(draft, errors));
 
 	const PERMISSIONS: { value: DataPermission; title: string; description: string }[] = [
 		{ value: 'public', title: 'Public', description: 'Open-source repositories anyone can read.' },
