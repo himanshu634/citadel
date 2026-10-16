@@ -443,16 +443,16 @@ would be the one agent that is pure role-play.
 - **Concurrency mode:** for the race simulation, run all developer instances in parallel
   threads within one tick.
 - **Forks:** `fork(slug, run)` runs `GRAPH.COPY brain_<slug> sim_<slug>_<run>`, and every role
-  in that run connects to the fork. `db.py` gains a run-scoped graph name, so it stays the
-  single place that picks a graph.
+  in that run connects to the fork. The run-scoped name comes from `agents.graphs`; `db.py`
+  still opens the connection.
 - **Stops when:** no queue has work, a tick limit is hit, or the run is paused. It can step one
   tick at a time from the UI.
 - **CLI:**
 
   ```bash
-  brain sim run <slug> --scenario sprint --ticks 30 [--offline]
-  brain sim step <run_id>
-  brain sim fork <slug> --run what-if-1
+  agents sim run <slug> --scenario sprint --ticks 30 [--offline]
+  agents sim step <run_id>
+  agents sim fork <slug> --run what-if-1
   make sim SLUG=synthetic SCENARIO=race OFFLINE=1
   ```
 
@@ -471,7 +471,7 @@ would be the one agent that is pure role-play.
 | `citadel_risk` | **R** | **R** | RW own | |
 | `citadel_brain` | **R** | **R** | | RW |
 
-Created by `brain agents users <slug>` with `ACL SETUSER`, for example:
+Created by `agents agents users <slug>` with `ACL SETUSER`, for example:
 
 ```text
 ACL SETUSER citadel_risk on >${PW} +@all %R~brain_falkordb %R~sim_falkordb_* %RW~mem_falkordb_risk
@@ -506,6 +506,7 @@ apps/agents/agents/
   work/          records, legal task moves, submit models, WorkStore
   sim/           orchestrator.py, scenarios.py, events.py
   graphs.py      names of the agent_<slug>, mem_<slug>_<role> and sim_<slug> graphs
+  memory.py      per-agent memory graph access (mem_<slug>_<role>), phase 2
   acl.py         create and check FalkorDB users
 ```
 
@@ -537,7 +538,7 @@ Each action card in the UI shows the feature badge, the named query that ran, an
 | 3 | Sun, only if ahead | Reviewer-matcher with replay score, label propagation staffing, MaxFlow, harmonic first contact, FalkorDB MCP server for an outside agent. Simulations 5 and 8. |
 
 Every role needs a test with its offline policy and a throwaway graph (the same setup as
-`tests/test_graph.py`). A simulation passes when its "done when" checks above hold.
+`apps/brain/tests/test_graph.py`). A simulation passes when its "done when" checks above hold.
 
 ## Implementation status
 
@@ -565,13 +566,13 @@ Built in two phases. **Phase 1 (agents)** is done; **phase 2 (connect to the bra
 - `agents/policies/`: a deterministic policy per job and a scripted client that plays a policy
   through the real loop, so offline runs exercise the same grounding checks as Claude.
 - `sim/orchestrator.py` and `sim/scenarios.py`: the tick loop over the store, with the sprint,
-  race and regression scenarios. `brain agents` lists the roles; `brain sim run <slug>
+  race and regression scenarios. `agents agents` lists the roles; `agents sim run <slug>
   --scenario sprint [--offline]` runs one against brain_<slug> (`make agents`, `make sim`).
   Agents read the brain through the real graph tools; offline, every role plays its policy.
 
 **Phase 2: connect to the brain** (not built yet): the `queries/work/*.cypher` writes and
 queues, `constraints.cypher`, the `derive/` step, the new `tools/` queries (role read tools
-that are declared but not available yet are listed by `brain agents`), the `citadel` UDFs and
-FLEX, ACL users created in FalkorDB, `GRAPH.COPY` forks, the FalkorDB store (so `brain sim`
-writes the work layer into the graph), the `sim step` / `sim fork` commands, and simulations 4
-to 8.
+that are declared but not available yet are listed by `agents agents`), the `citadel` UDFs and
+FLEX, ACL users created in FalkorDB, `GRAPH.COPY` forks, the FalkorDB store (so `agents sim`
+writes the work layer into the graph), the `agents sim step` / `agents sim fork` commands, and
+simulations 4 to 8.

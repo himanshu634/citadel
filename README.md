@@ -58,7 +58,7 @@ make query SLUG=synthetic TOOL=path_between P="from_uid=person:erin to_uid=syste
 is `uv run brain query <slug> <tool> key=value ...` (or `--param key=value`).
 
 Ask the Claude agent (a LangGraph loop over these same tools, conversation state checkpointed in
-FalkorDB graph `agent_<slug>`; on branch `feat/claude-agent` until it is merged):
+FalkorDB graph `agent_<slug>`):
 
 ```bash
 make chat SLUG=synthetic OFFLINE=1          # one scripted turn, no API key: proves router, tools, checkpointer
