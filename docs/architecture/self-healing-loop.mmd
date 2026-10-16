@@ -1,0 +1,42 @@
+graph TD
+  Q["Lead asks a question"]
+  ANS{"Brain answers<br/>with sources?"}
+  OK["Answer + graph path"]
+  GAP["Gap recorded<br/>no answer, zero sources,<br/>thumbs down, contradiction"]
+  SWEEP["Sweeper<br/>stale owners, expired facts,<br/>conflicting decisions"]
+  CUR["Brain Curator<br/>who should know?<br/>experts_for_system"]
+  CONSULT["Consult tasks<br/>posted to role queues<br/>in the graph"]
+  ROLES["PM · Designer · QA · Dev<br/>answer with cited claims"]
+  GATE{"Verify<br/>evidence uids real?<br/>critic: supersedes,<br/>contradicts?"}
+  HUMAN{"Lead approves?"}
+  WRITE["Write Claim / Decision<br/>own nodes, dated,<br/>linked to evidence"]
+  OLD["Old fact invalidated<br/>valid_to set, never deleted"]
+  REASK["Re-ask the original question<br/>becomes an eval case"]
+  DROP["Rejected claim kept<br/>with reason"]
+
+  Q --> ANS
+  ANS -->|yes| OK
+  ANS -->|no| GAP
+  SWEEP --> GAP
+  GAP --> CUR
+  CUR --> CONSULT
+  CONSULT --> ROLES
+  ROLES --> GATE
+  GATE -->|fail| DROP
+  GATE -->|pass| HUMAN
+  HUMAN -->|no| DROP
+  HUMAN -->|yes| WRITE
+  WRITE --> OLD
+  WRITE --> REASK
+  REASK --> ANS
+
+  classDef curator fill:#fff7ed,stroke:#d97706,stroke-width:3px
+  classDef brain fill:#e0f2fe,stroke:#0369a1,stroke-width:2px
+  classDef agent fill:#f0fdf4,stroke:#15803d
+  classDef person fill:#faf5ff,stroke:#7e22ce
+  classDef thin fill:#f8fafc,stroke:#94a3b8
+  class CUR,CONSULT,GATE curator
+  class ANS,OK,WRITE,OLD brain
+  class ROLES agent
+  class Q,HUMAN person
+  class GAP,SWEEP,REASK,DROP thin
