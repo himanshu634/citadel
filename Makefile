@@ -9,13 +9,13 @@ SLUG ?= falkordb
 BRAIN := uv run brain
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats reset brain test lint fmt check clean synthetic fe-install fe-dev fe-check fe-build
+.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools reset brain test lint fmt check clean synthetic fe-install fe-dev fe-check fe-build
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
 	@echo ""
-	@echo "  Variables: SLUG=$(SLUG)  SOURCE=<type>  FULL=1  NAME=<display name>  CONFIRM=1  ARGS=\"...\""
+	@echo "  Variables: SLUG=$(SLUG)  TOOL=<name>  P="k=v ..."  JSON=1  SOURCE=<type>  FULL=1  NAME=<display name>  CONFIRM=1  ARGS=\"...\""
 
 # --- Environment ------------------------------------------------------------------------------
 
@@ -62,6 +62,12 @@ synthetic: ## Regenerate the synthetic company JSONL and load it into brain_synt
 	uv run python apps/backend/examples/synthetic_company/generate.py
 	$(BRAIN) schema synthetic
 	$(BRAIN) ingest synthetic --full
+
+query: ## Run a named tool: make query TOOL=experts_for_system P="system=CI" (JSON=1 for JSON)
+	$(BRAIN) query $(SLUG) $(TOOL) $(P) $(if $(filter 1 yes,$(JSON)),--json)
+
+tools: ## List the named query tools and their parameters
+	$(BRAIN) tools
 
 reset: ## Delete graph brain_$(SLUG); needs CONFIRM=1
 	$(BRAIN) reset $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)

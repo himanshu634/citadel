@@ -7,13 +7,18 @@ Commands stay thin: they parse arguments and call plain functions in the other m
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime
 from importlib import resources
+from typing import Annotated
 
 import typer
 from pydantic import ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
+from rich.console import Console
+from rich.table import Table
 
-from brain import config, db, pipeline, schema
+from brain import config, db, pipeline, schema, tools
 from brain.adapters.github.client import GithubError
 
 app = typer.Typer(help="Company Brain: a company's engineering activity as one FalkorDB graph.")
@@ -158,6 +163,94 @@ def _print_stats(slug: str, title: str) -> None:
     for kind in ("node", "relationship"):
         part = sorted((r for r in rows if r["kind"] == kind), key=lambda r: -r["count"])
         typer.echo(f"  {kind}s: " + (", ".join(f"{r['type']}={r['count']}" for r in part) or "-"))
+
+
+@app.command("tools")
+def tools_cmd() -> None:
+    """List the named query tools and their parameters."""
+    for t in tools.TOOLS.values():
+        fields = t.params.model_fields
+        params = ", ".join(
+            name if f.is_required() else f"{name}={f.default}" for name, f in fields.items()
+        )
+        typer.secho(f"{t.name}({params})", bold=True)
+        typer.echo(f"    {t.description}")
+
+
+@app.command()
+def query(
+    slug: str,
+    tool: str,
+    args: Annotated[list[str] | None, typer.Argument(help="Parameters as key=value.")] = None,
+    param: Annotated[
+        list[str] | None, typer.Option("--param", "-p", help="key=value (repeatable).")
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Print rows as JSON.")] = False,
+) -> None:
+    """Run a named query tool and print its rows: `brain query falkordb impact_of system=CI`."""
+    _company(slug)
+    _connected()
+    params = {}
+    for kv in [*(args or []), *(param or [])]:
+        key, sep, value = kv.partition("=")
+        if not sep:
+            _fail(f"parameter {kv!r} must look like key=value")
+        params[key] = value
+    try:
+        rows = tools.call(slug, tool, **params)
+    except (KeyError, ValidationError) as e:
+        _fail(str(e))
+    data = [r.model_dump(by_alias=True) for r in rows]
+    if as_json:
+        typer.echo(json.dumps(data, indent=2, default=str))
+        return
+    _print_rows(tool, data)
+
+
+HIDDEN_IN_TABLE = ("url", "evidence", "examples", "declared_owners")  # still in --json
+LABEL_KEYS = ("name", "login", "system", "number", "title", "type", "uid")  # first found wins
+
+
+def _short(key: str, value, width: int) -> str:
+    """One readable cell: epoch seconds as dates, lists of maps by their first field."""
+    if key.endswith("_ts") and isinstance(value, int):
+        return datetime.fromtimestamp(value, UTC).strftime("%Y-%m-%d")
+    if key.endswith("_at") and isinstance(value, str):
+        return value[:10]
+    if isinstance(value, list):
+        text = ", ".join(_label(v) for v in value)
+    elif isinstance(value, float):
+        text = f"{value:.3g}"
+    else:
+        text = "-" if value is None else str(value)
+    text = " ".join(text.split())
+    return text if len(text) <= width else text[: width - 1] + "…"
+
+
+def _label(item) -> str:
+    if not isinstance(item, dict):
+        return str(item)
+    return str(next((item[k] for k in LABEL_KEYS if item.get(k) is not None), ""))
+
+
+def _print_rows(tool: str, rows: list[dict]) -> None:
+    if not rows:
+        typer.echo(f"{tool}: no rows")
+        return
+    console = Console()
+    if len(rows) == 1 and len(rows[0]) > 6:  # one wide record: print it vertically
+        for key, value in rows[0].items():
+            console.print(f"[bold]{key}[/bold]: {_short(key, value, 200)}", soft_wrap=True)
+        return
+    keys = [k for k in rows[0] if not k.endswith("_uid") and k not in HIDDEN_IN_TABLE]
+    if "number" in keys:  # the number identifies the item; the uid is in --json
+        keys.remove("uid")
+    table = Table(title=f"{tool} ({len(rows)} rows; --json for everything)")
+    for key in keys:
+        table.add_column(key, overflow="fold")
+    for r in rows:
+        table.add_row(*(_short(k, r[k], 60) for k in keys))
+    console.print(table)
 
 
 if __name__ == "__main__":
