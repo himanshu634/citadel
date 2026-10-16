@@ -1,11 +1,11 @@
 """Online traces: one record per question asked of a company's brain, for watching live use.
 
-Why: a real company graph has no gold answers, so the offline evals (apps/brain/evals) cannot
+Why: a real company graph has no gold answers, so the offline evals (agents/evals) cannot
 grade live use. Instead each turn asked from the CLI or the Ask page is kept as one `Trace` with
 what needs no reference answer: the tools called, failed tool calls, rejected submit_answer
 calls, nudges, how the turn stopped, tokens, latency and how many sources it cited. `summarize`
 turns a window of traces into rates and percentiles (GET .../traces/summary). A thumbs up or
-down from the Ask page is stored on its trace, and `python -m evals.drafts` turns thumbs-down
+down from the Ask page is stored on its trace, and `python -m agents.evals.drafts` turns thumbs-down
 turns into draft cases for evals/cases/<slug>.yaml.
 
 Traces live in data/traces/<slug>.jsonl (beside data/jobs/ and data/evals/), append-only: a
@@ -25,13 +25,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from brain import config
 from pydantic import BaseModel, Field, ValidationError
 
-from brain import config
-from brain.agents.loop import SUBMIT
+from agents.loop import SUBMIT
 
 if TYPE_CHECKING:
-    from brain.agents.ask import Answer
+    from agents.ask import Answer
 
 log = logging.getLogger(__name__)
 

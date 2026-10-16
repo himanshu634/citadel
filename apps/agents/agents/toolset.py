@@ -33,7 +33,7 @@ class ToolOutcome:
     is_error: bool
     seen: dict[str, dict[str, Any]]  # uid -> {uid, label, title, url} for every node in the rows
     # What the call ran with and returned, before `content` is cut to size: the Ask page draws
-    # its step from these (brain.agents.walk), never by parsing `content` back.
+    # its step from these (agents.walk), never by parsing `content` back.
     params: dict[str, Any] = field(default_factory=dict)
     rows: list[Any] = field(default_factory=list)
 

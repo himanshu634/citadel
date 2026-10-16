@@ -18,8 +18,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Protocol
 
-from brain.work.moves import MOVES
-from brain.work.tools import WORK_TOOLS
+from agents.work.moves import MOVES
+from agents.work.tools import WORK_TOOLS
 
 Row = dict[str, Any]
 

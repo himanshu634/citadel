@@ -4,9 +4,9 @@ it with the regression the plan misses, and learns a lesson when a failure repea
 
 from __future__ import annotations
 
-from brain.agents.roles.base import Ctx, Job, Role, Subject, task_context, tasks, write
-from brain.work.store import Row, WorkStore
-from brain.work.submits import SubmitQa
+from agents.roles.base import Ctx, Job, Role, Subject, task_context, tasks, write
+from agents.work.store import Row, WorkStore
+from agents.work.submits import SubmitQa
 
 LESSON_AFTER = 2  # the same regression failing tasks in one system this often -> a Lesson
 

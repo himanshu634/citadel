@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from brain.agents.policies import builder, critic, developer, devops, pm, qa, reviewer, risk
-from brain.agents.policies.base import Policy, Results, ScriptedClient
+from agents.policies import builder, critic, developer, devops, pm, qa, reviewer, risk
+from agents.policies.base import Policy, Results, ScriptedClient
 
 POLICIES: dict[tuple[str, str], Policy] = {
     ("pm", "triage"): pm.triage,

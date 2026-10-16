@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from brain.agents.policies.base import Call, Results, uniq
+from agents.policies.base import Call, Results, uniq
 
 HOLD_OVER = 3  # more impacted systems than this holds the train for one tick
 

@@ -15,7 +15,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from brain.work.model import PRIORITIES
+from agents.work.model import PRIORITIES
 
 Priority = Literal["P0", "P1", "P2", "P3"]
 assert PRIORITIES == Priority.__args__  # one list of priorities

@@ -15,6 +15,7 @@ import threading
 from typing import Annotated, NamedTuple
 
 import yaml
+from agents import checkpoint
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -155,7 +156,7 @@ def _left_behind(runner: JobRunner, slug: str) -> bool:
     if runner.has_history(slug):
         return True
     try:
-        return bool(db.company_graphs(slug))
+        return bool(checkpoint.company_graphs(slug))
     except GRAPH_DOWN:
         log.warning("FalkorDB is not reachable; cannot check for graphs left by %s", slug)
         return False

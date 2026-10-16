@@ -1,9 +1,9 @@
 """Turn thumbs-down answers from live use into draft eval cases.
 
-    uv run python -m evals.drafts --slug acme [--days 30] [--write]
+    uv run python -m agents.evals.drafts --slug acme [--days 30] [--write]
 
 Why: the offline cases should grow from the questions the brain actually got wrong. Each turn
-with a thumbs down in data/traces/<slug>.jsonl (`brain.agents.traces`) becomes one case: the
+with a thumbs down in data/traces/<slug>.jsonl (`agents.traces`) becomes one case: the
 earlier turns of its thread (so a follow-up like "and who reviews it?" keeps its meaning) and
 then the bad turn. Nobody knows the right answer yet, so a draft only expects an answer; the bad
 answer, what it cited and the thumbs note go in comments above it for whoever writes the real
@@ -23,10 +23,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import yaml
-from brain.agents.traces import Trace, TraceStore
 
-from evals import cases as cases_mod
-from evals.cases import DRAFT, Case
+from agents.evals import cases as cases_mod
+from agents.evals.cases import DRAFT, Case
+from agents.traces import Trace, TraceStore
 
 ANSWER_CHARS = 400  # of the bad answer, quoted in the draft's comments
 HEADER = "# --- drafts from thumbs-down answers (evals/drafts.py) ---"
@@ -89,7 +89,9 @@ def build(slug: str, days: int | None, known: set[str]) -> list[tuple[dict, list
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="python -m evals.drafts", description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(
+        prog="python -m agents.evals.drafts", description=__doc__.split("\n\n")[0]
+    )
     p.add_argument("--slug", required=True)
     p.add_argument("--days", type=int, help="only thumbs-down turns from the last N days")
     p.add_argument("--write", action="store_true", help="append to evals/cases/<slug>.yaml")

@@ -3,15 +3,16 @@ name = "citadel"
 version = "0.1.0"
 description = "Company Brain monorepo root (uv workspace). Apps live under apps/."
 requires-python = ">=3.12,<3.13"
-dependencies = ["brain"]
+dependencies = ["agents", "brain"]
 
 [tool.uv]
 package = false
 
 [tool.uv.workspace]
-members = ["apps/brain"]
+members = ["apps/agents", "apps/brain"]
 
 [tool.uv.sources]
+agents = { workspace = true }
 brain = { workspace = true }
 
 [tool.pytest.ini_options]

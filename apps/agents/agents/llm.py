@@ -12,7 +12,6 @@ from functools import cache
 from typing import Any
 
 import anthropic
-
 from brain.config import get_settings
 
 # Server-side fallback: when a safety classifier declines a request, the API re-runs it on the

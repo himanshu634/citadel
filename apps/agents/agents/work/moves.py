@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from brain.work.model import ActionKind, Pm, Qa, Status, Task
+from agents.work.model import ActionKind, Pm, Qa, Status, Task
 
 LEASE_S = 600  # a claim holds the task for this long; the orchestrator expires older ones
 

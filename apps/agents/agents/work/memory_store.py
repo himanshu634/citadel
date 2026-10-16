@@ -18,9 +18,10 @@ from collections import defaultdict, deque
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-from brain import acl
 from brain.config import graph_name, mem_graph_name
-from brain.work.model import (
+
+from agents import acl
+from agents.work.model import (
     Action,
     ActionKind,
     Agent,
@@ -36,9 +37,9 @@ from brain.work.model import (
     SuggestedReviewer,
     Task,
 )
-from brain.work.moves import MOVES
-from brain.work.priority import task_score
-from brain.work.store import READS, WRITES, Row
+from agents.work.moves import MOVES
+from agents.work.priority import task_score
+from agents.work.store import READS, WRITES, Row
 
 _WORD = re.compile(r"[a-z0-9]+")
 _STOP = {"the", "and", "for", "with", "when", "from", "into", "on", "in", "of", "to", "a", "is"}
@@ -551,7 +552,7 @@ class MemoryStore:
     def _r_episodes(self, p: Mapping[str, Any]) -> list[Row]:
         return [e.model_dump() for e in self.episodes]
 
-    # --- work tools (brain.work.tools.WORK_TOOLS) ---------------------------------------------
+    # --- work tools (agents.work.tools.WORK_TOOLS) ---------------------------------------------
 
     def _r_task_timeline(self, p: Mapping[str, Any]) -> list[Row]:
         return [a.model_dump() for a in self.actions if a.task == p["task"]]

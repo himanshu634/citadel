@@ -3,9 +3,9 @@ reports completion; reworks what a gate sends back (docs/agents.md, "2. Develope
 
 from __future__ import annotations
 
-from brain.agents.roles.base import Ctx, Job, Role, Subject, task_context, tasks, write
-from brain.work.store import Row, WorkStore
-from brain.work.submits import SubmitCompletion, SubmitPlan
+from agents.roles.base import Ctx, Job, Role, Subject, task_context, tasks, write
+from agents.work.store import Row, WorkStore
+from agents.work.submits import SubmitCompletion, SubmitPlan
 
 UNCLAIM = "work/unclaim_task"
 

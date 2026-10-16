@@ -3,9 +3,9 @@ back finished work against the acceptance criteria it wrote (docs/agents.md, "1.
 
 from __future__ import annotations
 
-from brain.agents.roles.base import Ctx, Job, Role, Subject, task_context, tasks, write
-from brain.work.store import Row, WorkStore
-from brain.work.submits import SubmitAcceptance, SubmitTriage
+from agents.roles.base import Ctx, Job, Role, Subject, task_context, tasks, write
+from agents.work.store import Row, WorkStore
+from agents.work.submits import SubmitAcceptance, SubmitTriage
 
 
 def intake(store: WorkStore, ctx: Ctx) -> list[Row]:

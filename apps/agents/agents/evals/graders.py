@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from evals.cases import Expect
+from agents.evals.cases import Expect
 
 
 @dataclass(frozen=True)

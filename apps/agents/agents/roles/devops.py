@@ -5,9 +5,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from brain.agents.roles.base import Ctx, Job, Role, Subject, write
-from brain.work.store import Row, WorkStore
-from brain.work.submits import SubmitRelease
+from agents.roles.base import Ctx, Job, Role, Subject, write
+from agents.work.store import Row, WorkStore
+from agents.work.submits import SubmitRelease
 
 
 def _queue(store: WorkStore, ctx: Ctx) -> list[Subject]:

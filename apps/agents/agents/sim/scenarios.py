@@ -10,10 +10,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from brain.agents.policies import offline_client
-from brain.agents.toolset import Runner
-from brain.sim.orchestrator import ORCHESTRATOR, START, AgentSpec, ClientFor, Orchestrator
-from brain.work.memory_store import MemoryStore
+from agents.policies import offline_client
+from agents.sim.orchestrator import ORCHESTRATOR, START, AgentSpec, ClientFor, Orchestrator
+from agents.toolset import Runner
+from agents.work.memory_store import MemoryStore
 
 # Ten issues for the synthetic company (Auth, Billing, Web app, Infra); 2 and 5 are
 # near-duplicates of 1 and 4.
@@ -38,7 +38,7 @@ def offline(role: str, job: str):
 
 
 def online(role: str, job: str):
-    from brain import llm
+    from agents import llm
 
     return llm.client()
 

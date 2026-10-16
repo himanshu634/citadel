@@ -1,4 +1,4 @@
-"""A scripted stand-in for Claude, for `brain chat --offline`.
+"""A scripted stand-in for Claude, for `agents chat --offline`.
 
 Why: anyone can check the wiring without an API key. The real router, toolset, graph tools and
 FalkorDB checkpointer all run; only the model is replaced by two fixed replies:
@@ -16,7 +16,7 @@ from typing import Any
 
 from anthropic.types.beta import BetaToolUseBlock, BetaUsage
 
-from brain.agents.loop import SUBMIT
+from agents.loop import SUBMIT
 
 MODEL = "offline-script"
 

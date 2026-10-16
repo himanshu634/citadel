@@ -1,5 +1,5 @@
 import sys
 
-from evals.run import main
+from agents.evals.run import main
 
 sys.exit(main())

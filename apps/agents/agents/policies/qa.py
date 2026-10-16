@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from brain.agents.policies.base import Call, Results, uniq
+from agents.policies.base import Call, Results, uniq
 
 FIXLIKE = re.compile(r"\b(fix|bug|regress\w*|crash\w*|race|leak|broken|fail\w*)\b", re.I)
 

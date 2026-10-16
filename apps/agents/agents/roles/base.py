@@ -18,8 +18,8 @@ from dataclasses import dataclass, field
 from importlib import resources
 from typing import Any
 
-from brain.work.store import Row, WorkStore
-from brain.work.submits import Submit
+from agents.work.store import Row, WorkStore
+from agents.work.submits import Submit
 
 
 @dataclass(frozen=True)
@@ -66,12 +66,12 @@ class Role:
     read_tools: tuple[str, ...]  # sorted; names from brain.tools.TOOLS or work.tools.WORK_TOOLS
     jobs: tuple[Job, ...]  # tried in order; an agent does at most one per tick
     every: int = 1  # runs on ticks where tick % every == 0
-    summary: str = ""  # one line for `brain agents`
+    summary: str = ""  # one line for `agents agents`
 
     @property
     def prompt(self) -> str:
         """Shared rules + the role's own prompt; static, so the request prefix caches."""
-        files = resources.files("brain.agents").joinpath("prompts")
+        files = resources.files("agents").joinpath("prompts")
         shared = files.joinpath("_shared.md").read_text()
         return f"{shared}\n\n{files.joinpath(f'{self.name}.md').read_text()}"
 

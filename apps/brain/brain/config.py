@@ -57,8 +57,9 @@ class Settings(BaseSettings):
 
     embedding_dim: int = 768
 
-    # Claude answers questions over the graph (brain/agents). pydantic-settings reads .env but
-    # does not export it, so llm.py passes the key on; unset lets the SDK use its own chain.
+    # Claude answers questions over the graph (the agents package). pydantic-settings reads .env
+    # but does not export it, so agents/llm.py passes the key on; unset lets the SDK use its own
+    # chain.
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-haiku-5-5"  # cheap while the product takes shape
     anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
@@ -164,12 +165,6 @@ def graph_name(slug: str) -> str:
     if not re.fullmatch(SLUG_RE, slug):
         raise ValueError(f"invalid company slug: {slug!r}")
     return f"brain_{slug}"
-
-
-def agent_graph_name(slug: str) -> str:
-    """Agent conversation checkpoints for one company: agent_<slug>, apart from its brain graph."""
-    graph_name(slug)  # same slug rules
-    return f"agent_{slug}"
 
 
 def mem_graph_name(slug: str, role: str) -> str:

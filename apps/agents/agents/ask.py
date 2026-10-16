@@ -17,14 +17,14 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import anthropic
+from brain.config import load_company
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.errors import GraphRecursionError
 
-from brain import llm
-from brain.agents.graph import build_graph
-from brain.agents.loop import SUBMIT, result_block
-from brain.agents.toolset import Toolset, graph_toolset
-from brain.config import load_company
+from agents import llm
+from agents.graph import build_graph
+from agents.loop import SUBMIT, result_block
+from agents.toolset import Toolset, graph_toolset
 
 _KEPT_STOPS = ("refusal", "max_tokens", "step_limit", "stopped")
 RECURSION_LIMIT = 40  # graph steps per question (each tool round trip is two)

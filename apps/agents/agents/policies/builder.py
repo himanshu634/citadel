@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from brain.agents.policies.base import Call, Results, first_line, uniq
+from agents.policies.base import Call, Results, first_line, uniq
 
 
 def record(context: dict[str, Any], results: Results) -> list[Call] | dict[str, Any]:

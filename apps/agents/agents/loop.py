@@ -26,15 +26,15 @@ from importlib import resources
 from typing import Annotated, Any, Literal, TypedDict
 
 import anthropic
+from brain.config import get_settings
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
 
-from brain import llm
-from brain.agents.toolset import Toolset
-from brain.agents.walk import preview_rows, subgraph
-from brain.config import get_settings
+from agents import llm
+from agents.toolset import Toolset
+from agents.walk import preview_rows, subgraph
 
-SYSTEM_PROMPT = resources.files("brain.agents").joinpath("system_prompt.md").read_text()
+SYSTEM_PROMPT = resources.files("agents").joinpath("system_prompt.md").read_text()
 SUBMIT = "submit_answer"
 MAX_NUDGES = 1  # times we ask for submit_answer after a plain-text reply before giving up
 _MARKER = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")  # [1] or [1, 3]

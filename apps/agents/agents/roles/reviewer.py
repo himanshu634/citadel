@@ -3,9 +3,9 @@ graph path that justifies them (docs/agents.md, "9. Reviewer-matcher")."""
 
 from __future__ import annotations
 
-from brain.agents.roles.base import Ctx, Job, Role, Subject, task_context, tasks, write
-from brain.work.store import Row, WorkStore
-from brain.work.submits import SubmitReviewers
+from agents.roles.base import Ctx, Job, Role, Subject, task_context, tasks, write
+from agents.work.store import Row, WorkStore
+from agents.work.submits import SubmitReviewers
 
 
 def _queue(store: WorkStore, ctx: Ctx) -> list[Subject]:

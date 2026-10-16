@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from brain.agents.policies.base import Call, Results, uniq
+from agents.policies.base import Call, Results, uniq
 
 SINGLE_EXPERT = 0.7
 BOTTLENECK = 2

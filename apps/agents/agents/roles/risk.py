@@ -6,9 +6,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from brain.agents.roles.base import Ctx, Job, Role, Subject, write
-from brain.work.store import Row, WorkStore
-from brain.work.submits import SubmitFindings
+from agents.roles.base import Ctx, Job, Role, Subject, write
+from agents.work.store import Row, WorkStore
+from agents.work.submits import SubmitFindings
 
 EVERY = 5  # ticks between scans
 

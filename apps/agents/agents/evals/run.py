@@ -1,6 +1,6 @@
 """Run eval cases against brain_<slug> with the real agent, grade them, record the results.
 
-    uv run python -m evals --slug synthetic [--case ID|TAG ...] [--repeat N] [--jobs N]
+    uv run python -m agents.evals --slug synthetic [--case ID|TAG ...] [--repeat N] [--jobs N]
         [--model M] [--effort E] [--baseline data/evals/synthetic/<run>.jsonl]
 
 Each case runs `repeat` times (models are not deterministic, so a case reports a pass rate, not
@@ -26,16 +26,16 @@ from pathlib import Path
 from typing import Any
 
 import anthropic
-from brain.agents.ask import ask_traced
-from brain.agents.loop import SUBMIT
-from brain.agents.toolset import Toolset, graph_toolset
-from brain.agents.traces import step_summary
 from brain.config import REPO_ROOT, get_settings
 from langgraph.checkpoint.memory import InMemorySaver
 
-from evals import cases as cases_mod
-from evals.cases import Case, GoldResolver
-from evals.graders import grade
+from agents.ask import ask_traced
+from agents.evals import cases as cases_mod
+from agents.evals.cases import Case, GoldResolver
+from agents.evals.graders import grade
+from agents.loop import SUBMIT
+from agents.toolset import Toolset, graph_toolset
+from agents.traces import step_summary
 
 OUT_DIR = REPO_ROOT / "data" / "evals"
 
@@ -228,7 +228,7 @@ def write(results: list[dict[str, Any]], meta: dict[str, Any], slug: str) -> Pat
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="python -m evals", description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(prog="python -m agents.evals", description=__doc__.split("\n\n")[0])
     p.add_argument("--slug", default="synthetic")
     p.add_argument("--case", action="append", default=[], help="case id or tag (repeatable)")
     p.add_argument("--repeat", type=int, default=1, help="runs per case")

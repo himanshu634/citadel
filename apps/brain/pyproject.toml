@@ -4,12 +4,9 @@ version = "0.1.0"
 description = "Company Brain engine: adapters, ingestion, the FalkorDB graph and its named query tools."
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "anthropic>=1.15.0",
     "falkordb>=1.8.0",
     "fastapi>=0.115",
     "httpx>=0.28.1",
-    "langchain-falkordb[langgraph]>=0.2.0",
-    "langgraph>=1.2.15",
     "pydantic>=2",
     "pydantic-settings>=2.16.0",
     "pyyaml>=6.0.3",

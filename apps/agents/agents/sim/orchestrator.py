@@ -16,11 +16,11 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
-from brain.agents.roles import ROLES, Ctx, Role
-from brain.agents.roles.pm import intake
-from brain.agents.runner import RunResult, run_job
-from brain.agents.toolset import Runner
-from brain.work.store import Row, WorkStore
+from agents.roles import ROLES, Ctx, Role
+from agents.roles.pm import intake
+from agents.runner import RunResult, run_job
+from agents.toolset import Runner
+from agents.work.store import Row, WorkStore
 
 # (role, job): the fixed order of a tick. None runs the role's first job that has work.
 STEPS: tuple[tuple[str, str | None], ...] = (

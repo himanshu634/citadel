@@ -9,8 +9,8 @@
   from what a thread established; the Critic will link them with SUPERSEDES / CONTRADICTS.
   They have no logic yet and the router never sends a turn to them.
 
-Compiled with a checkpointer (`db.checkpointer(slug)`: graph agent_<slug> on the same FalkorDB),
-every step is saved under the run's `thread_id`.
+Compiled with a checkpointer (`checkpoint.checkpointer(slug)`: graph agent_<slug> on the same
+FalkorDB), every step is saved under the run's `thread_id`.
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ import anthropic
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 
-from brain.agents.loop import AgentState, add_brain_loop
-from brain.agents.toolset import Toolset
+from agents.loop import AgentState, add_brain_loop
+from agents.toolset import Toolset
 
 Route = Literal["brain", "build"]
 

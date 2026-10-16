@@ -7,8 +7,8 @@ import re
 from collections import Counter
 from typing import Any
 
-from brain.agents.policies.base import Call, Results, uniq, words
-from brain.work.memory_store import uid_key
+from agents.policies.base import Call, Results, uniq, words
+from agents.work.memory_store import uid_key
 
 DUPLICATE = 0.6  # word overlap with an earlier task's title that makes this one a duplicate
 _P0 = re.compile(r"crash|outage|data loss|security|corrupt|leak", re.I)

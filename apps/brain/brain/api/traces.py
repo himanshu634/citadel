@@ -5,16 +5,16 @@ none (`agents/traces.py`). GET .../traces/summary?days=7 gives the window's rate
 step limit, refusal, nudges, rejected submits, zero-source answers, ...), p50/p95 latency and
 tokens, and the thumbs counts. POST .../traces/{trace_id}/feedback stores a thumbs up or down
 (or takes it back) on one turn the Ask page answered; thumbs-down turns become draft eval cases
-(`python -m evals.drafts`). A trace id only counts for its own company (404 otherwise).
+(`python -m agents.evals.drafts`). A trace id only counts for its own company (404 otherwise).
 """
 
 from __future__ import annotations
 
 from typing import Annotated
 
+from agents.traces import TraceSummary, summarize, window
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
-from brain.agents.traces import TraceSummary, summarize, window
 from brain.api.ask import Asker, get_asker
 from brain.api.deps import company_slug
 from brain.api.models import FeedbackIn, FeedbackOut

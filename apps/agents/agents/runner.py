@@ -5,7 +5,7 @@
                          -> Episode (always, once claimed)
 
 Why: every role decides the same way, so this is the one place that does it. The loop is
-`agents/loop.py` (the same one `brain ask` uses), so a role's run follows the same rules:
+`agents/loop.py` (the same one `agents ask` uses), so a role's run follows the same rules:
 append-only history, all tool results in one message, and a submit that may cite only uids
 seen in tool results this run. `client` is Claude (`llm.client()`) or a scripted policy client
 (`agents/policies`); the run can't tell the difference.
@@ -18,18 +18,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import anthropic
+from brain.config import graph_name
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import START, StateGraph
 from pydantic import BaseModel, ValidationError
 
-from brain import acl
-from brain.agents.loop import AgentState, Check, add_brain_loop
-from brain.agents.roles.base import Ctx, Job, Role, Subject, write
-from brain.agents.toolset import Runner, Toolset
-from brain.config import graph_name
-from brain.work.store import Row, WorkStore
-from brain.work.submits import Submit
-from brain.work.tools import WORK_TOOLS
+from agents import acl
+from agents.loop import AgentState, Check, add_brain_loop
+from agents.roles.base import Ctx, Job, Role, Subject, write
+from agents.toolset import Runner, Toolset
+from agents.work.store import Row, WorkStore
+from agents.work.submits import Submit
+from agents.work.tools import WORK_TOOLS
 
 RECURSION_LIMIT = 30  # graph steps per run (each tool round trip is two)
 

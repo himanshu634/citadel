@@ -11,7 +11,9 @@ Graph kinds: `brain` (brain_<slug>), `sim` (sim_<slug>_*), `agent` (agent_<slug>
 
 from __future__ import annotations
 
-from brain.config import agent_graph_name, graph_name
+from brain.config import graph_name
+
+from agents.checkpoint import agent_graph_name
 
 R, RW = "R", "RW"
 

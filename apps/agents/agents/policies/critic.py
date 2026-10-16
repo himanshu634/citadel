@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from brain.agents.policies.base import Call, Results, uniq, words
+from agents.policies.base import Call, Results, uniq, words
 
 _NEGATION = re.compile(r"\b(no longer|not|never|stop|remove|revert|drop|disable)\b", re.I)
 SAME_TOPIC = 0.5

@@ -26,14 +26,15 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Annotated, Any
 
+from agents import checkpoint, llm
+from agents.ask import Answer, answer_out, run_events
+from agents.toolset import Toolset, graph_toolset
+from agents.traces import TraceStore, new_trace
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
-from brain import db, llm
-from brain.agents.ask import Answer, answer_out, run_events
-from brain.agents.toolset import Toolset, graph_toolset
-from brain.agents.traces import TraceStore, new_trace
+from brain import db
 from brain.api.deps import company_slug
 from brain.api.models import AskAnswer, AskError, AskIn, AskStart, AskStep, AskStepDone
 
@@ -59,7 +60,7 @@ class Asker:
 
     client: Callable[[], Any] = llm.client
     toolset: Callable[[], Toolset] = graph_toolset
-    checkpointer: Callable[[str], Any] = db.checkpointer
+    checkpointer: Callable[[str], Any] = checkpoint.checkpointer
     graph_exists: Callable[[str], bool] = db.graph_exists
     traces: Callable[[str], TraceStore] = TraceStore
     claim_wait: float = CLAIM_WAIT_SECONDS
