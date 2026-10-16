@@ -60,7 +60,7 @@
 	<header>
 		<h1>Components</h1>
 		<p>
-			Direction H, wide type and a calm body. Rules are in <code>apps/frontend/design-system.md</code>.
+			Wide type and a calm body. Rules are in <code>apps/frontend/design-system.md</code>.
 			Switch the theme from the top bar to check both modes.
 		</p>
 	</header>

@@ -1,9 +1,8 @@
 # Citadel design system
 
-Direction **H, "Wide type, calm body"**, picked from the round 2 directions canvas
-(<https://claude.ai/artifact/4GQhEe9KcnEu36jxJhr4xh>). The interface is quiet and ordinary. The
-identity lives in two places only: **wide Archivo type** for brand, headings and labels, and
-**one solid ultramarine block** that marks where you are.
+The direction is **"Wide type, calm body"**. The interface is quiet and ordinary. The identity
+lives in two places only: **wide Archivo type** for brand, headings and labels, and **one solid
+ultramarine block** that marks where you are.
 
 This file is the rulebook. The tokens are in `src/lib/styles/tokens.css`, the components in
 `src/lib/components/`, and the live gallery at `/components`. When code and this file disagree,

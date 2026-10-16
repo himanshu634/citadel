@@ -1,5 +1,5 @@
 /*
- * Citadel design tokens, direction H "Wide type, calm body".
+ * Citadel design tokens, "Wide type, calm body".
  * Rules for using them live in apps/frontend/design-system.md. Components read tokens only;
  * no component may hold a literal colour, size or radius.
  *
