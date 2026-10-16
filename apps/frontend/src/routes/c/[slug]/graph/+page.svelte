@@ -162,6 +162,14 @@ overview (`viewOf`). The layout runs in a worker (`graphLayout.ts`), because it 
 	}
 
 	let filtersOpen = $state(false);
+
+	/** Escape clears the selection, unless it was meant for a field or the filters panel. */
+	function onescape(e: KeyboardEvent) {
+		if (e.key !== 'Escape' || !selected || e.defaultPrevented || filtersOpen) return;
+		const target = e.target instanceof Element ? e.target : null;
+		if (target?.closest('input, textarea, select, .graph-filters, [role="dialog"]')) return;
+		select(null);
+	}
 	let listing = $state(false);
 	let shownRows = $state(200);
 	const rows = $derived(
@@ -181,9 +189,7 @@ overview (`viewOf`). The layout runs in a worker (`graphLayout.ts`), because it 
 </script>
 
 <svelte:head><title>Graph · {company?.name ?? 'Graph'} | Citadel</title></svelte:head>
-<svelte:window
-	onkeydown={(e) => e.key === 'Escape' && selected && !finding && !filtersOpen && select(null)}
-/>
+<svelte:window onkeydowncapture={onescape} />
 
 {#if company && status}
 	<div class="graph-page">
@@ -398,8 +404,8 @@ overview (`viewOf`). The layout runs in a worker (`graphLayout.ts`), because it 
 	.graph-page {
 		display: flex;
 		flex-direction: column;
-		height: calc(100dvh - var(--topbar-height));
-		min-height: 32rem;
+		flex: 1;
+		min-height: 0;
 	}
 	.bar {
 		display: flex;

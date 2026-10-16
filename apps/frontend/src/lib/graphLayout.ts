@@ -4,7 +4,7 @@
  *
  * Why: `layoutMap` takes seconds on a real company (2,272 nodes on brain_falkordb), and the same
  * view always gives the same layout. The cache is keyed by slug, the bots switch and the view's
- * size, so a sync that changes the graph lays it out again.
+ * content, so a sync that changes the graph lays it out again.
  */
 import { layoutMap, type MapLayout } from './graph';
 import type { GraphView } from './types';
@@ -16,8 +16,15 @@ let worker: Worker | null = null;
 let next = 0;
 const waiting = new Map<number, (layout: MapLayout) => void>();
 
+/** The view's content, not just its size: a sync can change uids or territories and keep the
+ *  counts, and a layout drawn for other nodes would put them in the wrong places. */
 function keyOf(view: GraphView): string {
-	return `${view.slug}|${view.bots_shown}|${view.nodes.length}|${view.edges.length}`;
+	let h = 5381;
+	const mix = (text: string) => {
+		for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+	};
+	for (const n of view.nodes) mix(`${n.uid}|${n.territory}|${n.degree};`);
+	return `${view.slug}|${view.bots_shown}|${view.nodes.length}|${view.edges.length}|${h >>> 0}`;
 }
 
 function getWorker(): Worker | null {

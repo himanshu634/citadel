@@ -40,6 +40,8 @@ summary instead; the page's search and list are the keyboard way in (see design-
 	let palette = $state<Record<string, string>>({});
 
 	const index = $derived(new Map(view.nodes.map((n, i) => [n.uid, i])));
+	/** Positions by uid, so a layout is never read by a node's place in the list. */
+	const pos = $derived(new Map(layout.nodes.map((n) => [n.uid, n])));
 	const shown = $derived(keep?.nodes ?? null);
 	const keptView = $derived(
 		keep ? { nodes: view.nodes, edges: view.edges.filter((_, i) => keep.edges[i]) } : view
@@ -84,7 +86,7 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		const { width, height } = size;
 		if (!uid || !width || !height) return;
 		untrack(() => {
-			const n = layout.nodes[index.get(uid) ?? -1];
+			const n = pos.get(uid);
 			if (!n) return;
 			const sx = n.x * transform.k + transform.x;
 			const sy = n.y * transform.k + transform.y;
@@ -136,7 +138,7 @@ summary instead; the page's search and list are the keyboard way in (see design-
 	let frame = 0;
 	$effect(() => {
 		// Read everything the drawing depends on, then draw once per animation frame.
-		const deps = [canvas, size.width, size.height, transform, palette, view, layout, shown, keptView, roads, hood, reached, hover, selected];
+		const deps = [canvas, size.width, size.height, transform, palette, view, layout, pos, shown, keptView, roads, hood, reached, hover, selected];
 		void deps;
 		cancelAnimationFrame(frame);
 		frame = requestAnimationFrame(draw);
@@ -176,7 +178,7 @@ summary instead; the page's search and list are the keyboard way in (see design-
 
 		// Links inside a territory: thin and quiet.
 		const territory = (uid: string) => view.nodes[index.get(uid) ?? -1]?.territory;
-		const at = (uid: string) => layout.nodes[index.get(uid) ?? -1];
+		const at = (uid: string) => pos.get(uid);
 		ctx.strokeStyle = palette.edge;
 		ctx.lineWidth = 0.5;
 		ctx.globalAlpha = dim ? 0.05 : 0.16;
@@ -218,13 +220,11 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		}
 
 		// Nodes, small first so hubs sit on top.
-		const order = layout.nodes
-			.map((_, i) => i)
-			.filter((i) => !shown || shown.has(view.nodes[i].uid))
-			.sort((a, b) => layout.nodes[a].r - layout.nodes[b].r);
-		for (const i of order) {
-			const n = layout.nodes[i];
-			const label = view.nodes[i].label;
+		const order = view.nodes
+			.filter((v) => (!shown || shown.has(v.uid)) && pos.has(v.uid))
+			.map((v) => [v.label, pos.get(v.uid)!] as const)
+			.sort((a, b) => a[1].r - b[1].r);
+		for (const [label, n] of order) {
 			ctx.globalAlpha = dim && !hood?.uids.has(n.uid) ? 0.18 : 1;
 			ctx.fillStyle = palette[label] ?? palette.ink;
 			ctx.beginPath();
@@ -342,15 +342,15 @@ summary instead; the page's search and list are the keyboard way in (see design-
 			{/if}
 		{/each}
 		{#if hovered}
-			{@const n = layout.nodes[index.get(hovered.uid) ?? -1]}
-			{@const p = screen(n.x, n.y)}
+			{@const n = pos.get(hovered.uid)}
+			{@const p = n ? screen(n.x, n.y) : { left: -999, top: -999 }}
 			<span class="node hover" style:left="{p.left + 10}px" style:top="{p.top - 9}px">
 				{nodeName(hovered)}<small>{kindOf(hovered.label)}</small>
 			</span>
 		{/if}
 		{#if picked}
-			{@const n = layout.nodes[index.get(picked.uid) ?? -1]}
-			{@const p = screen(n.x, n.y)}
+			{@const n = pos.get(picked.uid)}
+			{@const p = n ? screen(n.x, n.y) : { left: -999, top: -999 }}
 			<span class="node selected" style:left="{p.left + 12}px" style:top="{p.top - 9}px">
 				{nodeName(picked)}
 			</span>

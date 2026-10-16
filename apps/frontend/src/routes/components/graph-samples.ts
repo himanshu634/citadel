@@ -1,5 +1,5 @@
-// The synthetic company's graph view (GET /api/companies/synthetic/graph?bots=true), for the gallery.
-// Regenerate with: graph_view.load("synthetic", bots=True).model_dump()
+// The synthetic company's graph view, bots shown, for the gallery: a fresh load of
+// apps/backend/examples/synthetic_company read through brain.graph_view (bots=True).
 import type { GraphView } from '$lib/types';
 
 export const syntheticGraph: GraphView = {
@@ -15,7 +15,7 @@ export const syntheticGraph: GraphView = {
    "url": null,
    "is_bot": false,
    "comments": 0,
-   "degree": 19,
+   "degree": 14,
    "territory": "system:Auth"
   },
   {
@@ -28,7 +28,7 @@ export const syntheticGraph: GraphView = {
    "url": null,
    "is_bot": false,
    "comments": 0,
-   "degree": 24,
+   "degree": 15,
    "territory": "system:Billing"
   },
   {
@@ -41,7 +41,7 @@ export const syntheticGraph: GraphView = {
    "url": null,
    "is_bot": false,
    "comments": 0,
-   "degree": 12,
+   "degree": 9,
    "territory": "system:Auth"
   },
   {
@@ -80,7 +80,7 @@ export const syntheticGraph: GraphView = {
    "url": null,
    "is_bot": false,
    "comments": 0,
-   "degree": 17,
+   "degree": 14,
    "territory": "system:Billing"
   },
   {
@@ -496,7 +496,7 @@ export const syntheticGraph: GraphView = {
    "url": "https://example.com/synthetic/app/issues/14",
    "is_bot": false,
    "comments": 1,
-   "degree": 3,
+   "degree": 2,
    "territory": "none"
   },
   {
@@ -522,7 +522,7 @@ export const syntheticGraph: GraphView = {
    "url": "https://example.com/synthetic/app/pull/10",
    "is_bot": false,
    "comments": 0,
-   "degree": 5,
+   "degree": 4,
    "territory": "system:Auth"
   },
   {
@@ -561,7 +561,7 @@ export const syntheticGraph: GraphView = {
    "url": "https://example.com/synthetic/app/pull/4",
    "is_bot": false,
    "comments": 0,
-   "degree": 6,
+   "degree": 5,
    "territory": "system:Billing"
   },
   {
@@ -626,7 +626,7 @@ export const syntheticGraph: GraphView = {
    "url": "https://example.com/synthetic/app/pull/9",
    "is_bot": false,
    "comments": 0,
-   "degree": 5,
+   "degree": 4,
    "territory": "system:Billing"
   },
   {
@@ -640,136 +640,6 @@ export const syntheticGraph: GraphView = {
    "is_bot": false,
    "comments": 0,
    "degree": 1,
-   "territory": "none"
-  },
-  {
-   "uid": "synthetic:ticket:IDN-1",
-   "label": "WorkItem",
-   "title": "Rotate JWT signing keys",
-   "kind": "ticket",
-   "state": "In Progress",
-   "number": 1,
-   "url": "https://example.com/synthetic/linear/IDN-1",
-   "is_bot": false,
-   "comments": 0,
-   "degree": 4,
-   "territory": "none"
-  },
-  {
-   "uid": "synthetic:ticket:IDN-2",
-   "label": "WorkItem",
-   "title": "SSO login for enterprise customers",
-   "kind": "ticket",
-   "state": "Todo",
-   "number": 2,
-   "url": "https://example.com/synthetic/linear/IDN-2",
-   "is_bot": false,
-   "comments": 0,
-   "degree": 4,
-   "territory": "none"
-  },
-  {
-   "uid": "synthetic:ticket:IDN-3",
-   "label": "WorkItem",
-   "title": "Session audit log",
-   "kind": "ticket",
-   "state": "Backlog",
-   "number": 3,
-   "url": "https://example.com/synthetic/linear/IDN-3",
-   "is_bot": false,
-   "comments": 0,
-   "degree": 2,
-   "territory": "none"
-  },
-  {
-   "uid": "synthetic:ticket:IDN-4",
-   "label": "WorkItem",
-   "title": "Extract token service",
-   "kind": "ticket",
-   "state": "Done",
-   "number": 4,
-   "url": "https://example.com/synthetic/linear/IDN-4",
-   "is_bot": false,
-   "comments": 0,
-   "degree": 3,
-   "territory": "system:Auth"
-  },
-  {
-   "uid": "synthetic:ticket:PAY-1",
-   "label": "WorkItem",
-   "title": "Speed up invoice batch generation",
-   "kind": "ticket",
-   "state": "Done",
-   "number": 1,
-   "url": "https://example.com/synthetic/linear/PAY-1",
-   "is_bot": false,
-   "comments": 0,
-   "degree": 3,
-   "territory": "system:Billing"
-  },
-  {
-   "uid": "synthetic:ticket:PAY-2",
-   "label": "WorkItem",
-   "title": "Per-seat pricing for SSO plans",
-   "kind": "ticket",
-   "state": "In Progress",
-   "number": 2,
-   "url": "https://example.com/synthetic/linear/PAY-2",
-   "is_bot": false,
-   "comments": 0,
-   "degree": 4,
-   "territory": "none"
-  },
-  {
-   "uid": "synthetic:ticket:PAY-3",
-   "label": "WorkItem",
-   "title": "Usage-based add-ons",
-   "kind": "ticket",
-   "state": "In Progress",
-   "number": 3,
-   "url": "https://example.com/synthetic/linear/PAY-3",
-   "is_bot": false,
-   "comments": 0,
-   "degree": 4,
-   "territory": "system:Billing"
-  },
-  {
-   "uid": "synthetic:ticket:PAY-4",
-   "label": "WorkItem",
-   "title": "Refunds in the web app",
-   "kind": "ticket",
-   "state": "Todo",
-   "number": 4,
-   "url": "https://example.com/synthetic/linear/PAY-4",
-   "is_bot": false,
-   "comments": 0,
-   "degree": 3,
-   "territory": "none"
-  },
-  {
-   "uid": "synthetic:ticket:PAY-5",
-   "label": "WorkItem",
-   "title": "Redesign old pricing page",
-   "kind": "ticket",
-   "state": "Canceled",
-   "number": 5,
-   "url": "https://example.com/synthetic/linear/PAY-5",
-   "is_bot": false,
-   "comments": 0,
-   "degree": 2,
-   "territory": "none"
-  },
-  {
-   "uid": "synthetic:ticket:PAY-6",
-   "label": "WorkItem",
-   "title": "Invoice emails sent twice",
-   "kind": "ticket",
-   "state": "Todo",
-   "number": 6,
-   "url": "https://example.com/synthetic/linear/PAY-6",
-   "is_bot": false,
-   "comments": 0,
-   "degree": 3,
    "territory": "none"
   },
   {
@@ -854,11 +724,6 @@ export const syntheticGraph: GraphView = {
  "edges": [
   {
    "source": "person:alice",
-   "rel": "ASSIGNED_TO",
-   "target": "synthetic:ticket:IDN-1"
-  },
-  {
-   "source": "person:alice",
    "rel": "AUTHORED",
    "target": "synthetic:commit:a001"
   },
@@ -899,26 +764,6 @@ export const syntheticGraph: GraphView = {
   },
   {
    "source": "person:alice",
-   "rel": "AUTHORED",
-   "target": "synthetic:ticket:IDN-1"
-  },
-  {
-   "source": "person:alice",
-   "rel": "AUTHORED",
-   "target": "synthetic:ticket:IDN-2"
-  },
-  {
-   "source": "person:alice",
-   "rel": "AUTHORED",
-   "target": "synthetic:ticket:IDN-3"
-  },
-  {
-   "source": "person:alice",
-   "rel": "AUTHORED",
-   "target": "synthetic:ticket:IDN-4"
-  },
-  {
-   "source": "person:alice",
    "rel": "COMMENTED_ON",
    "target": "synthetic:pr:1"
   },
@@ -946,21 +791,6 @@ export const syntheticGraph: GraphView = {
    "source": "person:alice",
    "rel": "REVIEWED",
    "target": "synthetic:pr:8"
-  },
-  {
-   "source": "person:bob",
-   "rel": "ASSIGNED_TO",
-   "target": "synthetic:ticket:PAY-1"
-  },
-  {
-   "source": "person:bob",
-   "rel": "ASSIGNED_TO",
-   "target": "synthetic:ticket:PAY-2"
-  },
-  {
-   "source": "person:bob",
-   "rel": "ASSIGNED_TO",
-   "target": "synthetic:ticket:PAY-5"
   },
   {
    "source": "person:bob",
@@ -1014,36 +844,6 @@ export const syntheticGraph: GraphView = {
   },
   {
    "source": "person:bob",
-   "rel": "AUTHORED",
-   "target": "synthetic:ticket:PAY-1"
-  },
-  {
-   "source": "person:bob",
-   "rel": "AUTHORED",
-   "target": "synthetic:ticket:PAY-2"
-  },
-  {
-   "source": "person:bob",
-   "rel": "AUTHORED",
-   "target": "synthetic:ticket:PAY-3"
-  },
-  {
-   "source": "person:bob",
-   "rel": "AUTHORED",
-   "target": "synthetic:ticket:PAY-4"
-  },
-  {
-   "source": "person:bob",
-   "rel": "AUTHORED",
-   "target": "synthetic:ticket:PAY-5"
-  },
-  {
-   "source": "person:bob",
-   "rel": "AUTHORED",
-   "target": "synthetic:ticket:PAY-6"
-  },
-  {
-   "source": "person:bob",
    "rel": "COMMENTED_ON",
    "target": "synthetic:issue:14"
   },
@@ -1066,21 +866,6 @@ export const syntheticGraph: GraphView = {
    "source": "person:bob",
    "rel": "REVIEWED",
    "target": "synthetic:pr:7"
-  },
-  {
-   "source": "person:carol",
-   "rel": "ASSIGNED_TO",
-   "target": "synthetic:ticket:IDN-2"
-  },
-  {
-   "source": "person:carol",
-   "rel": "ASSIGNED_TO",
-   "target": "synthetic:ticket:IDN-3"
-  },
-  {
-   "source": "person:carol",
-   "rel": "ASSIGNED_TO",
-   "target": "synthetic:ticket:IDN-4"
   },
   {
    "source": "person:carol",
@@ -1196,21 +981,6 @@ export const syntheticGraph: GraphView = {
    "source": "person:dave",
    "rel": "REVIEWED",
    "target": "synthetic:pr:1"
-  },
-  {
-   "source": "person:erin",
-   "rel": "ASSIGNED_TO",
-   "target": "synthetic:ticket:PAY-3"
-  },
-  {
-   "source": "person:erin",
-   "rel": "ASSIGNED_TO",
-   "target": "synthetic:ticket:PAY-4"
-  },
-  {
-   "source": "person:erin",
-   "rel": "ASSIGNED_TO",
-   "target": "synthetic:ticket:PAY-6"
   },
   {
    "source": "person:erin",
@@ -1588,46 +1358,6 @@ export const syntheticGraph: GraphView = {
    "target": "synthetic:pr:3"
   },
   {
-   "source": "synthetic:ticket:IDN-1",
-   "rel": "BLOCKS",
-   "target": "synthetic:ticket:IDN-2"
-  },
-  {
-   "source": "synthetic:ticket:IDN-1",
-   "rel": "BLOCKS",
-   "target": "synthetic:ticket:PAY-4"
-  },
-  {
-   "source": "synthetic:ticket:IDN-4",
-   "rel": "MENTIONS",
-   "target": "synthetic:pr:10"
-  },
-  {
-   "source": "synthetic:ticket:PAY-1",
-   "rel": "MENTIONS",
-   "target": "synthetic:pr:4"
-  },
-  {
-   "source": "synthetic:ticket:PAY-2",
-   "rel": "BLOCKS",
-   "target": "synthetic:ticket:IDN-2"
-  },
-  {
-   "source": "synthetic:ticket:PAY-3",
-   "rel": "BLOCKS",
-   "target": "synthetic:ticket:PAY-2"
-  },
-  {
-   "source": "synthetic:ticket:PAY-3",
-   "rel": "MENTIONS",
-   "target": "synthetic:pr:9"
-  },
-  {
-   "source": "synthetic:ticket:PAY-6",
-   "rel": "MENTIONS",
-   "target": "synthetic:issue:14"
-  },
-  {
    "source": "team:identity",
    "rel": "OWNS",
    "target": "system:Auth"
@@ -1648,14 +1378,14 @@ export const syntheticGraph: GraphView = {
    "id": "system:Billing",
    "name": "Billing",
    "system_uid": "system:Billing",
-   "size": 18,
+   "size": 16,
    "systems": 1
   },
   {
    "id": "system:Auth",
    "name": "Auth",
    "system_uid": "system:Auth",
-   "size": 16,
+   "size": 15,
    "systems": 1
   },
   {
@@ -1676,7 +1406,7 @@ export const syntheticGraph: GraphView = {
    "id": "none",
    "name": "Not linked to code",
    "system_uid": null,
-   "size": 10,
+   "size": 3,
    "systems": 0
   }
  ],

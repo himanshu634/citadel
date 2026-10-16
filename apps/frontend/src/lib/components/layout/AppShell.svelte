@@ -54,7 +54,7 @@ tooltip context for everything inside.
 		{#if navOpen}
 			<button class="scrim" type="button" aria-label="Close navigation" onclick={close}></button>
 		{/if}
-		<div class="main">
+		<div class={['main', { bleed }]}>
 			<Topbar onmenu={() => (navOpen = !navOpen)} menuOpen={navOpen} />
 			<main class={['content', { bleed }]}>
 				{@render children()}
@@ -98,7 +98,15 @@ tooltip context for everything inside.
 			padding-inline: var(--space-8);
 		}
 	}
+	/* The Graph page fills the window under the top bar, however tall the top bar wraps. */
+	.main.bleed {
+		height: 100dvh;
+	}
 	.content.bleed {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		min-height: 0;
 		max-width: none;
 		padding: 0;
 	}
