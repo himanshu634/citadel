@@ -82,7 +82,7 @@ sources:
 ```
 
 **Write an adapter.** For a source you want to sync repeatedly, copy
-[`apps/backend/brain/adapters/_template.py`](../apps/backend/brain/adapters/_template.py) to
+[`apps/brain/brain/adapters/_template.py`](../apps/brain/brain/adapters/_template.py) to
 `adapters/<name>.py`. An adapter is two methods and its config model:
 
 - `fetch(company, source, cache_dir)`: all network I/O; writes raw responses under
@@ -93,7 +93,7 @@ sources:
 - A `SourceConfig` subclass with `type: Literal["<name>"]` and its settings; the company YAML
   is validated against it.
 
-Then register it with one line in `apps/backend/brain/adapters/__init__.py`. That is the only
+Then register it with one line in `apps/brain/brain/adapters/__init__.py`. That is the only
 change outside the new file.
 
 Rules for adapters: never emit email addresses (identify people by login or handle), raise
@@ -103,7 +103,7 @@ source can tell public from private data.
 ## (c) A synthetic company for demos
 
 `companies/synthetic.yaml` points at
-[`apps/backend/examples/synthetic_company/`](../apps/backend/examples/synthetic_company/): 5
+[`apps/brain/examples/synthetic_company/`](../apps/brain/examples/synthetic_company/): 5
 people and a bot, 2 teams, 4 systems, 15 work items, with known answers built in (one system
 whose declared owners are not the people doing the work, a bot that must not count as an
 expert, two systems that change together).

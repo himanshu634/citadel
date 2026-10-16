@@ -132,7 +132,7 @@ Rules:
 ### The graph map (design direction D, "Territories")
 
 - Every node sits in the territory of the system it touches most (rules in
-  `apps/backend/brain/graph_view.py`): the nine biggest systems, one territory for the smaller
+  `apps/brain/brain/graph_view.py`): the nine biggest systems, one territory for the smaller
   ones, and a dashed outline for work linked to no code. The layout numbers are in `src/lib/graph.ts`.
 - Territories are **tonal**, never hue: `--graph-territory` and `--graph-territory-alt`
   alternate, outlined in `--color-line`. Hue stays reserved for node kinds.

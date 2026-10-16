@@ -13,27 +13,14 @@ Tracks: **Company Brain** and **Agent Memory & Coordination**.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-  subgraph sources["Sources (one adapter each)"]
-    GH["GitHub<br/>GraphQL + partial git clone"]
-    JL["Canonical JSONL<br/>Slack / Jira / Linear exports"]
-    LD["Local docs<br/>markdown folders"]
-  end
-  CFG["companies/&lt;slug&gt;.yaml<br/>path rules, bots, window,<br/>data_permission"]
-  GH -- fetch --> RAW[("data/raw cache")]
-  RAW -- records --> CAN["canonical records<br/>canonical.py"]
-  JL --> CAN
-  LD --> CAN
-  CAN --> NORM["normalize<br/>systems, bots, emails scrubbed,<br/>activity window"]
-  CFG --> NORM
-  NORM --> LOAD["loader<br/>UNWIND + MERGE on uid<br/>queries/load/*.cypher"]
-  LOAD --> FDB[("FalkorDB<br/>graph brain_&lt;slug&gt; per company")]
-  FDB --> TOOLS["named tools<br/>queries/tools/*.cypher<br/>tools.py"]
-  TOOLS --> CLI["brain query / make query"]
-  TOOLS --> AGENT["Claude agent (LangGraph)<br/>checkpoints in agent_&lt;slug&gt;"]
-  TOOLS --> UI["apps/frontend (SvelteKit)"]
-```
+Company Brain is three packages. **The brain** is a dedicated engine that turns sources into one
+FalkorDB graph per company and answers through named tools. **Agents** are its first user, and
+reach the graph only through those named tools. **Backend** is the HTTP layer for the UI.
+
+![Company Brain architecture](docs/architecture/architecture.svg)
+
+The editable source is `docs/architecture/architecture.excalidraw` (open it at excalidraw.com,
+File, Open). The extractor stage in the diagram is planned, not built.
 
 - **FalkorDB is the only store.** Each company is an isolated graph, `brain_<slug>`. Raw API
   responses are cached on disk as ingestion input; nothing reads them at runtime.
@@ -93,7 +80,7 @@ Relationships: `AUTHORED`, `REVIEWED`, `COMMENTED_ON`, `MEMBER_OF`, `OWNS`, `TOU
 
 ## Every Cypher query
 
-All under [`apps/backend/queries/`](apps/backend/queries/). Each file starts with a header:
+All under [`apps/brain/queries/`](apps/brain/queries/). Each file starts with a header:
 purpose, parameters, returns, example.
 
 ### Tools (read side: CLI, agents, UI)
@@ -149,25 +136,37 @@ combination has its own small file rather than one query built from strings.
 **[docs/adding-a-company.md](docs/adding-a-company.md)**: (a) a public GitHub repo (copy the
 config, edit the path rules, sync), (b) Slack/Jira/Linear exports via
 [canonical JSONL](docs/canonical-format.md) or a new adapter (skeleton in
-`apps/backend/brain/adapters/_template.py`), (c) a synthetic demo company.
+`apps/brain/brain/adapters/_template.py`), (c) a synthetic demo company.
 
 ## Repository
 
 ```
-apps/backend/     Python 3.12 (uv): ingestion, schema, named queries, agents. CLI: brain
-  brain/            cli, config, canonical, normalize, loader, pipeline, tools, db, adapters/
-  queries/          schema/, load/, tools/  (every Cypher query)
+apps/brain/       Python 3.12 (uv): the engine. CLI: brain
+  brain/            cli, config, canonical, normalize, loader, pipeline, tools, db, graph_view,
+                    adapters/, testing (pytest graph fixtures)
+  queries/          schema/, load/, tools/, graph/  (every Cypher query)
   examples/         synthetic_company/ (offline demo data + generator)
   tests/            pytest; graph tests use a real FalkorDB (make up) and throwaway graphs
+apps/agents/      Python: agents that use the brain through named tools. CLI: agents
+  agents/           loop, graph, ask, toolset, traces, roles/, policies/, prompts/, work/, sim/,
+                    acl, llm, evals/ (cases in evals/cases/), testing (fake clients)
+  tests/            pytest, scripted fake clients
+apps/backend/     Python: HTTP for the UI. CLI: backend
+  backend/          api/ (FastAPI), jobs, registry, onboard, config_diff
+  tests/            pytest
 apps/frontend/    SvelteKit UI and design system (make fe-install, make fe-dev)
 companies/        one YAML per company -> graph brain_<slug>
-docs/             graph model, canonical format, adding a company
+docs/             graph model, canonical format, adding a company, architecture diagram
 data/             gitignored: raw API caches and inbox folders
 ```
 
-`make test` runs the suite (graph tests are skipped when FalkorDB is not running), `make lint`
-runs ruff. The same code runs against FalkorDB Cloud: set `FALKORDB_HOST/PORT/USERNAME/PASSWORD`
-(and `FALKORDB_TLS=true` when the instance uses TLS) in `.env`.
+Dependencies run one way: backend, then agents, then brain (checked by
+`apps/brain/tests/test_package_boundaries.py`).
+
+`make test` runs the suites of all three packages (graph tests are skipped when FalkorDB is not
+running), `make lint` runs ruff. The same code runs against FalkorDB Cloud: set
+`FALKORDB_HOST/PORT/USERNAME/PASSWORD` (and `FALKORDB_TLS=true` when the instance uses TLS) in
+`.env`.
 
 ## AI usage
 

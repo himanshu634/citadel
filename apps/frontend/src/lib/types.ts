@@ -1,4 +1,4 @@
-/** Shapes the UI renders. They mirror the brain's graph labels (apps/backend/brain/canonical.py). */
+/** Shapes the UI renders. They mirror the brain's graph labels (apps/brain/brain/canonical.py). */
 
 export type NodeType = 'person' | 'team' | 'system' | 'work-item' | 'change' | 'document';
 
@@ -150,7 +150,7 @@ export interface SourceConfig {
 	[field: string]: unknown;
 }
 
-/** The company YAML as the API reads and writes it (apps/backend/brain/config.py CompanyConfig). */
+/** The company YAML as the API reads and writes it (apps/brain/brain/config.py CompanyConfig). */
 export interface CompanyConfig {
 	slug: string;
 	name: string;
@@ -298,7 +298,7 @@ export const LABEL_TYPES: Record<GraphLabel, NodeType> = {
 	Document: 'document'
 };
 
-/** One node of `GET /api/companies/<slug>/graph` (apps/backend/brain/graph_view.py). */
+/** One node of `GET /api/companies/<slug>/graph` (apps/brain/brain/graph_view.py). */
 export interface GraphNode {
 	uid: string;
 	label: GraphLabel;
