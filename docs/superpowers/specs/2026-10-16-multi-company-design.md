@@ -285,7 +285,9 @@ fetched; the ingest stages repeat per source).
 A slug is taken when `companies/<slug>.yaml` exists ("already a company"), or when a former
 company with that slug left graph `brain_<slug>`, graph `agent_<slug>` or its build history
 `data/jobs/<slug>.json` (the message says to run `make reset SLUG=<slug> CONFIRM=1`, which
-deletes those three and keeps the raw cache). While FalkorDB is down only the files are
+deletes those three and keeps the raw cache, and to restart the API if that was already run: a
+running server still holds the old build in memory). A `companies/*.yaml` whose file name is
+not a valid slug is listed as `invalid`. While FalkorDB is down only the files are
 checked.
 
 YAML is written by the server from the validated model, keeping the field order of the existing

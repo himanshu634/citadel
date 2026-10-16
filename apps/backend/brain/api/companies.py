@@ -83,6 +83,18 @@ def company_out(
     runner: JobRunner, company: CompanyConfig | registry.InvalidCompany, graph: bool = True
 ) -> CompanyOut:
     """A company as the list, the detail routes and the /api/events stream report it."""
+    if not re.fullmatch(config.SLUG_RE, company.slug):  # a hand-named file, e.g. Acme-Labs.yaml
+        # It has no graph or builds to ask about (the slug cannot name them): just invalid.
+        return CompanyOut(
+            slug=company.slug,
+            name=company.slug,
+            data_permission=None,
+            status="invalid",
+            error=company.error
+            if isinstance(company, registry.InvalidCompany)
+            else "the file name is not a valid slug",
+            graph_reachable=graph,
+        )
     state = company_status(runner, company.slug, graph)
     common = {
         "slug": company.slug,
@@ -159,7 +171,8 @@ def slug_taken(runner: JobRunner, slug: object) -> str | None:
     if _left_behind(runner, slug):
         return (
             f"{slug} was used before and its data is still there. Pick another name, or delete "
-            f"that data with make reset SLUG={slug} CONFIRM=1"
+            f"that data with make reset SLUG={slug} CONFIRM=1 (if you already ran it, restart "
+            "the API)"
         )
     return None
 

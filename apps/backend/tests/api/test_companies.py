@@ -133,7 +133,7 @@ def test_create_twice_is_409(client, api_root):
 
 REUSED = (
     "acme_labs was used before and its data is still there. Pick another name, or delete that "
-    "data with make reset SLUG=acme_labs CONFIRM=1"
+    "data with make reset SLUG=acme_labs CONFIRM=1 (if you already ran it, restart the API)"
 )
 
 
@@ -270,6 +270,17 @@ def test_failed_build_when_the_graph_is_down_is_failed(api_root, tmp_path, graph
     body = client.get("/api/companies/acme_labs").json()
     assert body["status"] == "failed" and body["error"] == "boom"
     assert body["graph_reachable"] is False
+
+
+def test_a_yaml_filename_that_is_not_a_slug_is_listed_as_invalid(client, api_root):
+    write(api_root, "acme_labs", name="Acme Labs")
+    (api_root / "companies" / "Acme-Labs.yaml").write_text("slug: acme\n")
+    r = client.get("/api/companies")
+    assert r.status_code == 200
+    odd = next(c for c in r.json() if c["slug"] == "Acme-Labs")
+    assert odd["status"] == "invalid" and odd["error"] and odd["build"] is None
+    assert odd["last_synced_at"] is None
+    assert [c["status"] for c in r.json() if c["slug"] == "acme_labs"] == ["empty"]
 
 
 def test_invalid_company_reports_graph_reachable(client, api_root):
