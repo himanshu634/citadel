@@ -24,6 +24,7 @@ Rules the loop keeps:
 from __future__ import annotations
 
 import operator
+import re
 import uuid
 from dataclasses import dataclass, field
 from importlib import resources
@@ -31,6 +32,7 @@ from typing import Annotated, Any, Literal, TypedDict
 
 import anthropic
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 
 from brain import llm
@@ -41,6 +43,7 @@ SYSTEM_PROMPT = resources.files("brain.agents").joinpath("system_prompt.md").rea
 SUBMIT = "submit_answer"
 MAX_NUDGES = 1  # times we ask for submit_answer after a plain-text reply before giving up
 RECURSION_LIMIT = 40  # graph steps per question (each tool round trip is two)
+_MARKER = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")  # [1] or [1, 3]
 
 SUBMIT_TOOL: dict[str, Any] = {
     "name": SUBMIT,
@@ -218,11 +221,19 @@ def check_answer(answer: dict[str, Any], seen: dict[str, Any]) -> str | None:
     """Why an answer can't be accepted, or None. Only uids from tool results may be cited."""
     if not isinstance(answer.get("answer"), str) or not answer["answer"].strip():
         return "answer is empty."
-    unknown = [u for u in [*answer.get("sources", []), *answer.get("path", [])] if u not in seen]
+    sources = answer.get("sources", [])
+    unknown = [u for u in [*sources, *answer.get("path", [])] if u not in seen]
     if unknown:
         return (
             f"These uids did not appear in any tool result: {', '.join(unknown)}. Look them up, "
             f"or remove them, then call {SUBMIT} again."
+        )
+    markers = {int(n) for m in _MARKER.findall(answer["answer"]) for n in m.split(",")}
+    bad = sorted(n for n in markers if not 1 <= n <= len(sources))
+    if bad:
+        return (
+            f"Markers {bad} have no matching entry in sources ({len(sources)} given). "
+            f"Marker [n] cites sources[n-1]; fix them and call {SUBMIT} again."
         )
     return None
 
@@ -268,18 +279,36 @@ def ask(
     before = 0
     if checkpointer is not None:
         before = len(graph.get_state(config).values.get("usage", []))
-    state = graph.invoke(
-        {
-            "slug": slug,
-            "messages": [first],
-            "answer": None,
-            "stop": None,
-            "stop_details": None,
-            "nudges": 0,
-        },
-        config,
-    )
+    inputs = {
+        "slug": slug,
+        "messages": [first],
+        "answer": None,
+        "stop": None,
+        "stop_details": None,
+        "nudges": 0,
+    }
+    try:
+        state = graph.invoke(inputs, config)
+    except GraphRecursionError:
+        state = {}
+        if checkpointer is not None:
+            _close_open_tool_calls(graph, config)
+            state = graph.get_state(config).values
+        state = {**state, "answer": None, "stop": "step_limit"}
     return _to_answer(question, thread_id, state, state.get("usage", [])[before:])
+
+
+def _close_open_tool_calls(graph, config: dict) -> None:
+    """After the step limit, the saved thread may end on tool calls that never ran. Answer them
+    with error results (appended, never edited) so a follow-up in the thread stays valid."""
+    messages = graph.get_state(config).values.get("messages") or []
+    last = messages[-1] if messages else {}
+    uses = [b for b in last.get("content", []) if b.get("type") == "tool_use"]
+    if last.get("role") == "assistant" and uses:
+        results = [_result(u["id"], "Not run: the step limit was reached.", True) for u in uses]
+        graph.update_state(
+            config, {"messages": [{"role": "user", "content": results}]}, as_node="run_tools"
+        )
 
 
 def _to_answer(question: str, thread_id: str, state: dict, usage: list[dict]) -> Answer:
@@ -304,7 +333,7 @@ def _to_answer(question: str, thread_id: str, state: dict, usage: list[dict]) ->
         text=answer["answer"] if answer else None,
         sources=[source(u) for u in answer["sources"]] if answer else [],
         path=[source(u) for u in answer["path"]] if answer else [],
-        stop=stop if answer or stop in ("refusal", "max_tokens") else "no_answer",
+        stop=stop if answer or stop in ("refusal", "max_tokens", "step_limit") else "no_answer",
         stop_details=state.get("stop_details"),
         model=state.get("model"),
         usage=totals,

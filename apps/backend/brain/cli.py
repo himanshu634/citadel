@@ -183,7 +183,11 @@ def ask(
     except anthropic.APIStatusError as e:
         _fail(f"Anthropic API error {e.status_code}: {e.message}")
     if answer.text is None:
-        reason = {"refusal": "Claude declined to answer", "max_tokens": "hit the output limit"}
+        reason = {
+            "refusal": "Claude declined to answer",
+            "max_tokens": "hit the output limit",
+            "step_limit": "too many tool calls",
+        }
         detail = (answer.stop_details or {}).get("explanation") or ""
         typer.secho(
             f"No answer: {reason.get(answer.stop, 'no answer submitted')}. {detail}", fg="yellow"

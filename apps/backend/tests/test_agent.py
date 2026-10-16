@@ -281,3 +281,37 @@ def test_rows_keyed_by_person_uid_are_citable_with_a_title():
     )
     assert seen["person:alice"] == {"uid": "person:alice", "title": "alice"}
     assert seen["system:Auth"] == {"uid": "system:Auth"}
+
+
+def test_out_of_range_citation_marker_is_rejected():
+    client = FakeClient(
+        reply(tool_use("t1", "related_work_items", {"text": "jwt"})),
+        reply(submit("t2", "Load [2].", ["pr:1"])),
+        reply(submit("t3", "Load [1].", ["pr:1"])),
+    )
+    a = ask(client)
+    rejected = client.requests[2]["messages"][-1]["content"][0]
+    assert rejected["is_error"] is True and "[2]" in rejected["content"]
+    assert a.text == "Load [1]."
+
+
+def test_step_limit_closes_open_tool_calls_so_the_thread_stays_valid(monkeypatch):
+    monkeypatch.setattr(agent, "RECURSION_LIMIT", 3)  # call, tools, call -> stops after a call
+    saver = InMemorySaver()
+    loop = [reply(tool_use(f"t{i}", "related_work_items", {"text": "jwt"})) for i in range(2)]
+    client = FakeClient(*loop, reply(submit("t9", "Load [1].", ["pr:1"])))
+    first = ask(client, checkpointer=saver)
+    assert first.text is None and first.stop == "step_limit"
+
+    monkeypatch.setattr(agent, "RECURSION_LIMIT", 40)
+    second = agent.ask(
+        "synthetic", "Try again", first.thread_id, client=client, toolset=TOOLSET,
+        checkpointer=saver,
+    )  # fmt: skip
+    assert second.text == "Load [1]."
+    history = client.requests[-1]["messages"]
+    calls = [b["id"] for m in history for b in m["content"] if b["type"] == "tool_use"]
+    answered = [
+        b["tool_use_id"] for m in history for b in m["content"] if b["type"] == "tool_result"
+    ]
+    assert calls and calls == answered  # every tool call has its result, in order
