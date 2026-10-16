@@ -10,7 +10,7 @@ API_PORT ?= 8000
 BRAIN := uv run brain
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask chat reset brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
+.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask chat eval reset brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
@@ -81,6 +81,14 @@ agents: ## List the agent roles, their jobs and read tools
 
 sim: ## Run agents on $(SLUG): make sim SLUG=synthetic SCENARIO=race OFFLINE=1 (TICKS=30)
 	$(BRAIN) sim run $(SLUG) --scenario $(or $(SCENARIO),sprint) --ticks $(or $(TICKS),30) $(if $(filter 1 yes,$(OFFLINE)),--offline)
+
+# Evals default to the synthetic company: it is the one with golden cases.
+EVAL_SLUG = $(if $(filter file,$(origin SLUG)),synthetic,$(SLUG))
+
+eval: ## Agent evals (calls the API; SLUG defaults to synthetic): CASE=id|tag REPEAT=3 MODEL=.. EFFORT=.. BASELINE=file
+	cd apps/backend && uv run python -m evals --slug $(EVAL_SLUG) $(foreach c,$(CASE),--case $(c)) \
+		$(if $(REPEAT),--repeat $(REPEAT)) $(if $(MODEL),--model $(MODEL)) \
+		$(if $(EFFORT),--effort $(EFFORT)) $(if $(BASELINE),--baseline $(abspath $(BASELINE)))
 
 reset: ## Delete graphs brain_/agent_$(SLUG) and its build history; needs CONFIRM=1
 	$(BRAIN) reset $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)
