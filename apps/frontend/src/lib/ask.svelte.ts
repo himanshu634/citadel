@@ -48,9 +48,9 @@ function endSteps(turn: Turn): void {
 export class AskThread {
 	turns = $state<Turn[]>([]);
 	threadId = $state<string | null>(null);
-	/** The turn whose walk the stage shows. */
+	/** The newest asked or the replayed turn: `revealed` applies to it only. */
 	selected = $state(0);
-	/** While replaying: how many graph steps are shown; null shows them all. */
+	/** While replaying the selected turn: how many graph steps are shown; null shows them all. */
 	revealed = $state<number | null>(null);
 	readonly examples = EXAMPLES;
 
@@ -168,17 +168,18 @@ export class AskThread {
 		this.selected = 0;
 	}
 
-	/** Show a turn's walk on the stage. */
+	/** Make a turn the selected one (stops a replay of another). */
 	select(index: number): void {
 		if (index === this.selected) return;
 		this.#stopReplay();
 		this.selected = index;
 	}
 
-	/** Show the selected turn's walk again, a step at a time (all at once under reduced motion). */
-	replay(reducedMotion = false): void {
+	/** Show a turn's walk again, a step at a time (all at once under reduced motion); it becomes the selected turn. */
+	replay(index: number, reducedMotion = false): void {
 		this.#stopReplay();
-		const total = this.turns[this.selected]?.steps.filter((s) => s.n !== null).length ?? 0;
+		this.selected = index;
+		const total = this.turns[index]?.steps.filter((s) => s.n !== null).length ?? 0;
 		if (reducedMotion || total === 0) return;
 		this.revealed = 0;
 		this.#timer = setInterval(() => {
