@@ -20,7 +20,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from brain import config, db, embeddings, loader, schema
 from brain.adapters.canonical_jsonl import CanonicalJsonlAdapter, CanonicalJsonlSource
-from brain.config import CompanyConfig
+from brain.config import CompanyConfig, get_settings
 from brain.normalize import normalize
 
 SYNTHETIC = Path(__file__).resolve().parents[1] / "examples" / "synthetic_company"
@@ -28,8 +28,12 @@ SYNTHETIC = Path(__file__).resolve().parents[1] / "examples" / "synthetic_compan
 
 def pytest_configure(config) -> None:
     """No test may load the real embedding model: embeddings are off for the whole session.
-    A test that needs vectors calls `set_embedder(FakeEmbedder())`, which wins over this."""
+    A test that needs vectors calls `set_embedder(FakeEmbedder())`, which wins over this.
+    This module's import already read the settings (`needs_graph` pings FalkorDB), so the
+    cached copy is dropped to pick up the new value."""
     os.environ["EMBEDDING_PROVIDER"] = "none"
+    get_settings.cache_clear()
+    embeddings.set_embedder(None)
 
 
 class FakeEmbedder:
@@ -59,10 +63,10 @@ class FakeEmbedder:
 def embeddings_off(monkeypatch):
     """No embedder at all, whatever the session or .env says; undone afterwards."""
     monkeypatch.setenv("EMBEDDING_PROVIDER", "none")
-    config.get_settings.cache_clear()
+    get_settings.cache_clear()
     embeddings.set_embedder(None)
     yield
-    config.get_settings.cache_clear()
+    get_settings.cache_clear()
     embeddings.set_embedder(None)
 
 
