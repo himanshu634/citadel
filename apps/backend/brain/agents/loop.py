@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import operator
 import re
+from collections.abc import Callable
 from importlib import resources
 from typing import Annotated, Any, Literal, TypedDict
 
@@ -74,7 +75,7 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[list[dict[str, Any]], operator.add]
     seen: Annotated[dict[str, dict[str, Any]], _merge]  # uid -> {uid, label, title, url}
     usage: Annotated[list[dict[str, Any]], operator.add]  # one entry per Claude call
-    answer: dict[str, Any] | None  # the accepted submit_answer input
+    answer: dict[str, Any] | None  # the accepted submit tool input (submit_answer for Q&A)
     stop: str | None  # last stop_reason, or "no_answer"
     stop_details: dict[str, Any] | None
     model: str | None  # the model that served the last call (differs after a fallback)
@@ -85,16 +86,32 @@ class AgentState(TypedDict, total=False):
 ENTRY = "call_claude"  # where the router hands a turn to this loop
 
 
-def add_brain_loop(g: StateGraph, client: anthropic.Anthropic, toolset: Toolset) -> str:
-    """Add the loop's nodes and edges to `g`; returns the entry node name."""
+Check = Callable[[dict[str, Any], dict[str, Any]], str | None]  # (input, seen) -> problem
+
+
+def add_brain_loop(
+    g: StateGraph,
+    client: anthropic.Anthropic,
+    toolset: Toolset,
+    *,
+    system_prompt: str = SYSTEM_PROMPT,
+    submit_tool: dict[str, Any] = SUBMIT_TOOL,
+    check: Check | None = None,  # default: check_answer
+) -> str:
+    """Add the loop's nodes and edges to `g`; returns the entry node name.
+
+    The defaults are the brain's Q&A loop. Agent roles (`agents/runner.py`) pass their own
+    prompt, their one submit tool and the check that grounds it; the loop is the same."""
     s = get_settings()
-    tool_defs = [*toolset.definitions(), SUBMIT_TOOL]
+    check = check or check_answer
+    submit = submit_tool["name"]
+    tool_defs = [*toolset.definitions(), submit_tool]
 
     def call_claude(state: AgentState) -> dict[str, Any]:
         with client.beta.messages.stream(
             model=s.anthropic_model,
             max_tokens=s.anthropic_max_tokens,
-            system=[{"type": "text", "text": SYSTEM_PROMPT}],
+            system=[{"type": "text", "text": system_prompt}],
             tools=tool_defs,
             messages=state["messages"],
             output_config={"effort": s.anthropic_effort},
@@ -123,8 +140,8 @@ def add_brain_loop(g: StateGraph, client: anthropic.Anthropic, toolset: Toolset)
         results: list[dict[str, Any]] = []
         new_seen: dict[str, dict[str, Any]] = {}
         # Graph tools first, so a submit_answer in the same turn can cite their results.
-        for use in sorted(uses, key=lambda u: u["name"] == SUBMIT):
-            if use["name"] == SUBMIT:
+        for use in sorted(uses, key=lambda u: u["name"] == submit):
+            if use["name"] == submit:
                 continue
             out = toolset.call(state["slug"], use["name"], use.get("input"))
             new_seen.update(out.seen)
@@ -132,9 +149,9 @@ def add_brain_loop(g: StateGraph, client: anthropic.Anthropic, toolset: Toolset)
         seen.update(new_seen)
         answer = None
         for use in uses:
-            if use["name"] != SUBMIT:
+            if use["name"] != submit:
                 continue
-            problem = check_answer(use.get("input") or {}, seen)
+            problem = check(use.get("input") or {}, seen)
             if problem:
                 results.append(result_block(use["id"], problem, True))
             else:
@@ -147,7 +164,7 @@ def add_brain_loop(g: StateGraph, client: anthropic.Anthropic, toolset: Toolset)
         }
 
     def nudge(state: AgentState) -> dict[str, Any]:
-        text = f"Call {SUBMIT} with your final answer and its sources."
+        text = f"Call {submit} with your final answer and its sources."
         return {
             "messages": [{"role": "user", "content": [{"type": "text", "text": text}]}],
             "nudges": state.get("nudges", 0) + 1,

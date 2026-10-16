@@ -76,6 +76,12 @@ query: ## Run a named tool: make query TOOL=experts_for_system P="system=CI" (JS
 tools: ## List the named query tools and their parameters
 	$(BRAIN) tools
 
+agents: ## List the agent roles, their jobs and read tools
+	$(BRAIN) agents
+
+sim: ## Run agents on $(SLUG): make sim SLUG=synthetic SCENARIO=race OFFLINE=1 (TICKS=30)
+	$(BRAIN) sim run $(SLUG) --scenario $(or $(SCENARIO),sprint) --ticks $(or $(TICKS),30) $(if $(filter 1 yes,$(OFFLINE)),--offline)
+
 reset: ## Delete graphs brain_/agent_$(SLUG) and its build history; needs CONFIRM=1
 	$(BRAIN) reset $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)
 
