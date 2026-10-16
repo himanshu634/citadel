@@ -99,8 +99,7 @@ def add_brain_loop(g: StateGraph, client: anthropic.Anthropic, toolset: Toolset)
             messages=state["messages"],
             output_config={"effort": s.anthropic_effort},
             cache_control={"type": "ephemeral"},
-            betas=[llm.FALLBACK_BETA],
-            fallbacks="default",
+            **llm.fallback_params(s.anthropic_model),
         ) as stream:
             msg = stream.get_final_message()
         details = getattr(msg, "stop_details", None)
