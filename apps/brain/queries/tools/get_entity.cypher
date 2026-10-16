@@ -4,10 +4,12 @@
 // params:  $uid, $limit (int, max neighbours)
 // returns: uid, label, title, kind, state, url, date, body (first 2000 chars),
 //          neighbour_count, neighbours ([{rel, direction 'out'|'in', uid, label, title, url}],
-//          ordered by rel then uid, capped at $limit)
+//          ordered by rel then uid, capped at $limit). A Claim neighbour is listed only while
+//          it is current (status 'accepted', no valid_to): a retired Keeper claim is never shown.
 // example: make query TOOL=get_entity P="uid=synthetic:pr:4"
 MATCH (n {uid: $uid})
 OPTIONAL MATCH (n)-[r]-(m)
+WHERE NOT m:Claim OR (m.status = 'accepted' AND m.valid_to IS NULL)
 WITH n, r, m ORDER BY type(r), m.uid
 WITH n, collect(CASE WHEN r IS NULL THEN NULL ELSE {
        rel: type(r),

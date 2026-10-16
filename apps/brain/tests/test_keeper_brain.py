@@ -84,6 +84,9 @@ def test_project_and_notes_round_trip(brain):
 
     keeper.retire(brain, c["uid"], "superseded", "2026-10-18T10:00:00Z")
     assert c["uid"] not in {n.uid for n in tools.call(brain, "keeper_notes", uid="system:Auth")}
+    entity = tools.get_entity(brain, uid="system:Auth", limit=200)
+    assert c["uid"] not in {n.uid for n in entity.neighbours if n.label == "Claim"}
+    assert {n.uid for n in entity.neighbours} >= {"team:identity"}  # sources still there
     node = tools.get_entity(brain, uid=c["uid"])
     assert node is not None and node.label == "Claim"  # retired, not deleted
 

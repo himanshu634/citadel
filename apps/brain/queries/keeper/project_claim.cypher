@@ -8,6 +8,7 @@
 // returns: uid of each projected claim
 // notes:   title = statement, so get_entity and the Graph page show it. valid_to is cleared:
 //          an accepted claim is current. Edges MATCH both ends, so nothing dangles.
+//          Callers project only claims with status accepted, because this clears valid_to.
 // example: keeper.project("synthetic", [claim])
 UNWIND $claims AS c
 MERGE (n:Claim {uid: c.uid})
