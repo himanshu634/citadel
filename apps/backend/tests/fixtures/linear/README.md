@@ -5,7 +5,10 @@
 workspace. Task 10 re-records it from a real workspace; keep the shape and the cases below.
 
 `issues/state.json` lists two completed runs. The second run holds a newer version of `i-7`,
-which moved from team IDN to team PAY and got a new identifier.
+which moved from team IDN to team PAY and got a new identifier. Like a real run, it also holds
+every issue that is still open (`i-1`, `i-2`, `i-3`, `i-6`, unchanged): the issues query always
+returns open issues, and the transform marks an open issue missing from the newest run as removed
+from Linear. Only the closed `i-4` and `i-5` are absent from it.
 
 Cases covered: an assigned ticket (`IDN-1`) and unassigned ones; BLOCKS through `relations` only
 (`i-6` -> `i-1`), through `inverseRelations` only (`i-5` -> `i-3`) and on both sides (`i-1` ->

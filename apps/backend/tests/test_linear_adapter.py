@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import shutil
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -30,6 +32,27 @@ def company() -> CompanyConfig:
 
 
 SOURCE = LinearSource.model_validate({"type": "linear", "workspace": "synthetic-co"})
+NEWER_RUN = "20261017T000000"  # a third run, added on top of a copy of the fixture
+
+
+def fixture_copy(tmp_path: Path) -> Path:
+    cache = tmp_path / "synthetic-co"
+    shutil.copytree(FIXTURE, cache)
+    return cache
+
+
+def add_run(cache: Path, run_id: str, nodes: list[dict]) -> None:
+    """Add a completed run holding `nodes` (one page), as fetch would leave it."""
+    folder = cache / "issues"
+    (folder / f"{run_id}_0000.json").write_text(json.dumps(nodes))
+    state = json.loads((folder / "state.json").read_text())
+    state["completed_runs"].append(run_id)
+    (folder / "state.json").write_text(json.dumps(state))
+
+
+def newest_nodes(cache: Path) -> list[dict]:
+    """The issue nodes of the fixture's newest run."""
+    return json.loads((cache / "issues" / "20261016T120000_0000.json").read_text())
 
 
 @pytest.fixture(scope="module")
@@ -195,5 +218,93 @@ def test_dangling_blocker_is_dropped_by_the_loader(recs):
         report = loader.load(slug, recs, origin="linear:synthetic-co")
         assert report.dropped["load/link_blocks"] == 1  # i-3 -> i-9
         assert report.written["load/link_blocks"] == 3
+    finally:
+        db.delete_graph(slug)
+
+
+def test_records_skip_issues_outside_configured_teams():
+    only_idn = LinearSource.model_validate(
+        {"type": "linear", "workspace": "synthetic-co", "teams": ["IDN"]}
+    )
+    found = tickets(list(records(company(), only_idn, FIXTURE)))
+    assert {t.container for t in found.values()} == {"IDN"}
+    assert set(found) == {"IDN-1", "IDN-2", "IDN-3", "IDN-4"}  # i-7 is PAY-4 now: skipped
+
+
+def test_issue_missing_from_newest_run_becomes_removed(tmp_path):
+    """i-1 (open, assigned, blocking) is archived in Linear: the next run no longer returns it."""
+    cache = fixture_copy(tmp_path)
+    add_run(cache, NEWER_RUN, [n for n in newest_nodes(cache) if n["id"] != "i-1"])
+    recs = list(records(company(), SOURCE, cache))
+
+    removed = tickets(recs)["IDN-1"]
+    assert (removed.status_category, removed.state) == ("canceled", "Removed from Linear")
+    assert removed.assignees == []
+    assert removed.updated_at == removed.closed_at == datetime(2026, 10, 17, tzinfo=UTC)
+    assert (removed.title, removed.container) == ("Rotate signing keys", "IDN")
+    uid = issue_uid("i-1")
+    assert [r for r in recs if isinstance(r, Link) and uid in (r.from_uid, r.to_uid)] == []
+    assert [r for r in recs if isinstance(r, Comment) and r.work_item_uid == uid] == []
+    # still-open issues in the newest run and closed issues are left as they were
+    assert tickets(recs)["IDN-2"].status_category == "backlog"
+    assert tickets(recs)["PAY-2"].state == "Done"
+    assert tickets(recs)["PAY-4"].status_category == "in_progress"  # the team move survives
+
+
+def test_display_name_with_at_is_skipped(tmp_path):
+    """A Linear displayName can be an email address; it is never stored and never aborts."""
+    cache = fixture_copy(tmp_path)
+    teams = json.loads((cache / "teams.json").read_text())
+    teams[0]["members"]["nodes"].append(
+        {"id": "u-9", "displayName": "erin@example.com", "name": "Erin", "active": True}
+    )
+    (cache / "teams.json").write_text(json.dumps(teams))
+    nodes = newest_nodes(cache)
+    for node in nodes:
+        if node["id"] == "i-1":
+            node["assignee"] = node["creator"] = {"displayName": "erin@example.com"}
+            node["comments"]["nodes"][0]["user"] = {"displayName": "erin@example.com"}
+    add_run(cache, NEWER_RUN, nodes)
+
+    recs = list(records(company(), SOURCE, cache))
+    t = tickets(recs)["IDN-1"]
+    assert (t.assignees, t.author_login) == ([], None)
+    assert "erin@example.com" not in {r.login for r in recs if isinstance(r, Person)}
+    assert not [r for r in recs if isinstance(r, Comment) and r.work_item_uid == t.uid]
+
+
+@needs_graph
+def test_removed_ticket_loses_assignee_and_blocks(tmp_path):
+    slug = "test_linear_removed"
+    origin = "linear:synthetic-co"
+    uid = issue_uid("i-1")
+    cache = fixture_copy(tmp_path)
+    db.delete_graph(slug)
+    try:
+        schema.apply_schema(slug)
+        loader.load(slug, list(records(company(), SOURCE, cache)), origin=origin)
+        before = db.rows(
+            db.run_text(
+                slug,
+                "MATCH (w:WorkItem {uid: $uid}) RETURN w.status_category AS cat, "
+                "size([(w)<-[:ASSIGNED_TO]-(p) | p]) AS assigned, "
+                "size([(w)-[:BLOCKS]->(x) | x]) AS blocks",
+                {"uid": uid},
+            )
+        )
+        assert before == [{"cat": "in_progress", "assigned": 1, "blocks": 1}]
+
+        add_run(cache, NEWER_RUN, [n for n in newest_nodes(cache) if n["id"] != "i-1"])
+        loader.load(slug, list(records(company(), SOURCE, cache)), origin=origin)
+        after = db.rows(
+            db.run_text(
+                slug,
+                "MATCH (w:WorkItem {uid: $uid}) RETURN w.status_category AS cat, "
+                "size([(w)<-[:ASSIGNED_TO]-(p) | p]) AS assigned, "
+                "size([(w)-[:BLOCKS]-(x) | x]) AS blocks",
+                {"uid": uid},
+            )
+        )
+        assert after == [{"cat": "canceled", "assigned": 0, "blocks": 0}]
     finally:
         db.delete_graph(slug)

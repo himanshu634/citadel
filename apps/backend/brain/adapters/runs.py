@@ -113,7 +113,7 @@ def fetch_paged(
 
     if not incremental:  # this run covers the whole window: older runs are redundant
         for old in folder.glob("*_*.json"):
-            if old.name.split("_")[0] != run["id"]:
+            if run_id_of(old) != run["id"]:
                 old.unlink()
         state["completed_runs"] = []
     state["completed_runs"].append(run["id"])
@@ -124,8 +124,13 @@ def fetch_paged(
     return written
 
 
+def run_id_of(page: Path) -> str:
+    """The run a page belongs to (`<run>_<page>.json`); run ids sort by start time."""
+    return page.name.split("_")[0]
+
+
 def completed_pages(folder: Path) -> list[Path]:
     """Pages from completed runs only, oldest run first (later runs hold newer data)."""
     state = read_json(folder / "state.json", {"completed_runs": []})
     done = set(state["completed_runs"])
-    return sorted(p for p in folder.glob("*_*.json") if p.name.split("_")[0] in done)
+    return sorted(p for p in folder.glob("*_*.json") if run_id_of(p) in done)

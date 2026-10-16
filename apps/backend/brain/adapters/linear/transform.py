@@ -8,18 +8,34 @@ and the links between tickets:
   loader finds by its `url`). Other relation types (`duplicate`) are ignored.
 
 The uid is the Linear issue id, not the identifier ("IDN-2"): an issue that moves to another team
-gets a new identifier but stays one node. People are identified by Linear `displayName`.
+gets a new identifier but stays one node. People are identified by Linear `displayName` (a name
+with "@" in it is skipped: no email addresses in the graph).
+
+Removed tickets: every fetch run returns every open issue of the configured teams, so an issue
+whose latest cached copy is open but that is missing from the newest completed run was archived,
+deleted or moved out of scope. It is emitted as a canceled tombstone ("Removed from Linear", no
+assignees, no links), dated at that run's start so it passes the ingest cursor.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from brain.adapters.linear.fetch import check_permission
-from brain.adapters.runs import completed_pages, read_json
-from brain.canonical import CanonicalRecord, Comment, Link, Person, Team, WorkItem, url_ref
+from brain.adapters.runs import completed_pages, read_json, run_id_of
+from brain.canonical import (
+    CLOSED_STATUS,
+    CanonicalRecord,
+    Comment,
+    Link,
+    Person,
+    Team,
+    WorkItem,
+    url_ref,
+)
 from brain.config import CompanyConfig
 
 SOURCE = "linear"
@@ -36,6 +52,7 @@ STATUS_MAP = {
 }
 # Linear `priority` -> priority; 0 means "no priority".
 PRIORITY_MAP = {0: None, 1: "urgent", 2: "high", 3: "medium", 4: "low"}
+REMOVED_STATE = "Removed from Linear"  # state of a tombstone (see the module docstring)
 
 
 def issue_uid(id: str) -> str:
@@ -47,20 +64,30 @@ def _nodes(conn: dict[str, Any] | None) -> list[dict[str, Any]]:
 
 
 def _login(user: dict[str, Any] | None) -> str | None:
-    """Linear user -> login (displayName); None for a deleted user or a blank name."""
+    """Linear user -> login (displayName); None for a deleted user, a blank name, or a name
+    that is an email address (never stored)."""
     name = ((user or {}).get("displayName") or "").strip()
-    return name or None
+    return name if name and "@" not in name else None
 
 
-def _latest_issues(folder: Path) -> dict[str, dict[str, Any]]:
-    """Read completed pages; for the same issue id keep the most recently updated version."""
+def _latest_issues(folder: Path) -> tuple[dict[str, dict[str, Any]], set[str], str | None]:
+    """Read completed pages; for the same issue id keep the most recently updated version.
+
+    Also returns the ids in the newest completed run and that run's id (None: no run yet).
+    """
     issues: dict[str, dict[str, Any]] = {}
-    for page in completed_pages(folder):
+    pages = completed_pages(folder)
+    newest = max((run_id_of(p) for p in pages), default=None)  # ids sort by time
+    in_newest: set[str] = set()
+    for page in pages:
+        is_newest = run_id_of(page) == newest
         for node in read_json(page, []):
             old = issues.get(node["id"])
             if old is None or node["updatedAt"] >= old["updatedAt"]:
                 issues[node["id"]] = node
-    return issues
+            if is_newest:
+                in_newest.add(node["id"])
+    return issues, in_newest, newest
 
 
 def _ticket(node: dict[str, Any]) -> WorkItem:
@@ -85,6 +112,20 @@ def _ticket(node: dict[str, Any]) -> WorkItem:
         assignees=[assignee] if assignee else [],
         labels=[label["name"] for label in _nodes(node.get("labels"))],
         container=node["team"]["key"],
+    )
+
+
+def _removed(ticket: WorkItem, run_id: str) -> WorkItem:
+    """Tombstone of a ticket that left Linear (or the configured teams) before run `run_id`."""
+    at = datetime.strptime(run_id, "%Y%m%dT%H%M%S").replace(tzinfo=UTC)
+    return ticket.model_copy(
+        update={
+            "state": REMOVED_STATE,
+            "status_category": "canceled",
+            "assignees": [],
+            "updated_at": at,
+            "closed_at": at,
+        }
     )
 
 
@@ -126,8 +167,16 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
 
     blocks: set[tuple[str, str]] = set()
     mentions: set[tuple[str, str]] = set()
-    for node in _latest_issues(cache / "issues").values():
+    removed: set[str] = set()  # uids of tombstones: no links to or from them
+    issues, in_newest, newest = _latest_issues(cache / "issues")
+    for node in issues.values():
+        if source.teams and node["team"]["key"] not in source.teams:
+            continue  # cached before the team set changed; the next fetch clears it
         ticket = _ticket(node)
+        if newest and node["id"] not in in_newest and ticket.status_category not in CLOSED_STATUS:
+            removed.add(ticket.uid)
+            yield _removed(ticket, newest)
+            continue
         yield ticket
 
         for comment in _nodes(node.get("comments")):
@@ -158,8 +207,9 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
                 mentions.add((ticket.uid, url_ref(attachment["url"])))
 
     # Every BLOCKS link on every call: the loader deletes BLOCKS edges of this source that are
-    # missing from the load, so leaving one out would delete a real edge.
-    for from_uid, to_uid in sorted(blocks):
-        yield _link("BLOCKS", from_uid, to_uid)
-    for from_uid, to_uid in sorted(mentions):
-        yield _link("MENTIONS", from_uid, to_uid)
+    # missing from the load, so leaving one out would delete a real edge. Links that touch a
+    # tombstone are left out on purpose (older copies of other issues may still list them).
+    for rel, pairs in (("BLOCKS", blocks), ("MENTIONS", mentions)):
+        for from_uid, to_uid in sorted(pairs):
+            if from_uid not in removed and to_uid not in removed:
+                yield _link(rel, from_uid, to_uid)

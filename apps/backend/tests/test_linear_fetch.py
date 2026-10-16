@@ -117,3 +117,33 @@ def test_empty_teams_means_every_team(tmp_path):
 
     assert [t["key"] for t in read_json(cache / "teams.json")] == ["IDN", "PAY", "OPS"]
     assert client.calls[-1][1]["teams"] == ["IDN", "PAY", "OPS"]
+
+
+def test_changed_team_set_restarts_issue_runs(tmp_path):
+    cache = tmp_path / "linear"
+    fetch(FakeClient(), cache, source(teams=["IDN"]))
+    assert read_json(cache / "meta.json")["issue_teams"] == ["IDN"]
+    stale = cache / "issues" / "19990101T000000_0000.json"  # stands in for the old team's pages
+    stale.write_text("[]")
+
+    client = FakeClient()
+    fetch(client, cache, source(teams=["PAY", "IDN"]))
+
+    assert not stale.exists()
+    assert read_json(cache / "meta.json")["issue_teams"] == ["IDN", "PAY"]
+    state = read_json(cache / "issues" / "state.json")
+    assert len(state["completed_runs"]) == 1
+    (name, variables) = client.calls[-1]
+    assert name == "issues"
+    assert variables["since"] == "2026-01-01T00:00:00Z"  # the whole window, not "since last run"
+
+
+def test_same_team_set_keeps_issue_runs(tmp_path):
+    cache = tmp_path / "linear"
+    fetch(FakeClient(), cache, source(teams=["IDN", "PAY"]))
+    kept = cache / "issues" / "19990101T000000_0000.json"
+    kept.write_text("[]")
+
+    fetch(FakeClient(), cache, source(teams=["PAY", "IDN"]))  # same set, other order
+
+    assert kept.exists()
