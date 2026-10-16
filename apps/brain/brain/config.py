@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     linear_api_key: str | None = None
 
     embedding_dim: int = 768
+    embedding_provider: Literal["fastembed", "none"] = "fastembed"
+    embedding_model: str = "BAAI/bge-base-en-v1.5"
 
     # Claude answers questions over the graph (the agents package). pydantic-settings reads .env
     # but does not export it, so agents/llm.py passes the key on; unset lets the SDK use its own

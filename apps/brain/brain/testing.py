@@ -8,18 +8,62 @@ FalkorDB (`make up`) and are skipped without one.
 
 from __future__ import annotations
 
+import hashlib
+import math
+import os
+import re
 from pathlib import Path
 
 import pytest
 import yaml
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from brain import config, db, loader, schema
+from brain import config, db, embeddings, loader, schema
 from brain.adapters.canonical_jsonl import CanonicalJsonlAdapter, CanonicalJsonlSource
 from brain.config import CompanyConfig
 from brain.normalize import normalize
 
 SYNTHETIC = Path(__file__).resolve().parents[1] / "examples" / "synthetic_company"
+
+
+def pytest_configure(config) -> None:
+    """No test may load the real embedding model: embeddings are off for the whole session.
+    A test that needs vectors calls `set_embedder(FakeEmbedder())`, which wins over this."""
+    os.environ["EMBEDDING_PROVIDER"] = "none"
+
+
+class FakeEmbedder:
+    """A bag-of-words embedder for tests: each word (lowercased) adds 1.0 to one of `dim`
+    buckets chosen by its hash, then the vector is L2-normalised. Texts that share words are
+    close; an empty text is the zero vector. Passages and queries embed the same way."""
+
+    def __init__(self, dim: int = 768, model: str = "fake") -> None:
+        self.dim = dim
+        self.model = model
+
+    def _embed(self, text: str) -> list[float]:
+        vec = [0.0] * self.dim
+        for word in re.findall(r"\w+", text.lower()):
+            vec[int(hashlib.sha256(word.encode()).hexdigest(), 16) % self.dim] += 1.0
+        norm = math.sqrt(sum(x * x for x in vec))
+        return [x / norm for x in vec] if norm else vec
+
+    def passages(self, texts: list[str]) -> list[list[float]]:
+        return [self._embed(t) for t in texts]
+
+    def query(self, text: str) -> list[float]:
+        return self._embed(text)
+
+
+@pytest.fixture
+def embeddings_off(monkeypatch):
+    """No embedder at all, whatever the session or .env says; undone afterwards."""
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "none")
+    config.get_settings.cache_clear()
+    embeddings.set_embedder(None)
+    yield
+    config.get_settings.cache_clear()
+    embeddings.set_embedder(None)
 
 
 def falkordb_up() -> bool:
