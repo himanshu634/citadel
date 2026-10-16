@@ -51,6 +51,8 @@ All colours are tokens in `tokens.css`, with light values on `:root` and dark va
 | `--color-on-accent`                     | Text and icons on an accent fill.                           |
 | `--color-success` / `warning` / `danger` (+ `-soft`) | Status only. Never as an accent or for emphasis. |
 | `--node-person` … `--node-document`     | Graph node types. Only for dots, avatars, bars and graph marks. |
+| `--graph-edge`                          | Links between nodes on a graph.                             |
+| `--graph-territory` (+ `-alt`)          | The two tones graph territories alternate between. Tone, never hue. |
 
 Rules:
 
@@ -122,6 +124,32 @@ Rules:
   below, panels go to 6 or full width; at 720px and below, everything is one column.
 - Content is left-aligned. Nothing is centred except icons inside controls.
 - The page never scrolls sideways. Long text wraps (`overflow-wrap: anywhere` for titles).
+- The Graph page (`/c/<slug>/graph`) is the one exception to `--content-max`: `AppShell` drops
+  the width cap and the padding, and the page fills the height under the top bar. Its bar holds the
+  title, Find, a one-line count and the Filters and List buttons; the inspector (20rem) opens on
+  the right when a node is selected, and below 900px it takes the lower part of the page.
+
+### The graph map (design direction D, "Territories")
+
+- Every node sits in the territory of the system it touches most (rules in
+  `apps/backend/brain/graph_view.py`): the nine biggest systems, one territory for the smaller
+  ones, and a dashed outline for work linked to no code. The layout numbers are in `src/lib/graph.ts`.
+- Territories are **tonal**, never hue: `--graph-territory` and `--graph-territory-alt`
+  alternate, outlined in `--color-line`. Hue stays reserved for node kinds.
+- Routes between territories are ink (`--color-text`) at low opacity, as wide as the links they
+  carry; fewer than 10 links draw no route. Links inside a territory are `--graph-edge`, faint.
+- Territory names are wide black type on the outline's top edge, with a surface halo so they read
+  over dots. Small territories drop the count, the smallest drop the name until you zoom in.
+- **Selected is an ink ring**, never accent (the Graph nav item holds the accent). A selection
+  lights its node, neighbours and links, outlines the territories it reaches in ink, and dims
+  everything else. Hover is a thinner ink ring and a raised name label.
+- Filters hide nodes in place; the map never moves under them. Only Bots refetches and lays out
+  again, because it adds nodes. Comments are counted on their work items, not drawn.
+- The canvas is hidden from assistive tech, which reads a one-line summary. Find (a combobox)
+  and List (a table, most linked first) are the keyboard way to every node, and both select on
+  the map. The selection is kept in the URL as `?focus=<uid>`.
+- No motion: the layout is worked out before the map is shown (in a worker), and panning to a
+  selection jumps.
 
 ## 7. Components
 
@@ -146,16 +174,23 @@ not add another component library.
 | `Tabs`       | The selected tab is the solid accent block with square corners.                                |
 | `Menu`       | Pick one of a set or run a command. Selected item shows a check.                               |
 | `Tooltip`    | Extra hint only. Never the only place information lives. `detail` adds a mono second line (an id).                                       |
-| `Dialog`     | Confirm destructive or blocking actions. Title is a question; the confirming action is last and named for what it does. |
+| `Dialog`     | Confirm destructive or blocking actions, or a short task that keeps the page behind it (add a company). The confirming action is last and named for what it does. `initialFocus` puts focus in the first field; `placement="top"` pins the top edge of a dialog whose body grows while you type. |
 | `Stat`       | A count with its label, inside a `<dl>`. For summaries, not decoration.                        |
 | `EmptyState` | Says what will appear and how to get it, with one action.                                      |
 | `CitedAnswer`, `GraphPath` | The answer pattern from section 1. Citation chips link to the numbered source.   |
+| `GraphWalk`  | The agent's walk for one answer (Ask page, direction D). Nodes are pills with their type dot; the start node is ink at the centre. Links are `--graph-edge` hairlines labelled `step · RELATIONSHIP` in mono; a link the rows only imply is dashed (the legend says so). The newest step of a running answer is accent (ring on its nodes, accent links); a lit citation is accent and everything else drops to 25% (links 20%). Above 12 nodes, only the start, cited, lit and newest nodes keep their names; the rest are dots that name themselves on hover or focus. Earlier nodes drift at most 36 stage units when a step lands. Rules in `src/lib/walk.ts`. |
+| `WalkSteps`  | The tool calls behind an answer: number circle (success tint; accent while running; danger with an alert icon when failed), the call in mono, rows and ms. One step opens to show its rows (paths as chains); rows a citation used carry its chip. The last row is the answer check, and a rejected check stays visible with the reason. |
+| `WalkAnswer` | The answer on the Ask page: limited Markdown rendered as text, citation chips that are buttons (hover or focus lights the path, click pins it), sources that say which step found them. No answer says why (refused, stopped, step limit). |
+| `AnswerRating` | A thumbs up and down under an Ask answer, saved on its trace. Ghost icon buttons with `aria-pressed`; pressed is a filled ink icon on the sunken fill plus a line of words ("Marked right"), never accent (the citations own it). Pressing again takes it back. A thumbs down offers an optional note, which becomes the `why` of a draft eval case. Saving and a failed save are said in words; a failed save keeps the earlier thumbs. Hidden when the answer has no trace or was stopped. |
 | `EntityRow`, `WorkItemRow`, `ActivityBars` | List and comparison patterns for people, teams, systems and work items. |
 | `CompanyForm` | The fields of a company file for one wizard step or all three (Settings). Edits the draft; the page validates and hands back `errors`, which show under the field their `loc` names. Errors no field shows are listed at the foot of the step, so nothing blocks without a reason. Rules in `src/lib/onboarding.ts`. |
 | `SourceCard` | One source of a company. GitHub: repository, what to read, token note with "Check again", GitHub's answer; an error only when the repository is private while the data is not `own`. Not found, rate limits and outages are warnings with "Check again", never blockers; Continue waits while a check is unanswered. |
 | `ConfigPreview` | The YAML the server will write, with the top-level keys of the current step marked (bar, tint and a line of words). Shows the last valid text while the form has errors, and says so. |
 | `BuildProgress` | One build: "Step n of N" from the plan, an ink progress meter (the one accent block of the view is the primary button), a table with a cell per source and stage, and the plain log. Each cell is icon plus word plus count or message; a skipped source is one merged cell saying why. Rules live in `src/lib/buildProgress.ts`. |
-| `CompanyRail` | One tile per company brain; one click switches company and keeps the section you are on. Monogram 15px at width 118; ink for the current tile (section 3). Tooltip shows the name and `brain_<slug>` in mono. |
+| `AddCompanyDialog` | Add a company from one public GitHub repository: one field (a link or `owner/name`), then what Citadel will make (company, graph, window). Private repos are refused in the field's error; no token, GitHub down and a company that already reads the repo or its owner are banners with their one action. "Advanced setup" opens the step-by-step form at `/new`. Rules in `src/lib/addCompany.svelte.ts`. |
+| `CompanyRail` | One tile per company brain; one click switches company and keeps the section you are on. Monogram 15px at width 118; ink for the current tile (section 3). Tooltip shows the name and `brain_<slug>` in mono. The + opens `AddCompanyDialog`. |
+| `TerritoryMap` | The whole company graph as territories (section 6, The graph map). Canvas plus an HTML label layer; drag pans, scroll zooms (`scrollZoom={false}` where it sits in a scrolling page; pinch and the buttons still zoom), click selects. Colours are read from the tokens and re-read when the theme changes. |
+| `NodeInspector` | The selected node: kind, territory and state, its fields (`get_entity`), where its neighbours live, its links by relationship, and its most linked neighbours, which select in turn. Counts come from the links the map draws. "Open on GitHub" only when the node has a url. |
 | `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". |
 
 Adding a component:

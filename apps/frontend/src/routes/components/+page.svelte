@@ -2,7 +2,9 @@
 <script lang="ts">
 	import { CloudOff, Inbox, LoaderCircle, Plus, Search, Trash2 } from '@lucide/svelte';
 	import {
+		AnswerRating,
 		ActivityBars,
+		AddCompanyDialog,
 		Avatar,
 		Badge,
 		Banner,
@@ -19,20 +21,30 @@
 		EmptyState,
 		EntityRow,
 		GraphPath,
+		GraphWalk,
 		Input,
 		Menu,
 		NodeChip,
+		NodeInspector,
 		Select,
 		SourceCard,
 		Stat,
 		Stepper,
 		Tabs,
 		TagInput,
+		TerritoryMap,
 		Tooltip,
+		WalkAnswer,
+		WalkSteps,
 		WorkItemRow
 	} from '$lib';
+	import { AddCompany, type Lookup } from '$lib/addCompany.svelte';
+	import { layoutMap, neighbourhood } from '$lib/graph';
 	import { RepoChecks, type RepoResult } from '$lib/repochecks.svelte';
 	import * as builds from './build-samples';
+	import { syntheticGraph } from './graph-samples';
+	import * as walks from './walk-samples';
+	import { highlightFor } from '$lib/walk';
 	import {
 		NODE_LABELS,
 		type CitedAnswer as Answer,
@@ -40,9 +52,18 @@
 		type CompanyConfig,
 		type CompanyStatus,
 		type NodeType,
+		type RepoLookup,
 		type SourceConfig,
 		type WorkItem
 	} from '$lib/types';
+
+	// The Ask walk: citation 1 stays lit unless another is hovered.
+	let walkHover = $state<number | null>(null);
+	let liveRating = $state<'up' | 'down' | null>(null);
+	let liveNote = $state<string | null>(null);
+	const walkActive = $derived(walkHover ?? 1);
+	const walkLit = $derived(highlightFor(walks.answer.sources[walkActive - 1], walks.done));
+	const walkCites = new Map(walks.answer.sources.map((s, i) => [s.uid, [i + 1]]));
 
 	// Example content for the gallery, taken from apps/backend/examples/synthetic_company.
 	const featuredAnswer: Answer = {
@@ -144,6 +165,85 @@
 			return Promise.resolve();
 		}
 	}
+	/** The add-company dialog in one fixed state: typing never calls the API from the gallery. */
+	class FixedAdd extends AddCompany {
+		constructor(text: string, lookup: Lookup | null = null) {
+			super();
+			this.text = text;
+			if (lookup) this.result = { repo: this.repo ?? '', lookup };
+		}
+		override input(text: string) {
+			this.text = text;
+		}
+		override async retry() {}
+		override async create() {
+			return null;
+		}
+		override async addTo() {
+			return null;
+		}
+	}
+	const repoLookup = (over: Partial<RepoLookup> = {}): Lookup => ({
+		kind: 'found',
+		lookup: {
+			repo: 'acme-labs/platform',
+			exists: true,
+			private: false,
+			owner_name: 'Acme Labs',
+			name: 'Acme Labs',
+			slug: 'acme_labs',
+			since: '2025-10-16',
+			company: null,
+			owner_company: null,
+			...over
+		}
+	});
+	const addStates: { label: string; ctl: FixedAdd }[] = [
+		{ label: 'Empty', ctl: new FixedAdd('') },
+		{ label: 'Typing', ctl: new FixedAdd('acme-labs') },
+		{ label: 'Checking', ctl: new FixedAdd('acme-labs/platform', { kind: 'checking' }) },
+		{ label: 'Ready', ctl: new FixedAdd('https://github.com/acme-labs/platform', repoLookup()) },
+		{
+			label: 'Owner has a brain',
+			ctl: new FixedAdd(
+				'FalkorDB/falkordb-py',
+				repoLookup({
+					repo: 'FalkorDB/falkordb-py',
+					name: 'FalkorDB falkordb-py',
+					slug: 'falkordb_py',
+					owner_company: { slug: 'falkordb', name: 'FalkorDB' }
+				})
+			)
+		},
+		{
+			label: 'Already read',
+			ctl: new FixedAdd(
+				'FalkorDB/FalkorDB',
+				repoLookup({ repo: 'FalkorDB/FalkorDB', company: { slug: 'falkordb', name: 'FalkorDB' } })
+			)
+		},
+		{
+			label: 'Private',
+			ctl: new FixedAdd('acme-labs/billing', { kind: 'private', repo: 'acme-labs/billing' })
+		},
+		{
+			label: 'Not found',
+			ctl: new FixedAdd('acme-labs/platfrom', { kind: 'missing', repo: 'acme-labs/platfrom' })
+		},
+		{ label: 'No token', ctl: new FixedAdd('acme-labs/platform', { kind: 'no_token' }) },
+		{ label: 'GitHub down', ctl: new FixedAdd('acme-labs/platform', { kind: 'unreachable' }) },
+		{
+			label: 'Long name',
+			ctl: new FixedAdd(
+				'the-international-consortium-of-very-long-organisation-names/a-repository-with-an-equally-long-name',
+				repoLookup({
+					name: 'The International Consortium of Very Long Organisation Names and Friends',
+					slug: 'the_international_consortium_of_very_long_organisation_names'
+				})
+			)
+		}
+	];
+
 	const checksFound = new FixedChecks('env', { 'acme-labs/platform': { kind: 'found', private: false } });
 	const checksNoToken = new FixedChecks(null);
 	const checksPrivate = new FixedChecks('gh', { 'acme-labs/secret': { kind: 'found', private: true } });
@@ -271,6 +371,29 @@
 		['--text-sm', '13', 'Secondary rows'],
 		['--text-xs', '12', 'Meta and chips']
 	];
+
+	// The graph map and inspector, on the synthetic company's real graph view.
+	const mapLayout = layoutMap(syntheticGraph, { ticks: 300 });
+	let mapSelected = $state<string | null>('person:alice');
+	const graphNode = (uid: string) => syntheticGraph.nodes.find((n) => n.uid === uid);
+	const territoryOf = (uid: string) =>
+		syntheticGraph.territories.find((t) => t.id === graphNode(uid)?.territory) ?? null;
+	const alice = graphNode('person:alice')!;
+	const ciBot = graphNode('person:ci-bot')!;
+	const longPr = syntheticGraph.nodes
+		.filter((n) => n.label === 'WorkItem')
+		.toSorted((a, b) => (b.title ?? '').length - (a.title ?? '').length)[0];
+	const aliceEntity = {
+		uid: 'person:alice',
+		label: 'Person',
+		title: 'alice',
+		kind: null,
+		state: null,
+		url: null,
+		date: null,
+		body: '',
+		neighbour_count: neighbourhood(syntheticGraph, 'person:alice').uids.size - 1
+	};
 </script>
 
 <svelte:head><title>Components | Citadel</title></svelte:head>
@@ -502,6 +625,19 @@
 		</Card>
 	</div>
 
+	<Card title="Add-company dialog">
+		<p class="note">
+			The rail's + opens it: one field for a public GitHub repository, then what Citadel will make.
+			Each button opens one state; typing here never calls the API.
+		</p>
+		<div class="row">
+			{#each addStates as state (state.label)}
+				<Button size="sm" onclick={() => (state.ctl.open = true)}>{state.label}</Button>
+				<AddCompanyDialog ctl={state.ctl} />
+			{/each}
+		</div>
+	</Card>
+
 	<Card title="Source card">
 		<p class="note">
 			One card per source in the add-company form. GitHub: the repository, what to read, and what
@@ -630,6 +766,83 @@
 		</Tabs>
 	</Card>
 
+	<Card title="Graph walk, steps and answer (Ask)">
+		<div class="walks">
+			<figure>
+				<GraphWalk steps={walks.running} fresh={null} />
+				<WalkSteps steps={walks.running} />
+				<figcaption>Running: step 2 asked for, step 1 drawn</figcaption>
+			</figure>
+			<figure>
+				<GraphWalk
+					steps={walks.done}
+					highlight={walkLit}
+					cited={new Set(walks.answer.sources.map((s) => s.uid))}
+				/>
+				<WalkSteps
+					steps={walks.done}
+					open="s3"
+					ontoggle={() => {}}
+					cites={walkCites}
+					active={walkActive}
+				/>
+				<figcaption>Done: citation 1 lit, step 3 open with its rows</figcaption>
+			</figure>
+			<figure>
+				<WalkAnswer answer={walks.answer} active={walkActive} onactive={(n) => (walkHover = n)} />
+				<figcaption>Answer: hover a chip or a source</figcaption>
+			</figure>
+			<figure>
+				<WalkSteps steps={walks.rough} />
+				<GraphWalk steps={[]} />
+				<WalkAnswer answer={walks.stopped} />
+				<WalkAnswer answer={walks.refused} />
+				<figcaption>A failed call, an empty call, a rejected check; empty stage; no answer</figcaption>
+			</figure>
+		</div>
+	</Card>
+
+	<Card title="Answer rating (Ask)">
+		<div class="walks">
+			<figure>
+				<AnswerRating
+					rating={liveRating}
+					note={liveNote}
+					onrate={(r) => {
+						liveRating = r;
+						liveNote = null;
+					}}
+					onnote={(text) => (liveNote = text)}
+				/>
+				<figcaption>Live: press a thumb, press it again to take it back; thumbs down asks for a note</figcaption>
+			</figure>
+			<figure>
+				<AnswerRating rating="up" status="saved" />
+				<figcaption>Marked right</figcaption>
+			</figure>
+			<figure>
+				<AnswerRating rating="down" status="saved" />
+				<figcaption>Marked wrong, note not sent yet</figcaption>
+			</figure>
+			<figure>
+				<AnswerRating
+					rating="down"
+					status="saved"
+					note="It named bob, but erin has reviewed every Billing change since March and bob moved to the platform team."
+				/>
+				<figcaption>Marked wrong with a long note</figcaption>
+			</figure>
+			<figure>
+				<AnswerRating rating="up" status="saving" />
+				<figcaption>Saving</figcaption>
+			</figure>
+			<figure>
+				<AnswerRating rating={null} status="failed" />
+				<figcaption>The save failed: the thumbs that was there stays</figcaption>
+			</figure>
+		</div>
+	</Card>
+
 	<div class="two">
 		<Card title="Rows">
 			<EntityRow name="Alice Kim" type="person" meta="identity, 2 PRs" value={3} valueLabel="reviews" selected />
@@ -696,6 +909,65 @@
 			<BuildProgress snapshot={builds.stopped} />
 		</div>
 	</Card>
+
+	<Card title="Territory map">
+		<p class="note">
+			The Graph page's map: one tonal territory per system, ink routes between them, a selection
+			lights its neighbours and outlines the territories it reaches. Click a node, drag, use the
+			buttons or pinch to zoom (scroll zooms on the Graph page). Synthetic company, bots shown.
+		</p>
+		<div class="map-sample">
+			<TerritoryMap
+				view={syntheticGraph}
+				layout={mapLayout}
+				selected={mapSelected}
+				onselect={(uid) => (mapSelected = uid)}
+				scrollZoom={false}
+			/>
+		</div>
+		<h3 class="sub">Nothing selected</h3>
+		<div class="map-sample short">
+			<TerritoryMap view={syntheticGraph} layout={mapLayout} scrollZoom={false} />
+		</div>
+	</Card>
+
+	<Card title="Node inspector">
+		<p class="note">
+			What the Graph page says about a selected node. Counts come from the links the map draws;
+			fields come from <code>get_entity</code>.
+		</p>
+		<div class="inspectors">
+			<div>
+				<h3 class="sub">Fields read</h3>
+				<NodeInspector
+					node={alice}
+					hood={neighbourhood(syntheticGraph, alice.uid)}
+					territory={territoryOf(alice.uid)}
+					entity={aliceEntity}
+					lookup={graphNode}
+				/>
+			</div>
+			<div>
+				<h3 class="sub">Reading fields, long title</h3>
+				<NodeInspector
+					node={longPr}
+					hood={neighbourhood(syntheticGraph, longPr.uid)}
+					territory={territoryOf(longPr.uid)}
+					lookup={graphNode}
+				/>
+			</div>
+			<div>
+				<h3 class="sub">A bot, fields failed</h3>
+				<NodeInspector
+					node={ciBot}
+					hood={neighbourhood(syntheticGraph, ciBot.uid)}
+					territory={territoryOf(ciBot.uid)}
+					error="FalkorDB is not reachable"
+					lookup={graphNode}
+				/>
+			</div>
+		</div>
+	</Card>
 </div>
 
 <style>
@@ -718,6 +990,26 @@
 		margin: var(--space-5) 0 var(--space-3);
 		font-size: var(--text-sm);
 		font-variation-settings: 'wdth' var(--width-label);
+	}
+	.map-sample {
+		height: 30rem;
+		border: var(--border-hair) solid var(--color-line);
+		border-radius: var(--radius-md);
+		overflow: hidden;
+	}
+	.map-sample.short {
+		height: 18rem;
+	}
+	.inspectors {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+		gap: var(--space-5);
+		align-items: start;
+	}
+	.inspectors > div > :global(.inspector) {
+		height: auto;
+		border: var(--border-hair) solid var(--color-line);
+		border-radius: var(--radius-md);
 	}
 	.forms {
 		display: grid;
@@ -745,6 +1037,18 @@
 		grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
 		gap: var(--space-5);
 		align-items: start;
+	}
+	.walks {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr));
+		gap: var(--space-6);
+		align-items: start;
+	}
+	.walks figure {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+		margin: 0;
 	}
 	.note {
 		max-width: 70ch;

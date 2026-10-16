@@ -10,7 +10,7 @@ API_PORT ?= 8000
 BRAIN := uv run brain
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask chat reset linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
+.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask chat eval eval-drafts traces reset linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
@@ -76,7 +76,28 @@ query: ## Run a named tool: make query TOOL=experts_for_system P="system=CI" (JS
 tools: ## List the named query tools and their parameters
 	$(BRAIN) tools
 
-reset: ## Delete graphs brain_/agent_$(SLUG) and its build history; needs CONFIRM=1
+agents: ## List the agent roles, their jobs and read tools
+	$(BRAIN) agents
+
+sim: ## Run agents on $(SLUG): make sim SLUG=synthetic SCENARIO=race OFFLINE=1 (TICKS=30)
+	$(BRAIN) sim run $(SLUG) --scenario $(or $(SCENARIO),sprint) --ticks $(or $(TICKS),30) $(if $(filter 1 yes,$(OFFLINE)),--offline)
+
+# Evals default to the synthetic company: it is the one with golden cases.
+EVAL_SLUG = $(if $(filter file,$(origin SLUG)),synthetic,$(SLUG))
+
+eval: ## Agent evals (calls the API; SLUG defaults to synthetic): CASE=id|tag REPEAT=3 MODEL=.. EFFORT=.. BASELINE=file
+	cd apps/backend && uv run python -m evals --slug $(EVAL_SLUG) $(foreach c,$(CASE),--case $(c)) \
+		$(if $(REPEAT),--repeat $(REPEAT)) $(if $(MODEL),--model $(MODEL)) \
+		$(if $(EFFORT),--effort $(EFFORT)) $(if $(BASELINE),--baseline $(abspath $(BASELINE)))
+
+traces: ## How the brain did on live questions (CLI + Ask page) for $(SLUG): rates, p50/p95; DAYS=7
+	$(BRAIN) traces $(SLUG) $(if $(DAYS),--days $(DAYS))
+
+eval-drafts: ## Thumbs-down answers of $(SLUG) as draft eval cases (printed; WRITE=1 appends to the case file) DAYS=..
+	cd apps/backend && uv run python -m evals.drafts --slug $(SLUG) $(if $(DAYS),--days $(DAYS)) \
+		$(if $(filter 1 yes,$(WRITE)),--write)
+
+reset: ## Delete graphs brain_/agent_$(SLUG), its build history and Ask traces; needs CONFIRM=1
 	$(BRAIN) reset $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)
 
 linear-seed: ## Fill the Linear workspace of $(SLUG) with the synthetic tickets (CONFIRM=1)

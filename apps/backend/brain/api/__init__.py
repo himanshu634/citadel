@@ -17,7 +17,8 @@ from fastapi.responses import JSONResponse
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from brain.api import builds, checks, companies, overview, tools
+from brain.api import ask, builds, checks, companies, graph, onboard, overview, tools, traces
+from brain.api.ask import Asker
 from brain.jobs import JobRunner
 
 DEV_ORIGIN = "http://localhost:5173"
@@ -29,10 +30,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-def create_app(runner: JobRunner | None = None) -> FastAPI:
+def create_app(runner: JobRunner | None = None, asker: Asker | None = None) -> FastAPI:
     app = FastAPI(title="Company Brain", lifespan=lifespan)
     app.state.runner = runner or JobRunner()
     app.state.start_lock = threading.Lock()
+    app.state.asker = asker or Asker()
     app.add_middleware(CORSMiddleware, allow_origins=[DEV_ORIGIN], allow_methods=["*"])
 
     @app.exception_handler(RedisConnectionError)
@@ -43,8 +45,12 @@ def create_app(runner: JobRunner | None = None) -> FastAPI:
     app.include_router(companies.router, prefix="/api")
     app.include_router(builds.router, prefix="/api")
     app.include_router(checks.router, prefix="/api")
+    app.include_router(onboard.router, prefix="/api")
     app.include_router(overview.router, prefix="/api")
     app.include_router(tools.router, prefix="/api")
+    app.include_router(ask.router, prefix="/api")
+    app.include_router(traces.router, prefix="/api")
+    app.include_router(graph.router, prefix="/api")
     return app
 
 

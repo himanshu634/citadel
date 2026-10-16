@@ -8,7 +8,7 @@ source is ever reported; its value is never returned, logged or put in an error 
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException, Path
@@ -43,29 +43,36 @@ def github_token() -> dict[str, str | None]:
     return {"token": token_source()}
 
 
-@router.get("/github/{owner}/{name}")
-def github_repo(
-    owner: Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9-]*$")],
-    name: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]+$")],
-) -> dict[str, bool | None]:
-    """Whether owner/name exists for our token, and if so whether it is private. 424 without a
-    token (the check depends on one), 429 when GitHub rate-limits us, 502 when it fails."""
+OWNER = Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9-]*$")
+NAME = Path(pattern=r"^[A-Za-z0-9._-]+$")
+
+
+def ask_repo(query: str, owner: str, name: str) -> dict[str, Any] | None:
+    """`repository` from one GraphQL query, or None when GitHub has no such repo for our token.
+    424 without a token (the check depends on one), 429 when GitHub rate-limits us, 502 when
+    it fails. The onboarding routes ask through here too, so both answer alike."""
     try:
         github = github_client()
     except GithubError as exc:  # the client only fails to build when there is no token
         raise HTTPException(status_code=424, detail=NO_TOKEN) from exc
     with github:
         try:
-            repo = github.query("repo_meta", {"owner": owner, "name": name})["repository"]
+            return github.query(query, {"owner": owner, "name": name})["repository"]
         except GithubRateLimited as exc:
             detail = "GitHub rate limit reached; try again later"
             raise HTTPException(status_code=429, detail=detail) from exc
         except GithubError as exc:
             if "NOT_FOUND" in str(exc):  # GitHub answers a missing repo with a GraphQL error
-                return {"exists": False, "private": None}
+                return None
             raise HTTPException(status_code=502, detail="GitHub request failed") from exc
         except httpx.HTTPError as exc:  # includes timeouts
             raise HTTPException(status_code=502, detail="GitHub is not reachable") from exc
+
+
+@router.get("/github/{owner}/{name}")
+def github_repo(owner: Annotated[str, OWNER], name: Annotated[str, NAME]) -> dict[str, bool | None]:
+    """Whether owner/name exists for our token, and if so whether it is private."""
+    repo = ask_repo("repo_meta", owner, name)
     if repo is None:
         return {"exists": False, "private": None}
     return {"exists": True, "private": repo["isPrivate"]}

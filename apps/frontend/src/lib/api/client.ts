@@ -11,9 +11,16 @@ import type {
 	CompanyConfig,
 	CompanyDetail,
 	ConfigChange,
+	Feedback,
 	GithubRepoCheck,
 	GithubTokenCheck,
+	Entity,
+	GraphView,
+	OnboardRequest,
+	OnboardResult,
 	Overview,
+	Rating,
+	RepoLookup,
 	ValidateResult
 } from '../types';
 
@@ -56,6 +63,12 @@ const company = (slug: string) => `/companies/${encodeURIComponent(slug)}`;
 
 export const api = {
 	companies: () => request<Company[]>('GET', '/companies'),
+	/** A thumbs on one Ask answer (its `trace_id`); `rating` null takes it back. 404: no such answer. */
+	feedback: (slug: string, traceId: string, rating: Rating | null, note?: string) =>
+		request<Feedback>('POST', `${company(slug)}/traces/${encodeURIComponent(traceId)}/feedback`, {
+			rating,
+			note: note ?? null
+		}),
 	company: (slug: string) => request<CompanyDetail>('GET', company(slug)),
 	/** Check a draft on every form change; writes nothing. */
 	validate: (draft: CompanyConfig) => request<ValidateResult>('POST', '/companies/validate', draft),
@@ -82,13 +95,33 @@ export const api = {
 	stopBuild: (slug: string) => request<BuildSnapshot>('DELETE', `${company(slug)}/builds/current`),
 	/** 503 while FalkorDB is down. */
 	overview: (slug: string) => request<Overview>('GET', `${company(slug)}/overview`),
+	/** The whole graph for the Graph page; `bots` adds the bot accounts and their links. */
+	graph: (slug: string, bots = false) =>
+		request<GraphView>('GET', `${company(slug)}/graph${bots ? '?bots=true' : ''}`),
+	/** One node's fields (the `get_entity` tool); null when the graph has no such node. */
+	entity: (slug: string, uid: string) =>
+		request<{ rows: Entity[] }>('POST', `${company(slug)}/tools/get_entity`, {
+			uid,
+			limit: 1
+		}).then((r) => r.rows[0] ?? null),
 	githubToken: () => request<GithubTokenCheck>('GET', '/checks/github'),
 	/** 424 without a token, 429 when rate limited, 502 when GitHub fails. */
 	githubRepo: (owner: string, name: string) =>
 		request<GithubRepoCheck>(
 			'GET',
 			`/checks/github/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
-		)
+		),
+	/** The add-a-company dialog's lookup. 424 without a token, 429 rate limited, 502 GitHub failed. */
+	lookupRepo: (owner: string, name: string) =>
+		request<RepoLookup>(
+			'GET',
+			`/onboard/github/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
+		),
+	/**
+	 * Create a company from one public repo and start its first build. 422 `{code: 'private_repo' |
+	 * 'not_found'}` or FieldError[]; 409 `{code: 'repo_taken', slug, name}` or `{code: 'slug_taken'}`.
+	 */
+	onboard: (body: OnboardRequest) => request<OnboardResult>('POST', '/onboard/github', body)
 };
 
 /** Said when nothing answers at `/api`: the API is not running, or the dev proxy has no one behind it. */

@@ -26,7 +26,12 @@ make tools                     # list the named query tools and their params
 make query TOOL=impact_of P="system=CI"   # run one (SLUG=..., JSON=1 for raw rows)
 make ask SLUG=synthetic Q="who knows Auth?"   # Claude answers from the graph (THREAD=<id> follows up)
 make chat SLUG=synthetic OFFLINE=1   # one scripted turn, no API key: router + tools + checkpointer
-make reset SLUG=x CONFIRM=1    # delete brain_x, agent_x and its build history (frees the slug)
+make eval                      # agent evals on brain_synthetic (calls the API): CASE=id|tag REPEAT=3 MODEL=.. EFFORT=.. BASELINE=<file>
+make traces SLUG=x DAYS=7      # live Ask traffic: no-answer/step-limit/nudge/... rates, p50/p95 latency and tokens, thumbs
+make eval-drafts SLUG=x        # thumbs-down answers as draft eval cases (WRITE=1 appends to evals/cases/x.yaml)
+make agents                    # list the agent roles, their jobs and read tools
+make sim SLUG=synthetic SCENARIO=sprint OFFLINE=1   # run the agents (sprint, race, regression)
+make reset SLUG=x CONFIRM=1    # delete brain_x, agent_x, its build history and Ask traces (frees the slug)
 make linear-seed SLUG=synthetic_linear CONFIRM=1   # copy the synthetic tickets into a real Linear workspace
 make brain ARGS="..."          # any `brain` CLI command
 make api                       # HTTP API on 127.0.0.1:$API_PORT (default 8000), auto-reload
@@ -97,16 +102,23 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   `prepare` only converts params (days → epoch, text → RediSearch OR query, login → uid). No
   LLM-generated Cypher anywhere. `path_between` uses `algo.SPpaths` (FalkorDB's `shortestPath`
   rejects undirected traversals).
+- **`graph_view.py`** builds the Graph page's view: every drawable node and link, and the
+  territory (home system) of each node; the rules are in its module doc. Pure apart from `load`.
 - **`db.py`** is the only place that opens a connection and selects the graph (`brain_<slug>`);
   all queries go through `db.run()` so nothing can hit the wrong company's graph.
 - **API** (`brain/api`, FastAPI; `brain.api:app`, run with `make api`): the frontend's only way in.
-  Routes sit under `/api/companies/{slug}/...` (overview, builds, tools); the slug is resolved
-  only by `deps.company_slug`, which 404s unless `companies/<slug>.yaml` exists. Behind it:
+  Routes sit under `/api/companies/{slug}/...` (overview, builds, tools, ask, graph); the slug is
+  resolved only by `deps.company_slug`, which 404s unless `companies/<slug>.yaml` exists. Behind it:
   `registry.py` (`companies/*.yaml` is the registry; a bad file is reported, not fatal; edits
   round-trip so hand-written comments survive; writes are atomic), `config_diff.py` (says if a
   saved change needs a graph rebuild or a new download), and `jobs.py` (one build per company,
   at most two at once, progress as SSE events, last build kept in `data/jobs/<slug>.json`, a
-  build cut off by a restart is marked `stopped`).
+  build cut off by a restart is marked `stopped`). `/api/onboard/github` adds a company from one
+  public GitHub repo (the rail's + dialog): `brain/onboard.py` derives name, slug and window; the
+  create re-checks visibility (private repos are refused) and writes and starts under the
+  start lock. `api/ask.py`: POST `.../ask` answers one question as SSE (`start`, `step` /
+  `step_done` per tool call, `answer` or `error`) from a worker thread; one run per thread_id;
+  closing the stream stops the run at its next step.
 
 ### Agents (`brain/agents`)
 
@@ -123,8 +135,36 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
   models). It may cite only uids seen in tool results; anything else is sent back as an error.
 - Keep `agents/system_prompt.md` and the tool list static (no dates, sorted tools) so the prompt
   prefix stays cacheable. Threads are checkpointed in graph `agent_<slug>` (`db.checkpointer`).
+- `ask.ask_events` streams a run for the Ask page (`ask()` is its last item): each tool call is
+  timed and recorded in the append-only `trace` channel with the subgraph it touched
+  (`agents/walk.py` turns any tool's rows into nodes + relationships; links the rows only imply
+  are `inferred`). A stop is honoured only between saved steps, so the thread stays valid.
 - Tests use a scripted fake client (`tests/test_agent.py`); nothing in `make test` calls the API.
   `agents/offline.py` is the same idea for `brain chat --offline`.
+- Online traces (`agents/traces.py`): every turn asked from the CLI (`_run_ask`, real Claude only)
+  or the Ask API (its worker, before the `answer` event, which then carries `trace_id`) appends
+  one `Trace` to `data/traces/<slug>.jsonl`: tools, failed tools, rejected submits, nudges, stop
+  (`error` when the run raised), model, tokens (input + cache read + cache write + output),
+  latency, sources, the answer and its cited uids. `ask`, `ask_traced` and evals never record.
+  A thumbs (`POST .../traces/{id}/feedback`) is an appended `feedback` line; reading folds the
+  latest onto its turn. `GET .../traces/summary?days=` (`brain traces`) gives the rates (over all
+  turns; zero-source over answered turns) and nearest-rank p50/p95. `ask.run_events` is
+  `ask_events` with the raw `Answer` last, for callers that need its tokens and nudges.
+
+### Evals (`apps/backend/evals`)
+
+`make eval` asks the real agent each question in `evals/cases/<slug>.yaml` against brain_<slug>
+and grades it with deterministic checks (`graders.py`): uids cited (`cite_any/all/none`), graph
+tools that ran, answer text (substrings or a regex) and a step budget. Expected uids are literals
+or gold refs (`{tool, params, field, top}`) read from the graph when the run starts, so cases
+follow the data. Each case runs `REPEAT` times and reports a pass rate; turns of one case share a
+thread. Results: `data/evals/<slug>/<time>-<model>-<effort>.jsonl`; `BASELINE=` diffs pass rates
+against an earlier file. It calls the API, so it is not part of `make test`;
+`tests/test_evals.py` checks the case files and the harness with the scripted client.
+`evals/drafts.py` (`make eval-drafts`) turns thumbs-down traces into cases `fb-<trace id>`: the
+earlier turns of the thread, then the bad one expecting only an answer, with the bad answer in
+comments. They are tagged `draft`, which a plain run skips (`CASE=draft` runs them); write the
+real `expect` and drop the tag.
 
 ### Named Cypher queries
 
@@ -133,10 +173,37 @@ with a leading `//` header (purpose / params / returns) and is fetched by name v
 `queries.get("load/person")`. A file may hold several statements separated by `;` (FalkorDB runs one
 statement per `GRAPH.QUERY`), which the schema files use. Folders: `schema/` (range, full-text,
 vector indexes, applied in order by `schema.py`, "already indexed" errors are skipped), `load/`
-(loader writes), `tools/` (agent-facing read queries).
+(loader writes), `tools/` (agent-facing read queries), `graph/` (the Graph page's whole-graph read,
+used by `brain/graph_view.py`).
 
 The synthetic company (`apps/backend/examples/synthetic_company`, source type `canonical_jsonl`)
 is a small offline dataset for demos and tests; its JSONL is generated by `generate.py`.
+
+### Agent roles (`brain/agents/roles`, `brain/work`, `brain/sim`)
+
+The simulated company in [docs/agents.md](docs/agents.md) (the spec; its "Implementation status"
+says what is built). Agents never message each other: each reads its queue, makes one decision
+and writes it; the next agent finds it through its own queue. Pieces:
+- `work/`: the records (`model.py`), every legal task move in one table (`moves.py`: the guard
+  each `queries/work/*.cypher` must match), one pydantic model per `submit_*` tool
+  (`submits.py`: the write query's params), work-layer read tools (`tools.py`) and the
+  `WorkStore` protocol (`store.py`: `read`/`write` by query name, like `db.run`).
+  `memory_store.py` is the offline/test double that enforces the same guards; the FalkorDB store
+  is phase 2.
+- `acl.py`: which database user may read/write which graph (`brain_`, `sim_`, `mem_<slug>_<role>`,
+  `agent_`), and which role each writer user acts as. The store refuses what it does not allow.
+- `agents/roles/`: one `ROLE` per module (user, sorted read tools, jobs; prompt in
+  `agents/prompts/<role>.md` after `_shared.md`). A job = queue read + optional atomic claim +
+  one submit tool + `apply` (named writes).
+- `agents/runner.py`: runs a job through the brain loop (`loop.py`, parameterised by prompt,
+  submit tool and grounding check), then writes and logs one Episode. Read-only roles log to
+  their own memory graph.
+- `agents/policies/`: a deterministic policy per job; `ScriptedClient` plays it through the real
+  loop, so offline runs hit the same checks as Claude. Tests: `test_work_store.py`,
+  `test_agent_roles.py` (fake brain in `tests/agent_fakes.py`).
+- `sim/`: the orchestrator's tick loop (`STEPS` order) and the scenarios.
+Rules: roles cite only uids from this run's tool results; a write that matches nothing changed
+nothing; role read tools not yet backed by a query are pinned in `test_tools_still_missing_are_pinned`.
 
 ## Frontend architecture (`apps/frontend`)
 

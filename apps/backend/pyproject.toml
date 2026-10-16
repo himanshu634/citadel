@@ -31,3 +31,4 @@ packages = ["brain"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]  # the evals package (apps/backend/evals) sits next to brain

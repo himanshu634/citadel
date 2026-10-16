@@ -1,7 +1,9 @@
 <!--
 @component
 Modal dialog on bits-ui: focus is trapped, Escape closes, focus returns to the trigger.
-`title` is required. `footer` holds the actions; put the confirming action last.
+`title` is required. `footer` holds the actions; put the confirming action last. `initialFocus`
+is a selector inside the dialog to focus on open (default: the panel itself). `placement="top"`
+pins the panel's top edge, for a dialog whose body grows while you type (it would jump if centred).
 -->
 <script lang="ts">
 	import { Dialog } from 'bits-ui';
@@ -15,9 +17,28 @@ Modal dialog on bits-ui: focus is trapped, Escape closes, focus returns to the t
 		trigger?: Snippet<[Record<string, unknown>]>;
 		children?: Snippet;
 		footer?: Snippet;
+		initialFocus?: string;
+		placement?: 'center' | 'top';
 	};
 
-	let { open = $bindable(false), title, description, trigger, children, footer }: Props = $props();
+	let {
+		open = $bindable(false),
+		title,
+		description,
+		trigger,
+		children,
+		footer,
+		initialFocus,
+		placement = 'center'
+	}: Props = $props();
+
+	let content: HTMLElement | null = $state(null);
+	function focusFirst(event: Event) {
+		const target = initialFocus ? content?.querySelector<HTMLElement>(initialFocus) : null;
+		if (!target) return;
+		event.preventDefault();
+		target.focus();
+	}
 </script>
 
 <Dialog.Root bind:open>
@@ -30,7 +51,7 @@ Modal dialog on bits-ui: focus is trapped, Escape closes, focus returns to the t
 	{/if}
 	<Dialog.Portal>
 		<Dialog.Overlay class="dialog-scrim" />
-		<Dialog.Content class="dialog">
+		<Dialog.Content class="dialog {placement}" bind:ref={content} onOpenAutoFocus={focusFirst}>
 			<header class="dialog-head">
 				<Dialog.Title class="dialog-title">{title}</Dialog.Title>
 				<Dialog.Close class="dialog-close" aria-label="Close">
@@ -74,6 +95,11 @@ Modal dialog on bits-ui: focus is trapped, Escape closes, focus returns to the t
 		border: var(--border-hair) solid var(--color-line);
 		border-radius: var(--radius-md);
 		box-shadow: var(--shadow-overlay);
+	}
+	:global(.dialog.top) {
+		top: min(12vh, var(--space-12) * 2);
+		transform: translateX(-50%);
+		max-height: calc(100dvh - min(12vh, var(--space-12) * 2) - var(--space-8));
 	}
 	:global(.dialog-head) {
 		display: flex;

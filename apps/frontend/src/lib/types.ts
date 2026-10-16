@@ -202,6 +202,42 @@ export interface GithubRepoCheck {
 	private: boolean | null;
 }
 
+export interface CompanyRef {
+	slug: string;
+	name: string;
+}
+
+/** GET /api/onboard/github/{owner}/{name}: what the add-a-company dialog shows for a repo. */
+export interface RepoLookup {
+	/** owner/name as GitHub spells it (as asked, when it does not exist). */
+	repo: string;
+	exists: boolean;
+	private: boolean | null;
+	owner_name: string | null;
+	/** The suggestion (name, slug, since) is only made for a public repo that exists. */
+	name: string | null;
+	slug: string | null;
+	/** ISO date the window would start at. */
+	since: string | null;
+	/** The company that already reads this repo. */
+	company: CompanyRef | null;
+	/** A company that reads another repo of the same owner. */
+	owner_company: CompanyRef | null;
+}
+
+export interface OnboardRequest {
+	repo: string;
+	name?: string;
+	slug?: string;
+}
+
+/** POST /api/onboard/github, 201. `build` is null when the company was saved but did not start. */
+export interface OnboardResult {
+	company: CompanyDetail;
+	build: BuildSnapshot | null;
+	build_error: string | null;
+}
+
 export interface Stat {
 	kind: string;
 	type: string;
@@ -247,4 +283,158 @@ export interface Overview {
 	recent: RecentWorkItem[];
 	systems: SystemSummary[];
 	people: PersonActivity[];
+}
+
+/** A node label as the brain graph spells it; `LABEL_TYPES` maps it to a NodeType. */
+export type GraphLabel = 'Person' | 'Team' | 'System' | 'WorkItem' | 'Change' | 'Document';
+
+export const LABEL_TYPES: Record<GraphLabel, NodeType> = {
+	Person: 'person',
+	Team: 'team',
+	System: 'system',
+	WorkItem: 'work-item',
+	Change: 'change',
+	Document: 'document'
+};
+
+/** One node of `GET /api/companies/<slug>/graph` (apps/backend/brain/graph_view.py). */
+export interface GraphNode {
+	uid: string;
+	label: GraphLabel;
+	title: string | null;
+	/** Work item: pull_request, issue, ...; change: feat, fix, ... */
+	kind: string | null;
+	/** Work item: open, closed, merged. */
+	state: string | null;
+	number: number | null;
+	url: string | null;
+	is_bot: boolean;
+	/** Comment chunks folded into this node. */
+	comments: number;
+	/** Links drawn to it in this view. */
+	degree: number;
+	/** A `Territory.id`. */
+	territory: string;
+}
+
+export interface GraphEdge {
+	source: string;
+	rel: string;
+	target: string;
+}
+
+export interface Territory {
+	/** The system's uid, `other` (the smaller systems) or `none` (not linked to code). */
+	id: string;
+	name: string;
+	system_uid: string | null;
+	size: number;
+	systems: number;
+}
+
+export interface GraphView {
+	slug: string;
+	nodes: GraphNode[];
+	edges: GraphEdge[];
+	/** Biggest first, then `other`, then `none`. */
+	territories: Territory[];
+	/** Bot accounts in the graph, shown or not. */
+	bots: number;
+	bots_shown: boolean;
+	/** Comment chunks folded into their work items. */
+	comments: number;
+}
+
+/** The `get_entity` tool's row: one node's fields (its neighbours come from the graph view). */
+export interface Entity {
+	uid: string;
+	label: string;
+	title: string | null;
+	kind: string | null;
+	state: string | null;
+	url: string | null;
+	date: string | null;
+	body: string;
+	neighbour_count: number;
+}
+
+// --- Ask (POST /api/companies/{slug}/ask, Server-Sent Events; brain/api/models.py Ask*) -------
+
+/** A node one step touched. `label` is the graph label (Person, Team, System, WorkItem ...). */
+export interface WalkNode {
+	uid: string;
+	label: string;
+	title: string;
+	url: string | null;
+}
+
+/** A relationship one step touched. `inferred`: implied by the rows, not stored in the graph. */
+export interface WalkRel {
+	from: string;
+	to: string;
+	/** A stored relationship (AUTHORED) or, when inferred, words (works on). */
+	type: string;
+	inferred: boolean;
+	/** e.g. "score 0.88". */
+	note?: string | null;
+}
+
+export interface AskStepEvent {
+	id: string;
+	/** The graph step's number in this answer; null for submit_answer, the answer check. */
+	n: number | null;
+	tool: string;
+	input: Record<string, unknown> | null;
+}
+
+export interface AskStepDoneEvent extends AskStepEvent {
+	ms: number | null;
+	/** Rows returned, all of them; `rows` holds the first few. */
+	count: number | null;
+	error: string | null;
+	rows: unknown[];
+	nodes: WalkNode[];
+	rels: WalkRel[];
+}
+
+export interface AskSource {
+	uid: string;
+	title: string | null;
+	url: string | null;
+	label: string | null;
+	/** The step that first returned it. */
+	step: number | null;
+}
+
+export interface AskAnswer {
+	/** This turn's trace on the server, for a thumbs; null when it was not kept (hide the thumbs). */
+	trace_id?: string | null;
+	thread_id: string;
+	/** Markdown with [n] markers; null when there is no answer (see stop). */
+	text: string | null;
+	sources: AskSource[];
+	path: AskSource[];
+	/** Claude's stop reason, or refusal, max_tokens, step_limit, stopped, no_answer. */
+	stop: string | null;
+	model: string | null;
+}
+
+/** One tool call as the page shows it: asked for (running), then done. */
+export interface WalkStep extends AskStepEvent {
+	status: 'running' | 'done';
+	ms?: number | null;
+	count?: number | null;
+	error?: string | null;
+	rows?: unknown[];
+	nodes?: WalkNode[];
+	rels?: WalkRel[];
+}
+
+/** A thumbs on one answer (POST .../traces/{trace_id}/feedback); null takes it back. */
+export type Rating = 'up' | 'down';
+
+export interface Feedback {
+	trace_id: string;
+	rating: Rating | null;
+	note: string | null;
 }

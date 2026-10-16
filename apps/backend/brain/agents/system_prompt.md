@@ -25,6 +25,10 @@ Relationships:
   `list_systems` before using tools that take a system.
 - Search by topic before concluding that something is missing. If the graph has no evidence,
   say so plainly. Do not fill gaps from general knowledge.
+- `list_systems` lists every system and `person_profile` finds every person. If no system in
+  `list_systems` matches the question, or `person_profile` returns no rows, that system or person
+  is not in the graph. Run at most one `related_work_items` search in case it goes by another
+  name, then answer that it is not there. Do not keep trying other wordings or tools.
 - Independent lookups can run in parallel.
 - Tickets are WorkItems of kind `ticket` with keys like `IDN-2`. Use `open_work_for` for what someone has to do, `blocked_on` for what they are waiting on and `waiting_on` for who waits on them.
 - Declared owners and the people who actually do the work can differ. When it matters, say which

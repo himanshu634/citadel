@@ -8,15 +8,30 @@ tooltip context for everything inside.
 	import { page } from '$app/state';
 	import { Tooltip } from 'bits-ui';
 	import type { Snippet } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { AddCompany, setAddCompany } from '$lib/addCompany.svelte';
 	import { getCompanies } from '$lib/companies.svelte';
+	import AddCompanyDialog from '../brain/AddCompanyDialog.svelte';
 	import CompanyRail from './CompanyRail.svelte';
 	import Sidebar from './Sidebar.svelte';
 	import Topbar from './Topbar.svelte';
 
 	let { children }: { children: Snippet } = $props();
+	// The Graph page is a full-bleed canvas: no content width cap, no padding (design-system.md).
+	const bleed = $derived(page.url.pathname.endsWith('/graph'));
 	const companies = getCompanies();
 	let navOpen = $state(false);
 	const close = () => (navOpen = false);
+	// One add-a-company dialog for the app: the rail's + and "Add another" both open it.
+	const adding = new AddCompany();
+	setAddCompany(adding);
+
+	async function created(slug: string) {
+		await companies.load();
+		// The build page is its own route; resolve() has no entry for it yet.
+		await goto(`${resolve('/c/[slug]', { slug })}/build`);
+	}
 </script>
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && navOpen && close()} />
@@ -29,19 +44,24 @@ tooltip context for everything inside.
 				current={companies.current}
 				pathname={page.url.pathname}
 				onnavigate={close}
+				onadd={() => {
+					close();
+					adding.show();
+				}}
 			/>
 			<div class="sidebar-slot"><Sidebar onnavigate={close} /></div>
 		</div>
 		{#if navOpen}
 			<button class="scrim" type="button" aria-label="Close navigation" onclick={close}></button>
 		{/if}
-		<div class="main">
+		<div class={['main', { bleed }]}>
 			<Topbar onmenu={() => (navOpen = !navOpen)} menuOpen={navOpen} />
-			<main class="content">
+			<main class={['content', { bleed }]}>
 				{@render children()}
 			</main>
 		</div>
 	</div>
+	<AddCompanyDialog ctl={adding} oncreated={created} />
 </Tooltip.Provider>
 
 <style>
@@ -77,6 +97,18 @@ tooltip context for everything inside.
 		.content {
 			padding-inline: var(--space-8);
 		}
+	}
+	/* The Graph page fills the window under the top bar, however tall the top bar wraps. */
+	.main.bleed {
+		height: 100dvh;
+	}
+	.content.bleed {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		min-height: 0;
+		max-width: none;
+		padding: 0;
 	}
 	.scrim {
 		display: none;

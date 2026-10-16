@@ -35,3 +35,17 @@ def fallback_params(model: str) -> dict[str, Any]:
 def client() -> anthropic.Anthropic:
     key = get_settings().anthropic_api_key
     return anthropic.Anthropic(api_key=key) if key else anthropic.Anthropic()
+
+
+def describe_error(exc: BaseException) -> str | None:
+    """A sentence for a failed Claude call that says what to do, or None when `exc` is not one."""
+    if isinstance(exc, anthropic.AuthenticationError):
+        return "Anthropic rejected the credentials. Check ANTHROPIC_API_KEY in .env."
+    if isinstance(exc, TypeError) and "authentication" in str(exc):
+        # the SDK raises this when it finds no credentials at all
+        return "No Anthropic credentials. Set ANTHROPIC_API_KEY in .env."
+    if isinstance(exc, anthropic.APIConnectionError):
+        return f"Cannot reach the Anthropic API: {exc}"
+    if isinstance(exc, anthropic.APIStatusError):
+        return f"Anthropic API error {exc.status_code}: {exc.message}"
+    return None

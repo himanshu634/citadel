@@ -97,14 +97,17 @@ def schema_cmd(slug: str) -> None:
 
 @app.command()
 def reset(slug: str, yes: bool = typer.Option(False, "--yes", help="Confirm deletion.")) -> None:
-    """Delete everything the slug left in the graph store and its build history: graphs
-    brain_<slug> and agent_<slug>, and data/jobs/<slug>.json. companies/<slug>.yaml and the raw
-    cache in data/raw/ are kept (a refetch is slow). Frees the slug for a new company."""
+    """Delete everything the slug left in the graph store and its history: graphs brain_<slug>
+    and agent_<slug>, data/jobs/<slug>.json and data/traces/<slug>.jsonl (the Ask traces).
+    companies/<slug>.yaml and the raw cache in data/raw/ are kept (a refetch is slow). Frees the
+    slug for a new company."""
+    from brain.agents.traces import TraceStore
+
     name = _graph_name(slug)
     agent = config.agent_graph_name(slug)
     if not yes:
         typer.secho(
-            f"This deletes graphs {name} and {agent} and the build history of {slug}. "
+            f"This deletes graphs {name} and {agent} and the build and Ask history of {slug}. "
             "Re-run with --yes (make reset: CONFIRM=1).",
             fg="yellow",
         )
@@ -117,6 +120,8 @@ def reset(slug: str, yes: bool = typer.Option(False, "--yes", help="Confirm dele
         deleted.append(agent)
     if JobRunner().forget(slug):
         deleted.append(f"data/jobs/{slug}.json")
+    if TraceStore(slug).forget():
+        deleted.append(f"data/traces/{slug}.jsonl")
     typer.echo(f"Deleted {', '.join(deleted)}." if deleted else f"Nothing to delete for {slug}.")
 
 
@@ -230,6 +235,32 @@ def ask(
     typer.secho(f"follow up with --thread {answer.thread_id}", dim=True)
 
 
+@app.command("traces")
+def traces_cmd(
+    slug: str,
+    days: int = typer.Option(7, "--days", min=1, help="How many days back to look."),
+) -> None:
+    """How the brain did on live questions (CLI and Ask page): rates, latency, tokens, thumbs.
+    Thumbs-down turns become draft eval cases with `make eval-drafts SLUG=<slug>`."""
+    from brain.agents.traces import TraceStore, summarize, window
+
+    _graph_name(slug)
+    since, until = window(days)
+    s = summarize(TraceStore(slug).read(since=since), since, until)
+    typer.echo(f"{s.turns} turns in the last {days} days ({s.answered} answered)")
+    if not s.turns:
+        return
+
+    def pct(v: float | None) -> str:
+        return "-" if v is None else f"{v:.0%}"
+
+    for name, value in s.rates.model_dump().items():
+        typer.echo(f"  {name:<16} {pct(value):>5}")
+    typer.echo(f"  latency ms       p50 {s.latency_ms.p50}  p95 {s.latency_ms.p95}")
+    typer.echo(f"  tokens           p50 {s.tokens.p50}  p95 {s.tokens.p95}")
+    typer.echo(f"  thumbs           up {s.thumbs.up}  down {s.thumbs.down}")
+
+
 @app.command()
 def chat(
     slug: str,
@@ -271,24 +302,37 @@ def chat(
 
 
 def _run_ask(slug: str, question: str, thread: str | None, client=None):
-    import anthropic
+    """One turn. A turn with the real Claude (no `client`) leaves a trace in
+    data/traces/<slug>.jsonl (`brain traces`); a scripted --offline turn does not."""
+    import time
+    import uuid
 
-    from brain.agents.ask import ask as run_ask
+    from brain import llm
+    from brain.agents.ask import ask_traced
+    from brain.agents.traces import TraceStore, new_trace
+
+    thread = thread or uuid.uuid4().hex[:12]
+    started = time.perf_counter()
+
+    def keep(**kw) -> None:
+        if client is None:
+            ms = round((time.perf_counter() - started) * 1000)
+            TraceStore(slug).add(new_trace(slug, question, thread, via="cli", ms=ms, **kw))
 
     try:
-        return run_ask(
+        answer, steps = ask_traced(
             slug, question, thread_id=thread, client=client, checkpointer=db.checkpointer(slug)
         )
-    except anthropic.AuthenticationError:
-        _fail("Anthropic rejected the credentials. Check ANTHROPIC_API_KEY in .env.")
-    except TypeError as e:  # the SDK raises this when it finds no credentials at all
-        if "authentication" not in str(e):
+    except Exception as e:
+        problem = llm.describe_error(e)
+        keep(steps=[], error=problem or f"{type(e).__name__}: {e}")
+        if problem is None:
             raise
-        _fail("No Anthropic credentials. Set ANTHROPIC_API_KEY in .env, or try --offline.")
-    except anthropic.APIConnectionError as e:
-        _fail(f"Cannot reach the Anthropic API: {e}")
-    except anthropic.APIStatusError as e:
-        _fail(f"Anthropic API error {e.status_code}: {e.message}")
+        if "No Anthropic credentials" in problem:
+            problem += " Or try --offline."
+        _fail(problem)
+    keep(steps=steps, answer=answer)
+    return answer
 
 
 def _print_answer(answer) -> None:
@@ -416,3 +460,65 @@ def _print_rows(tool: str, rows: list[dict]) -> None:
 
 if __name__ == "__main__":
     app()
+
+
+# --- agents and simulations -------------------------------------------------------------------
+
+
+@app.command("agents")
+def agents_cmd() -> None:
+    """List the agent roles: database user, jobs (and their submit tools) and read tools."""
+    from brain.agents.roles import ROLES
+    from brain.agents.runner import missing_tools
+
+    for role in ROLES.values():
+        typer.secho(f"{role.name}  ({role.db_user})", bold=True)
+        typer.echo(f"    {role.summary}")
+        for job in role.jobs:
+            typer.echo(f"    job {job.name} -> {job.submit.name}")
+        missing = set(missing_tools(role))
+        names = [t + (" (phase 2)" if t in missing else "") for t in role.read_tools]
+        typer.echo(f"    reads: {', '.join(names)}")
+
+
+sim_app = typer.Typer(help="Run the agents on a company: a simulated sprint, race or loop.")
+app.add_typer(sim_app, name="sim")
+
+
+@sim_app.command("run")
+def sim_run(
+    slug: str,
+    scenario: str = typer.Option("sprint", "--scenario", help="sprint, race or regression."),
+    ticks: int = typer.Option(30, "--ticks", help="Stop after this many ticks."),
+    offline: bool = typer.Option(
+        False, "--offline", help="Every role plays its deterministic policy: no API key needed."
+    ),
+) -> None:
+    """Run a scenario. The agents read brain_<slug> through the graph tools; the work layer
+    (tasks, actions, decisions) is kept in memory until the FalkorDB store lands."""
+    from brain.sim import scenarios
+
+    _company(slug)
+    _connected()
+    build = scenarios.SCENARIOS.get(scenario)
+    if build is None:
+        _fail(f"unknown scenario {scenario!r}; known: {', '.join(scenarios.SCENARIOS)}")
+    sim = build(slug, clients=scenarios.offline if offline else scenarios.online)
+
+    def show(t) -> None:
+        for a in t.actions:
+            line = f"t{t.tick:<3} {a['agent']:<18} {a['kind']:<22} {a['task'] or '':<14}"
+            typer.echo(f"{line} {_short('summary', a['summary'], 70)}")
+
+    sim.run(ticks, on_tick=show)
+    s = sim.store
+    statuses: dict[str, int] = {}
+    for t in s.tasks.values():
+        statuses[t.status] = statuses.get(t.status, 0) + 1
+    lessons = s.read("memory/lessons", {})
+    findings = s.read("memory/findings", db_user="citadel_risk")
+    typer.secho(
+        f"{len(sim.ticks)} ticks: tasks {statuses}, {len(s.releases)} releases, "
+        f"{len(s.decisions)} decisions, {len(lessons)} lessons, {len(findings)} findings",
+        bold=True,
+    )

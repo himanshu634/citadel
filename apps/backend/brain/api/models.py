@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from brain.config_diff import ConfigDiff
-from brain.jobs import BuildSummary
+from brain.jobs import BuildSnapshot, BuildSummary
 from brain.registry import FieldError
 from brain.tools import PersonActivity, RecentWorkItem, Stat, SystemSummary
 
@@ -49,6 +49,38 @@ class ValidateOut(BaseModel):
     slug_taken_detail: str | None = None  # the same text a create would answer with (409)
 
 
+class CompanyRef(BaseModel):
+    slug: str
+    name: str
+
+
+class RepoLookup(BaseModel):
+    """What the add-a-company dialog shows for a pasted repository. The suggestion (name, slug,
+    since) is only made for a public repository that exists."""
+
+    repo: str  # owner/name as GitHub spells it, or as asked when it does not exist
+    exists: bool
+    private: bool | None = None
+    owner_name: str | None = None  # the owner's display name, else its login in words
+    name: str | None = None  # suggested company name
+    slug: str | None = None  # suggested slug, free to use
+    since: str | None = None  # the window start the company would get, an ISO date
+    company: CompanyRef | None = None  # the company that already reads this repository
+    owner_company: CompanyRef | None = None  # a company that reads another repo of this owner
+
+
+class OnboardIn(BaseModel):
+    repo: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$")
+    name: str | None = None  # default: the suggestion
+    slug: str | None = None  # default: the suggestion; a taken one given here is a 409
+
+
+class OnboardOut(BaseModel):
+    company: CompanyDetail
+    build: BuildSnapshot | None  # None: the company was saved but its build did not start
+    build_error: str | None = None
+
+
 class Overview(BaseModel):
     """What a company's overview page draws; every list comes from one named tool."""
 
@@ -82,3 +114,86 @@ class ConfigChange(ConfigDiff):
     """What a Settings save requires (`?dry_run=1`, and the 409 `rebuild_required` detail)."""
 
     slug: str
+
+
+# --- Ask (POST /api/companies/{slug}/ask, answered as Server-Sent Events) ---------------------
+
+
+class AskIn(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    thread_id: str | None = Field(None, pattern=r"^[A-Za-z0-9_-]{1,64}$")  # a follow-up
+
+
+class WalkNode(BaseModel):
+    uid: str
+    label: str  # the graph label: Person, Team, System, WorkItem, Change, Document
+    title: str
+    url: str | None = None
+
+
+class WalkRel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    from_: str = Field(alias="from")
+    to: str
+    type: str  # a stored relationship (AUTHORED) or, when inferred, words (works on)
+    inferred: bool = False  # implied by the rows, not stored in the graph
+    note: str | None = None  # e.g. "score 0.88"
+
+
+class AskStart(BaseModel):
+    thread_id: str
+
+
+class AskStep(BaseModel):
+    """Claude asked for a tool. `n` numbers the graph steps of one answer; submit_answer (the
+    answer check) has none."""
+
+    id: str
+    n: int | None
+    tool: str
+    input: dict[str, Any] | None = None
+
+
+class AskStepDone(AskStep):
+    ms: int | None = None
+    count: int | None = None  # rows returned (all of them; `rows` holds the first few)
+    error: str | None = None
+    rows: list[Any] = []
+    nodes: list[WalkNode] = []
+    rels: list[WalkRel] = []
+
+
+class AskSource(BaseModel):
+    uid: str
+    title: str | None = None
+    url: str | None = None
+    label: str | None = None
+    step: int | None = None  # the step that first returned it
+
+
+class AskAnswer(BaseModel):
+    trace_id: str | None = None  # this turn's trace, for a thumbs (None: it was not kept)
+    thread_id: str
+    text: str | None  # None when there is no answer (see stop)
+    sources: list[AskSource]
+    path: list[AskSource]
+    stop: str | None  # end_turn ... or refusal, max_tokens, step_limit, stopped, no_answer
+    model: str | None = None
+
+
+class AskError(BaseModel):
+    detail: str
+
+
+class FeedbackIn(BaseModel):
+    """A thumbs on one answer; `rating` None takes it back."""
+
+    rating: Literal["up", "down"] | None
+    note: str | None = Field(None, max_length=1000)  # what was wrong (or right)
+
+
+class FeedbackOut(BaseModel):
+    trace_id: str
+    rating: Literal["up", "down"] | None
+    note: str | None = None

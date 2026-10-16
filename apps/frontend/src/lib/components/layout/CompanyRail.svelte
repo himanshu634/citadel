@@ -20,8 +20,10 @@ accessible name says the same in words. The tile list scrolls; the add tile stay
 		current: string | null;
 		pathname: string;
 		onnavigate?: () => void;
+		/** Open the add-a-company dialog; without it the + is a link to the step-by-step form. */
+		onadd?: () => void;
 	};
-	let { companies, current, pathname, onnavigate }: Props = $props();
+	let { companies, current, pathname, onnavigate, onadd }: Props = $props();
 
 	type Mark = { icon: Component; tone: 'warning' | 'danger' | 'muted'; words: string };
 	const marks: Partial<Record<CompanyStatus, Mark>> = {
@@ -90,9 +92,25 @@ accessible name says the same in words. The tile list scrolls; the add tile stay
 	<div class="add">
 		<Tooltip text="Add a company" side="right">
 			{#snippet trigger(props)}
-				<a {...props} class="tile new" href={newCompany} aria-label="Add a company" onclick={click(props)}>
-					<Plus aria-hidden="true" />
-				</a>
+				{#if onadd}
+					<button
+						{...props}
+						type="button"
+						class="tile new"
+						aria-label="Add a company"
+						aria-haspopup="dialog"
+						onclick={(e) => {
+							(props.onclick as ((e: MouseEvent) => void) | undefined)?.(e);
+							onadd();
+						}}
+					>
+						<Plus aria-hidden="true" />
+					</button>
+				{:else}
+					<a {...props} class="tile new" href={newCompany} aria-label="Add a company" onclick={click(props)}>
+						<Plus aria-hidden="true" />
+					</a>
+				{/if}
 			{/snippet}
 		</Tooltip>
 	</div>
@@ -148,6 +166,9 @@ accessible name says the same in words. The tile list scrolls; the add tile stay
 	}
 	.tile {
 		position: relative;
+		padding: 0;
+		font: inherit;
+		cursor: pointer;
 		display: grid;
 		place-items: center;
 		width: var(--control-lg);
