@@ -43,7 +43,7 @@ Configuration comes from `.env` (see `.env.example`): FalkorDB host/port/credent
 `FALKORDB_TLS` (the same code runs against local Docker or FalkorDB Cloud), `GITHUB_TOKEN`
 (falls back to `gh auth token`), and Vertex AI embedding settings. `EMBEDDING_DIM` must match the
 embedding model because the vector index is created with it. `ANTHROPIC_API_KEY`,
-`ANTHROPIC_MODEL` (default `claude-sonnet-5-5`) and `ANTHROPIC_EFFORT` (default `medium`) drive
+`ANTHROPIC_MODEL` (default `claude-haiku-5-5`) and `ANTHROPIC_EFFORT` (default `medium`) drive
 `brain ask`.
 
 ## Backend architecture (`apps/backend/brain`)
@@ -105,7 +105,8 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
 `brain ask` / `brain chat` run the agent graph (`agents/graph.py`): a `router` hands each turn to
 the brain loop; `builder` -> `critic` are placeholders for writing Decision nodes (the router does
 not use them yet). The brain loop (`agents/loop.py`): `call_claude` streams one Messages API call
-(anthropic SDK via `llm.client()`, server-side `fallbacks: "default"` on) and `run_tools` runs the
+(anthropic SDK via `llm.client()`; `llm.fallback_params` adds server-side `fallbacks: "default"`
+for Sonnet/Opus, Haiku has none) and `run_tools` runs the
 requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-written Cypher). Rules:
 - State is append-only and in Anthropic block format; assistant content is replayed exactly as
   returned (thinking blocks included), because the API rejects edited history. Never trim it.

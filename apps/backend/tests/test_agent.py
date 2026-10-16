@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 @pytest.fixture(autouse=True)
 def settings(monkeypatch):
     """Pin the Claude settings so a local .env can't change what the tests expect."""
-    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-5-5")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-haiku-5-5")
     monkeypatch.setenv("ANTHROPIC_EFFORT", "medium")
     get_settings.cache_clear()
     yield
@@ -81,7 +81,7 @@ def reply(*blocks, stop="tool_use", details=None):
         content=list(blocks),
         stop_reason=stop,
         stop_details=details,
-        model="claude-sonnet-5-5",
+        model="claude-haiku-5-5",
         usage=BetaUsage(input_tokens=100, output_tokens=10, cache_read_input_tokens=80),
     )
 
@@ -147,14 +147,13 @@ def test_tool_round_trip_ends_with_a_cited_answer():
     }  # fmt: skip
 
 
-def test_request_shape_uses_settings_fallbacks_and_a_stable_prefix():
+def test_request_shape_uses_settings_and_a_stable_prefix():
     client = FakeClient(reply(submit("t1", "Nothing found.", [])))
     ask(client)
     req = client.requests[0]
-    assert req["model"] == "claude-sonnet-5-5"
+    assert req["model"] == "claude-haiku-5-5"
     assert req["output_config"] == {"effort": "medium"}
-    assert req["fallbacks"] == "default"
-    assert req["betas"] == ["server-side-fallback-2026-07-01"]
+    assert "fallbacks" not in req and "betas" not in req  # Haiku has no server-side fallback
     assert req["cache_control"] == {"type": "ephemeral"}
     assert "tool_choice" not in req  # forced tool choice is rejected by current models
     assert "thinking" not in req
@@ -358,3 +357,15 @@ def test_offline_client_runs_a_scripted_turn_through_the_real_loop():
         checkpointer=saver,
     )  # fmt: skip
     assert again.thread_messages == 2 * first.thread_messages == 10
+
+
+@pytest.mark.parametrize("model", ["claude-sonnet-5-5", "claude-opus-5-5"])
+def test_sonnet_and_opus_get_server_side_fallbacks(monkeypatch, model):
+    monkeypatch.setenv("ANTHROPIC_MODEL", model)
+    get_settings.cache_clear()
+    client = FakeClient(reply(submit("t1", "Nothing found.", [])))
+    ask(client)
+    req = client.requests[0]
+    assert req["model"] == model
+    assert req["fallbacks"] == "default"
+    assert req["betas"] == ["server-side-fallback-2026-07-01"]
