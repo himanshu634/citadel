@@ -1,0 +1,314 @@
+"""Write canonical records into a company graph.
+
+Why: this is the only code that writes ingested data to FalkorDB, and it knows nothing about
+where records came from. For each record type it builds plain dict rows and runs the matching
+queries/load/*.cypher file in batches (`UNWIND $rows AS row`, 500 rows per query).
+
+Every write is `MERGE` on uid followed by `SET`, so loading the same records twice changes
+nothing, and loading an updated record updates the node in place.
+
+Write order matters: nodes first, then the relationships between them. Relationship queries
+MATCH both ends, so a link to something that is not in the graph is dropped (and counted).
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
+
+from brain import db
+from brain.canonical import (
+    CanonicalRecord,
+    Change,
+    Comment,
+    Document,
+    Link,
+    Ownership,
+    Person,
+    Review,
+    System,
+    Team,
+    WorkItem,
+    person_uid,
+    system_uid,
+    team_uid,
+    to_utc,
+)
+
+BATCH_SIZE = 500
+
+# (rel, from_label, to_label) -> load query. Mirrors canonical.ALLOWED_LINKS.
+LINK_QUERIES: dict[tuple[str, str, str], str] = {
+    ("CLOSES", "WorkItem", "WorkItem"): "load/link_closes",
+    ("PART_OF", "Change", "WorkItem"): "load/link_part_of",
+    ("MEMBER_OF", "Person", "Team"): "load/link_member_of",
+    ("MENTIONS", "WorkItem", "WorkItem"): "load/link_mentions_workitem_workitem",
+    ("MENTIONS", "WorkItem", "System"): "load/link_mentions_workitem_system",
+    ("MENTIONS", "Document", "WorkItem"): "load/link_mentions_document_workitem",
+    ("MENTIONS", "Document", "System"): "load/link_mentions_document_system",
+}
+
+
+@dataclass
+class LoadReport:
+    written: dict[str, int] = field(default_factory=lambda: defaultdict(int))  # query -> rows
+    dropped: dict[str, int] = field(default_factory=lambda: defaultdict(int))  # query -> rows
+
+    def merge(self, other: LoadReport) -> None:
+        for k, v in other.written.items():
+            self.written[k] += v
+        for k, v in other.dropped.items():
+            self.dropped[k] += v
+
+
+# --- value helpers ----------------------------------------------------------------------------
+
+
+def iso(dt: datetime | None) -> str | None:
+    dt = to_utc(dt)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ") if dt else None
+
+
+def epoch(dt: datetime | None) -> int | None:
+    dt = to_utc(dt)
+    return int(dt.timestamp()) if dt else None
+
+
+def _base(r: CanonicalRecord) -> dict[str, Any]:
+    return {"uid": r.uid, "source": r.source, "url": r.url}
+
+
+# --- runner -----------------------------------------------------------------------------------
+
+
+def _run(slug: str, query: str, rows: list[dict[str, Any]], report: LoadReport) -> None:
+    for i in range(0, len(rows), BATCH_SIZE):
+        chunk = rows[i : i + BATCH_SIZE]
+        result = db.run(slug, query, {"rows": chunk, "company": slug})
+        n = result[0]["n"] if result else 0
+        report.written[query] += n
+        report.dropped[query] += len(chunk) - n
+
+
+def _dedupe(records: Iterable[CanonicalRecord]) -> dict[type, list[CanonicalRecord]]:
+    """Group by type; for the same uid, the last record wins."""
+    by_type: dict[type, dict[str, CanonicalRecord]] = defaultdict(dict)
+    for r in records:
+        by_type[type(r)][r.uid] = r
+    return {t: list(d.values()) for t, d in by_type.items()}
+
+
+def load(slug: str, records: Iterable[CanonicalRecord]) -> LoadReport:
+    """Write records to brain_<slug>. Idempotent."""
+    groups = _dedupe(records)
+    rep = LoadReport()
+
+    def of(t: type) -> list:
+        return groups.get(t, [])
+
+    # 1. nodes
+    _run(
+        slug,
+        "load/person",
+        [
+            {**_base(p), "login": p.login, "display_name": p.display_name, "is_bot": p.is_bot}
+            for p in of(Person)
+        ],
+        rep,
+    )
+    _run(slug, "load/team", [{**_base(t), "name": t.name} for t in of(Team)], rep)
+    _run(
+        slug,
+        "load/system",
+        [{**_base(s), "name": s.name, "path_rule": s.path_rule} for s in of(System)],
+        rep,
+    )
+    _run(
+        slug,
+        "load/work_item",
+        [
+            {
+                **_base(w),
+                "kind": w.kind,
+                "number": w.number,
+                "title": w.title,
+                "body": w.body,
+                "state": w.state,
+                "created_at": iso(w.created_at),
+                "created_ts": epoch(w.created_at),
+                "updated_at": iso(w.updated_at),
+                "closed_at": iso(w.closed_at),
+                "closed_ts": epoch(w.closed_at),
+                "merged_at": iso(w.merged_at),
+                "labels": w.labels,
+                "container": w.container,
+            }
+            for w in of(WorkItem)
+        ],
+        rep,
+    )
+    _run(
+        slug,
+        "load/document",
+        [
+            {
+                **_base(d),
+                "path": d.path,
+                "title": d.title,
+                "body": d.body,
+                "updated_at": iso(d.updated_at),
+            }
+            for d in of(Document)
+        ],
+        rep,
+    )
+    _run(
+        slug,
+        "load/change",
+        [
+            {
+                **_base(c),
+                "sha": c.sha,
+                "date": iso(c.date),
+                "ts": epoch(c.date),
+                "kind": c.kind or "other",
+                "subject": c.subject,
+            }
+            for c in of(Change)
+        ],
+        rep,
+    )
+
+    # 2. authorship
+    for t, query in [
+        (Change, "load/authored_change"),
+        (WorkItem, "load/authored_work_item"),
+        (Document, "load/authored_document"),
+    ]:
+        _run(
+            slug,
+            query,
+            [
+                {"person_uid": person_uid(r.author_login), "target_uid": r.uid}
+                for r in of(t)
+                if r.author_login
+            ],
+            rep,
+        )
+
+    # 3. other relationships
+    _run(
+        slug,
+        "load/touches",
+        [
+            {"change_uid": c.uid, "system_uid": system_uid(name), "files": files}
+            for c in of(Change)
+            for name, files in c.touches.items()
+        ],
+        rep,
+    )
+    reviews = sorted(of(Review), key=lambda r: epoch(r.submitted_at) or 0)
+    _run(
+        slug,
+        "load/reviewed",
+        [
+            {
+                "person_uid": person_uid(r.reviewer_login),
+                "work_item_uid": r.work_item_uid,
+                "state": r.state,
+                "submitted_at": iso(r.submitted_at),
+                "ts": epoch(r.submitted_at),
+            }
+            for r in reviews
+        ],
+        rep,
+    )
+    comments: list[Comment] = of(Comment)
+    _run(
+        slug,
+        "load/comment_chunk",
+        [
+            {
+                **_base(c),
+                "uid": f"chunk:{c.uid}",
+                "work_item_uid": c.work_item_uid,
+                "author_uid": person_uid(c.author_login),
+                "text": c.body,
+                "created_at": iso(c.created_at),
+                "ts": epoch(c.created_at),
+            }
+            for c in comments
+        ],
+        rep,
+    )
+    pairs = sorted({(person_uid(c.author_login), c.work_item_uid) for c in comments})
+    _run(slug, "load/commented_on", [{"person_uid": p, "work_item_uid": w} for p, w in pairs], rep)
+    _load_ownership(slug, of(Ownership), rep)
+    links: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for link in of(Link):
+        query = LINK_QUERIES[(link.rel, link.from_label, link.to_label)]
+        links[query].append(
+            {"from_uid": link.from_uid, "to_uid": link.to_uid, "source": link.source}
+        )
+    for query, rows in links.items():
+        _run(slug, query, rows, rep)
+    return rep
+
+
+def _load_ownership(slug: str, owns: list[Ownership], rep: LoadReport) -> None:
+    """One OWNS edge per (owner, system); several patterns for the same pair are joined."""
+    patterns: dict[tuple[str, str, str], list[str]] = defaultdict(list)
+    sources: dict[tuple[str, str, str], str] = {}
+    for o in owns:
+        owner = person_uid(o.owner) if o.owner_kind == "person" else team_uid(o.owner)
+        for name in o.systems:
+            key = (o.owner_kind, owner, system_uid(name))
+            patterns[key].append(o.pattern)
+            sources[key] = o.source
+    for kind in ("team", "person"):
+        _run(
+            slug,
+            f"load/owns_{kind}",
+            [
+                {
+                    "owner_uid": owner,
+                    "system_uid": sys,
+                    "pattern": ", ".join(pats),
+                    "source": sources[(k, owner, sys)],
+                }
+                for (k, owner, sys), pats in patterns.items()
+                if k == kind
+            ],
+            rep,
+        )
+
+
+# --- sync state -------------------------------------------------------------------------------
+
+
+def get_cursor(slug: str, key: str) -> datetime | None:
+    rows = db.run(slug, "load/sync_state_get", {"uid": f"sync:{key}"}, read_only=True)
+    if not rows or not rows[0]["cursor"]:
+        return None
+    return datetime.fromisoformat(rows[0]["cursor"].replace("Z", "+00:00"))
+
+
+def set_sync_state(
+    slug: str, adapter: str, key: str, cursor: datetime | None, records: int
+) -> None:
+    db.run(
+        slug,
+        "load/sync_state_set",
+        {
+            "company": slug,
+            "uid": f"sync:{key}",
+            "adapter": adapter,
+            "key": key,
+            "cursor": iso(cursor),
+            "last_run": iso(datetime.now(UTC)),
+            "records": records,
+        },
+    )

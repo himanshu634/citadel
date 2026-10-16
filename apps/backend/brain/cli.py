@@ -13,7 +13,7 @@ import typer
 from pydantic import ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from brain import config, db, schema
+from brain import config, db, pipeline, schema
 
 app = typer.Typer(help="Company Brain: a company's engineering activity as one FalkorDB graph.")
 
@@ -96,6 +96,61 @@ def reset(slug: str, yes: bool = typer.Option(False, "--yes", help="Confirm dele
     _connected()
     deleted = db.delete_graph(slug)
     typer.echo(f"Deleted {name}." if deleted else f"{name} does not exist; nothing to delete.")
+
+
+SOURCE_OPT = typer.Option(None, "--source", help="Only this source type, e.g. github.")
+
+
+@app.command()
+def fetch(slug: str, source: str = SOURCE_OPT) -> None:
+    """Network step: pull raw data for each source into data/raw/<slug>/ (cached, resumable)."""
+    _company(slug)
+    for line in pipeline.fetch(slug, only=source):
+        typer.echo(f"fetch {line}")
+
+
+@app.command()
+def ingest(
+    slug: str,
+    full: bool = typer.Option(False, "--full", help="Ignore sync cursors; reload everything."),
+    source: str = SOURCE_OPT,
+) -> None:
+    """Transform step: cache/local files -> canonical records -> graph brain_<slug>."""
+    cfg = _company(slug)
+    _connected()
+    report = pipeline.ingest(slug, full=full, only=source)
+    for s in report.sources:
+        if s.skipped_reason:
+            typer.secho(f"skipped {s.key}: {s.skipped_reason}", fg="yellow")
+        else:
+            typer.echo(f"ingested {s.key}: {s.read} read, {s.loaded} loaded")
+    dropped = {q: n for q, n in report.load.dropped.items() if n}
+    for q, n in sorted(dropped.items()):
+        typer.secho(f"  dropped {n} rows in {q} (an end node is not in the graph)", fg="yellow")
+    _print_stats(slug, f"{cfg.graph_name} now holds:")
+
+
+@app.command()
+def sync(slug: str, full: bool = typer.Option(False, "--full"), source: str = SOURCE_OPT) -> None:
+    """fetch + ingest."""
+    fetch(slug, source=source)
+    ingest(slug, full=full, source=source)
+
+
+@app.command()
+def stats(slug: str) -> None:
+    """Node counts per label and relationship counts per type."""
+    _company(slug)
+    _connected()
+    _print_stats(slug, f"{config.graph_name(slug)}:")
+
+
+def _print_stats(slug: str, title: str) -> None:
+    rows = db.run(slug, "tools/graph_stats", read_only=True)
+    typer.echo(title)
+    for kind in ("node", "relationship"):
+        part = sorted((r for r in rows if r["kind"] == kind), key=lambda r: -r["count"])
+        typer.echo(f"  {kind}s: " + (", ".join(f"{r['type']}={r['count']}" for r in part) or "-"))
 
 
 if __name__ == "__main__":

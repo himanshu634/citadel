@@ -9,13 +9,13 @@ SLUG ?= falkordb
 BRAIN := uv run brain
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs ps browser init schema reset brain test lint fmt check clean
+.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats reset brain test lint fmt check clean synthetic
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
 	@echo ""
-	@echo "  Variables: SLUG=$(SLUG)  NAME=<display name>  CONFIRM=1  ARGS=\"...\""
+	@echo "  Variables: SLUG=$(SLUG)  SOURCE=<type>  FULL=1  NAME=<display name>  CONFIRM=1  ARGS=\"...\""
 
 # --- Environment ------------------------------------------------------------------------------
 
@@ -45,6 +45,23 @@ init: ## Write companies/$(SLUG).yaml template (NAME="Display Name" optional)
 
 schema: ## Create indexes on graph brain_$(SLUG) (safe to re-run)
 	$(BRAIN) schema $(SLUG)
+
+fetch: ## Pull raw data for $(SLUG) into data/raw/ (SOURCE=github to limit)
+	$(BRAIN) fetch $(SLUG) $(if $(SOURCE),--source $(SOURCE))
+
+ingest: ## Load cached data into brain_$(SLUG) (FULL=1 ignores sync cursors)
+	$(BRAIN) ingest $(SLUG) $(if $(filter 1 yes,$(FULL)),--full) $(if $(SOURCE),--source $(SOURCE))
+
+sync: ## fetch + ingest for $(SLUG)
+	$(BRAIN) sync $(SLUG) $(if $(filter 1 yes,$(FULL)),--full) $(if $(SOURCE),--source $(SOURCE))
+
+stats: ## Node and relationship counts for brain_$(SLUG)
+	$(BRAIN) stats $(SLUG)
+
+synthetic: ## Regenerate the synthetic company JSONL and load it into brain_synthetic
+	uv run python apps/backend/examples/synthetic_company/generate.py
+	$(BRAIN) schema synthetic
+	$(BRAIN) ingest synthetic --full
 
 reset: ## Delete graph brain_$(SLUG); needs CONFIRM=1
 	$(BRAIN) reset $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)

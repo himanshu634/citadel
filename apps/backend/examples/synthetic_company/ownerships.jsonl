@@ -1,0 +1,4 @@
+{"owner": "identity", "owner_kind": "team", "pattern": "/services/auth/", "uid": "synthetic:codeowners:1", "url": "https://example.com/synthetic/app/blob/main/CODEOWNERS"}
+{"owner": "payments", "owner_kind": "team", "pattern": "/services/billing/", "uid": "synthetic:codeowners:2", "url": "https://example.com/synthetic/app/blob/main/CODEOWNERS"}
+{"owner": "identity", "owner_kind": "team", "pattern": "/web/", "uid": "synthetic:codeowners:3", "url": "https://example.com/synthetic/app/blob/main/CODEOWNERS"}
+{"owner": "dave", "owner_kind": "person", "pattern": "/infra/", "uid": "synthetic:codeowners:4", "url": "https://example.com/synthetic/app/blob/main/CODEOWNERS"}
