@@ -29,12 +29,13 @@ import anthropic
 from brain.agents.ask import ask_traced
 from brain.agents.loop import SUBMIT
 from brain.agents.toolset import Toolset, graph_toolset
+from brain.agents.traces import step_summary
 from brain.config import REPO_ROOT, get_settings
 from langgraph.checkpoint.memory import InMemorySaver
 
 from evals import cases as cases_mod
 from evals.cases import Case, GoldResolver
-from evals.graders import grade, step_summary
+from evals.graders import grade
 
 OUT_DIR = REPO_ROOT / "data" / "evals"
 

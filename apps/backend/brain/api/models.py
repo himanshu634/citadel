@@ -173,6 +173,7 @@ class AskSource(BaseModel):
 
 
 class AskAnswer(BaseModel):
+    trace_id: str | None = None  # this turn's trace, for a thumbs (None: it was not kept)
     thread_id: str
     text: str | None  # None when there is no answer (see stop)
     sources: list[AskSource]
@@ -183,3 +184,16 @@ class AskAnswer(BaseModel):
 
 class AskError(BaseModel):
     detail: str
+
+
+class FeedbackIn(BaseModel):
+    """A thumbs on one answer; `rating` None takes it back."""
+
+    rating: Literal["up", "down"] | None
+    note: str | None = Field(None, max_length=1000)  # what was wrong (or right)
+
+
+class FeedbackOut(BaseModel):
+    trace_id: str
+    rating: Literal["up", "down"] | None
+    note: str | None = None

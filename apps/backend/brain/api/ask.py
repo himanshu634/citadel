@@ -10,6 +10,9 @@ and forwards each event as it comes: `start`, then `step` / `step_done` per tool
 - When the browser goes away (or presses Stop, which closes the stream), the run stops at its
   next step and the thread stays valid for the next question.
 - The worker is a plain thread, not the request's task: a cancelled request only asks it to stop.
+- Every turn leaves a trace (`agents/traces.py`, data/traces/<slug>.jsonl), written by the worker
+  before the `answer` event goes out, so a stopped turn is kept too and a thumbs click
+  (`api/traces.py`) always finds it. The event carries its `trace_id`; None when the write failed.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
@@ -27,8 +31,9 @@ from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
 from brain import db, llm
-from brain.agents.ask import ask_events
+from brain.agents.ask import Answer, answer_out, run_events
 from brain.agents.toolset import Toolset, graph_toolset
+from brain.agents.traces import TraceStore, new_trace
 from brain.api.deps import company_slug
 from brain.api.models import AskAnswer, AskError, AskIn, AskStart, AskStep, AskStepDone
 
@@ -56,6 +61,7 @@ class Asker:
     toolset: Callable[[], Toolset] = graph_toolset
     checkpointer: Callable[[str], Any] = db.checkpointer
     graph_exists: Callable[[str], bool] = db.graph_exists
+    traces: Callable[[str], TraceStore] = TraceStore
     claim_wait: float = CLAIM_WAIT_SECONDS
     _busy: set[str] = field(default_factory=set)
     _free: threading.Condition = field(default_factory=threading.Condition)
@@ -104,8 +110,18 @@ async def _events(asker: Asker, slug: str, question: str, thread_id: str) -> Asy
             pass
 
     def work() -> None:
+        started = time.perf_counter()
+        steps: list[dict] = []
+
+        def keep(answer: Answer | None = None, error: str | None = None) -> str | None:
+            ms = round((time.perf_counter() - started) * 1000)
+            trace = new_trace(
+                slug, question, thread_id, via="api", steps=steps, ms=ms, answer=answer, error=error
+            )
+            return trace.id if asker.traces(slug).add(trace) else None
+
         try:
-            for event in ask_events(
+            for event in run_events(
                 slug,
                 question,
                 thread_id,
@@ -114,12 +130,18 @@ async def _events(asker: Asker, slug: str, question: str, thread_id: str) -> Asy
                 checkpointer=asker.checkpointer(slug),
                 stop=stop,
             ):
+                if isinstance(event, Answer):
+                    put(answer_out(event, keep(event)))
+                    continue
+                if event.get("kind") == "step_done":
+                    steps.append(dict(event))  # the sender pops "kind" from the original
                 put(event)
         except Exception as exc:
             problem = llm.describe_error(exc)
             if problem is None:
                 log.exception("ask %s failed", slug)
                 problem = f"The answer failed: {type(exc).__name__}: {exc}"
+            keep(error=problem)
             put({"kind": "error", "detail": problem})
         finally:
             asker.release(thread_id)

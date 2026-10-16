@@ -77,10 +77,14 @@ def load(slug: str, path: Path | None = None) -> list[Case]:
     return cases
 
 
+DRAFT = "draft"  # a case made from a thumbs-down (evals/drafts.py) that nobody finished yet
+
+
 def select(cases: list[Case], only: list[str]) -> list[Case]:
-    """Cases whose id or a tag matches one of `only` (all of them when it is empty)."""
+    """Cases whose id or a tag matches one of `only`. With `only` empty: every case but drafts,
+    whose expectations are still unwritten (`--case draft` runs them)."""
     if not only:
-        return cases
+        return [c for c in cases if DRAFT not in c.tags]
     return [c for c in cases if c.id in only or set(c.tags) & set(only)]
 
 

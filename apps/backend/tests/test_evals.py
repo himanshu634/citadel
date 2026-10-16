@@ -7,9 +7,10 @@ from dataclasses import dataclass
 
 import pytest
 from brain import tools
+from brain.agents.traces import step_summary
 from evals import cases, run
 from evals.cases import Case, Expect, Gold, GoldResolver
-from evals.graders import grade, step_summary
+from evals.graders import grade
 from pydantic import BaseModel
 from test_agent import FakeClient, reply, submit, tool_use
 

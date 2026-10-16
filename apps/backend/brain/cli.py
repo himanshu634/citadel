@@ -93,14 +93,17 @@ def schema_cmd(slug: str) -> None:
 
 @app.command()
 def reset(slug: str, yes: bool = typer.Option(False, "--yes", help="Confirm deletion.")) -> None:
-    """Delete everything the slug left in the graph store and its build history: graphs
-    brain_<slug> and agent_<slug>, and data/jobs/<slug>.json. companies/<slug>.yaml and the raw
-    cache in data/raw/ are kept (a refetch is slow). Frees the slug for a new company."""
+    """Delete everything the slug left in the graph store and its history: graphs brain_<slug>
+    and agent_<slug>, data/jobs/<slug>.json and data/traces/<slug>.jsonl (the Ask traces).
+    companies/<slug>.yaml and the raw cache in data/raw/ are kept (a refetch is slow). Frees the
+    slug for a new company."""
+    from brain.agents.traces import TraceStore
+
     name = _graph_name(slug)
     agent = config.agent_graph_name(slug)
     if not yes:
         typer.secho(
-            f"This deletes graphs {name} and {agent} and the build history of {slug}. "
+            f"This deletes graphs {name} and {agent} and the build and Ask history of {slug}. "
             "Re-run with --yes (make reset: CONFIRM=1).",
             fg="yellow",
         )
@@ -113,6 +116,8 @@ def reset(slug: str, yes: bool = typer.Option(False, "--yes", help="Confirm dele
         deleted.append(agent)
     if JobRunner().forget(slug):
         deleted.append(f"data/jobs/{slug}.json")
+    if TraceStore(slug).forget():
+        deleted.append(f"data/traces/{slug}.jsonl")
     typer.echo(f"Deleted {', '.join(deleted)}." if deleted else f"Nothing to delete for {slug}.")
 
 
@@ -183,6 +188,32 @@ def ask(
     typer.secho(f"follow up with --thread {answer.thread_id}", dim=True)
 
 
+@app.command("traces")
+def traces_cmd(
+    slug: str,
+    days: int = typer.Option(7, "--days", min=1, help="How many days back to look."),
+) -> None:
+    """How the brain did on live questions (CLI and Ask page): rates, latency, tokens, thumbs.
+    Thumbs-down turns become draft eval cases with `make eval-drafts SLUG=<slug>`."""
+    from brain.agents.traces import TraceStore, summarize, window
+
+    _graph_name(slug)
+    since, until = window(days)
+    s = summarize(TraceStore(slug).read(since=since), since, until)
+    typer.echo(f"{s.turns} turns in the last {days} days ({s.answered} answered)")
+    if not s.turns:
+        return
+
+    def pct(v: float | None) -> str:
+        return "-" if v is None else f"{v:.0%}"
+
+    for name, value in s.rates.model_dump().items():
+        typer.echo(f"  {name:<16} {pct(value):>5}")
+    typer.echo(f"  latency ms       p50 {s.latency_ms.p50}  p95 {s.latency_ms.p95}")
+    typer.echo(f"  tokens           p50 {s.tokens.p50}  p95 {s.tokens.p95}")
+    typer.echo(f"  thumbs           up {s.thumbs.up}  down {s.thumbs.down}")
+
+
 @app.command()
 def chat(
     slug: str,
@@ -224,20 +255,37 @@ def chat(
 
 
 def _run_ask(slug: str, question: str, thread: str | None, client=None):
+    """One turn. A turn with the real Claude (no `client`) leaves a trace in
+    data/traces/<slug>.jsonl (`brain traces`); a scripted --offline turn does not."""
+    import time
+    import uuid
+
     from brain import llm
-    from brain.agents.ask import ask as run_ask
+    from brain.agents.ask import ask_traced
+    from brain.agents.traces import TraceStore, new_trace
+
+    thread = thread or uuid.uuid4().hex[:12]
+    started = time.perf_counter()
+
+    def keep(**kw) -> None:
+        if client is None:
+            ms = round((time.perf_counter() - started) * 1000)
+            TraceStore(slug).add(new_trace(slug, question, thread, via="cli", ms=ms, **kw))
 
     try:
-        return run_ask(
+        answer, steps = ask_traced(
             slug, question, thread_id=thread, client=client, checkpointer=db.checkpointer(slug)
         )
     except Exception as e:
         problem = llm.describe_error(e)
+        keep(steps=[], error=problem or f"{type(e).__name__}: {e}")
         if problem is None:
             raise
         if "No Anthropic credentials" in problem:
             problem += " Or try --offline."
         _fail(problem)
+    keep(steps=steps, answer=answer)
+    return answer
 
 
 def _print_answer(answer) -> None:

@@ -10,7 +10,7 @@ API_PORT ?= 8000
 BRAIN := uv run brain
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask chat eval reset brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
+.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask chat eval eval-drafts traces reset brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
@@ -90,7 +90,14 @@ eval: ## Agent evals (calls the API; SLUG defaults to synthetic): CASE=id|tag RE
 		$(if $(REPEAT),--repeat $(REPEAT)) $(if $(MODEL),--model $(MODEL)) \
 		$(if $(EFFORT),--effort $(EFFORT)) $(if $(BASELINE),--baseline $(abspath $(BASELINE)))
 
-reset: ## Delete graphs brain_/agent_$(SLUG) and its build history; needs CONFIRM=1
+traces: ## How the brain did on live questions (CLI + Ask page) for $(SLUG): rates, p50/p95; DAYS=7
+	$(BRAIN) traces $(SLUG) $(if $(DAYS),--days $(DAYS))
+
+eval-drafts: ## Thumbs-down answers of $(SLUG) as draft eval cases (printed; WRITE=1 appends to the case file) DAYS=..
+	cd apps/backend && uv run python -m evals.drafts --slug $(SLUG) $(if $(DAYS),--days $(DAYS)) \
+		$(if $(filter 1 yes,$(WRITE)),--write)
+
+reset: ## Delete graphs brain_/agent_$(SLUG), its build history and Ask traces; needs CONFIRM=1
 	$(BRAIN) reset $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)
 
 brain: ## Run any brain command: make brain ARGS="query falkordb graph_stats"
