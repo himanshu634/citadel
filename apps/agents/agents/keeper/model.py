@@ -1,8 +1,9 @@
 """The Keeper's records: what the ledger graph keeper_<slug> holds.
 
-Why: the Keeper's work (gaps it reviews, the log of what it did, its review runs) must survive a
-rebuild of brain_<slug>, so it lives in its own graph. These models are the rows the ledger's
-named queries return (`store.py`), the same from FalkorDB and from the in-memory store.
+Why: the Keeper's work must survive a rebuild of brain_<slug>, so it lives in its own graph:
+gaps, the consults pm and qa answer, the claims the Keeper writes, pm's follow-ups, the log and
+the review runs. These models are the rows the ledger's named queries return (`store.py`), the
+same from FalkorDB and from the in-memory store.
 
 Timestamps are ISO-8601 UTC strings (`iso`), so they sort as text in Cypher and in Python.
 Records point at brain nodes by uid string; graphs cannot link to each other.
@@ -19,6 +20,10 @@ from pydantic import BaseModel, Field
 
 GapKind = Literal["failed_question", "thumbs_down", "stale_owner", "unowned_hot_system"]
 GapStatus = Literal["open", "in_review", "resolved", "needs_person", "dismissed"]
+ClaimKind = Literal["owner", "expert", "decision", "fact", "link"]
+ClaimStatus = Literal[
+    "pending_approval", "accepted", "rejected", "superseded", "stale", "conflicts_with_source"
+]
 
 # Gaps the Keeper notices itself are about one subject, not a question's text, so they dedupe on
 # (kind, subject). Mirrored in apps/brain/queries/ledger/open_gap.cypher.
@@ -69,6 +74,60 @@ class Review(BaseModel):
     stop: str | None = None  # why it ended early, e.g. "restart" or "brain_unavailable"
 
 
+class Consult(BaseModel):
+    """One role's answer to one gap: a draft claim citing uids it saw, or can_ground False."""
+
+    uid: str  # consult:<gap>:<role>, one per role per gap
+    gap: str
+    role: Literal["pm", "qa"]
+    status: Literal["open", "answered"] = "open"
+    can_ground: bool | None = None  # None until answered
+    kind: ClaimKind | None = None
+    subject: str | None = None
+    statement: str | None = None
+    value: str | None = None
+    cites: list[str] = Field(default_factory=list)
+    created_at: str  # when it was posted; the role's queue reads oldest first
+    answered_at: str | None = None
+
+
+class Claim(BaseModel):
+    """What the Keeper holds true beyond the sources. Never deleted: it is superseded (valid_to),
+    rejected, marked stale or conflicts_with_source instead."""
+
+    uid: str
+    kind: ClaimKind
+    subject: str  # the brain uid it is about, e.g. system:billing
+    statement: str
+    value: str | None = None  # e.g. the owner's uid for an owner claim
+    about: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)  # brain uids that support it
+    status: ClaimStatus = "pending_approval"
+    critical: bool = False
+    critical_reasons: list[str] = Field(default_factory=list)
+    conflict: str | None = None  # the source fact it contradicts (conflicts_with_source)
+    valid_from: str | None = None  # set when it is accepted
+    valid_to: str | None = None  # set when it is superseded
+    author: str  # "keeper", or the role that drafted it
+    approved_by: str | None = None  # the name the lead typed (not verified: no sign-in), or "auto"
+    why: str | None = None  # why it has its current status
+    gap: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class FollowUp(BaseModel):
+    """The task pm opens for an accepted owner/expert/decision claim, or to fix a source."""
+
+    uid: str  # followup:<claim>, one per claim
+    claim: str
+    title: str
+    body: str = ""
+    by: str = "pm"
+    status: Literal["open", "done"] = "open"
+    created_at: str
+
+
 def iso(now: str | float) -> str:
     """A ledger timestamp: ISO strings pass through; epoch seconds (`Ctx.now`) become UTC ISO."""
     if isinstance(now, str):
@@ -91,3 +150,17 @@ def review_uid() -> str:
 def log_uid(at: str | float) -> str:
     """log:<compact timestamp>-<6 hex>, e.g. log:20261017T100000Z-3fa2c1."""
     return f"log:{re.sub(r'[^0-9A-Za-z]', '', iso(at))}-{_hex(6)}"
+
+
+def claim_uid() -> str:
+    return f"claim:{_hex(12)}"
+
+
+def consult_uid(gap: str, role: str) -> str:
+    """Mirrored in apps/brain/queries/ledger/post_consult.cypher."""
+    return f"consult:{gap}:{role}"
+
+
+def followup_uid(claim: str) -> str:
+    """Mirrored in apps/brain/queries/ledger/open_followup.cypher."""
+    return f"followup:{claim}"

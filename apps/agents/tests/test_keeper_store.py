@@ -1,4 +1,5 @@
-"""The Keeper's ledger store (keeper_<slug>): the named ledger reads and writes.
+"""The Keeper's ledger store (keeper_<slug>): gaps, log, reviews, consults, claims and
+follow-ups through the named ledger reads and writes.
 
 Every case runs on `MemoryKeeperStore` and, when FalkorDB is up, on `KeeperStore` against a
 throwaway keeper_test_<hex> graph that is deleted afterwards. FalkorDB-only checks are in
@@ -11,7 +12,7 @@ import uuid
 
 import pytest
 from agents import acl
-from agents.keeper.model import gap_uid, review_uid
+from agents.keeper.model import Claim, claim_uid, gap_uid, review_uid
 from agents.keeper.store import READS, WRITES, KeeperStore, MemoryKeeperStore, delete_keeper_graph
 from brain.testing import needs_graph
 
@@ -195,3 +196,125 @@ def test_unknown_names(store):
         store.write("ledger/nope", KEEPER, {})
     with pytest.raises(KeyError):
         store.read("ledger/open_gap", {})  # a write is not a read
+
+
+# --- consults, claims and follow-ups -------------------------------------------------------
+
+
+def write_claim(store, kind="owner", status="accepted", *, subject="system:billing", now=T1):
+    claim = Claim(
+        uid=claim_uid(),
+        kind=kind,
+        subject=subject,
+        statement=f"{kind} of {subject}",
+        value="person:alice",
+        about=[subject],
+        evidence=["pr:1", "pr:2"],
+        status=status,
+        author="keeper",
+        why="Alice merged most Billing changes.",
+        gap="gap:1",
+        created_at=now,
+        updated_at=now,
+    )
+    assert store.write("ledger/write_claim", KEEPER, claim.model_dump()) == [{"uid": claim.uid}]
+    return claim
+
+
+def test_consult_round_trip(store):
+    post = {"gap": "gap:1", "role": "pm", "now": T1}
+    assert store.write("ledger/post_consult", KEEPER, post) == [
+        {"uid": "consult:gap:1:pm", "created": True}]  # fmt: skip
+    assert store.write("ledger/post_consult", KEEPER, {**post, "now": T2}) == [
+        {"uid": "consult:gap:1:pm", "created": False}]  # fmt: skip
+    store.write("ledger/post_consult", KEEPER, {**post, "role": "qa"})
+
+    [queued] = store.read("ledger/queue_consult", {"role": "pm"})
+    assert (queued["uid"], queued["gap"], queued["status"], queued["can_ground"]) == (
+        "consult:gap:1:pm", "gap:1", "open", None)  # fmt: skip
+    assert queued["created_at"] == T1  # the second post changed nothing
+
+    answer = {
+        "consult": "consult:gap:1:pm",
+        "can_ground": True,
+        "kind": "owner",
+        "subject": "system:billing",
+        "statement": "Alice owns Billing.",
+        "value": "person:alice",
+        "cites": ["pr:1"],
+        "now": T2,
+    }
+    assert store.write("ledger/answer_consult", "citadel_pm", answer) == [
+        {"uid": "consult:gap:1:pm", "status": "answered"}]  # fmt: skip
+    assert store.read("ledger/queue_consult", {"role": "pm"}) == []
+    assert store.write("ledger/answer_consult", "citadel_pm", answer) == []  # answered once
+
+    pm, qa = store.read("ledger/consults_for_gap", {"gap": "gap:1"})
+    assert (pm["role"], pm["status"], pm["can_ground"], pm["cites"], pm["value"]) == (
+        "pm", "answered", True, ["pr:1"], "person:alice")  # fmt: skip
+    assert (qa["role"], qa["status"], qa["cites"]) == ("qa", "open", [])
+
+
+def test_queue_consult_oldest_first(store):
+    store.write("ledger/post_consult", KEEPER, {"gap": "gap:2", "role": "qa", "now": T2})
+    store.write("ledger/post_consult", KEEPER, {"gap": "gap:1", "role": "qa", "now": T1})
+    rows = store.read("ledger/queue_consult", {"role": "qa"})
+    assert [r["uid"] for r in rows] == ["consult:gap:1:qa", "consult:gap:2:qa"]
+
+
+def test_write_and_read_claims(store):
+    c = write_claim(store, status="pending_approval")
+    assert store.write("ledger/write_claim", KEEPER, c.model_dump()) == []  # uid taken
+    [got] = store.read("ledger/get_claim", {"uid": c.uid})
+    assert got == c.model_dump()
+    other = write_claim(store, "expert", subject="system:auth", now=T2)
+
+    rows = store.read("ledger/claims", {"statuses": ["pending_approval", "accepted"], "limit": 5})
+    assert [r["uid"] for r in rows] == [other.uid, c.uid]  # newest first
+    one = {"kind": "owner", "subject": "system:billing", "statuses": ["pending_approval"]}
+    assert [r["uid"] for r in store.read("ledger/claims_for_subject", one)] == [c.uid]
+    assert store.read("ledger/claims_for_subject", {**one, "statuses": ["accepted"]}) == []
+    assert store.read("ledger/get_claim", {"uid": "claim:nope"}) == []
+
+
+def test_claim_status_guard(store):
+    c = write_claim(store, status="pending_approval")
+    move = {"uid": c.uid, "from": ["pending_approval"], "to": "accepted", "now": T2}
+    approve = {**move, "by": "Dana", "why": "Checked with Alice."}
+    assert store.write("ledger/set_claim_status", KEEPER, approve) == [
+        {"uid": c.uid, "status": "accepted"}]  # fmt: skip
+    assert store.write("ledger/set_claim_status", KEEPER, {**approve, "by": "Eve"}) == []
+    [got] = store.read("ledger/get_claim", {"uid": c.uid})
+    assert (got["status"], got["approved_by"], got["why"], got["updated_at"]) == (
+        "accepted", "Dana", "Checked with Alice.", T2)  # fmt: skip
+    assert got["valid_from"] == T2 and got["valid_to"] is None
+
+    supersede = {"uid": c.uid, "from": ["accepted"], "to": "superseded", "now": T3}
+    out = store.write(
+        "ledger/set_claim_status", KEEPER, {**supersede, "by": "auto", "why": None, "valid_to": T3}
+    )
+    assert out == [{"uid": c.uid, "status": "superseded"}]
+    [got] = store.read("ledger/get_claim", {"uid": c.uid})
+    assert (got["valid_to"], got["approved_by"], got["why"]) == (T3, "Dana", "Checked with Alice.")
+
+
+def test_queue_follow_up(store):
+    owner = write_claim(store, "owner", "accepted", now=T1)
+    conflict = write_claim(store, "fact", "conflicts_with_source", now=T2)
+    write_claim(store, "fact", "accepted", now=T1)  # a plain fact needs no follow-up
+    write_claim(store, "owner", "pending_approval", now=T1)  # not yet accepted
+    queued = store.read("ledger/queue_follow_up", {})
+    assert [r["uid"] for r in queued] == [owner.uid, conflict.uid]  # oldest first
+    assert queued[0]["evidence"] == ["pr:1", "pr:2"]
+
+    follow = {"claim": owner.uid, "title": "Follow up", "body": "Tell Alice.", "by": "pm"}
+    assert store.write("ledger/open_followup", "citadel_pm", {**follow, "now": T2}) == [
+        {"uid": f"followup:{owner.uid}", "created": True}]  # fmt: skip
+    assert store.write("ledger/open_followup", "citadel_pm", {**follow, "now": T3}) == [
+        {"uid": f"followup:{owner.uid}", "created": False}]  # fmt: skip
+    assert [r["uid"] for r in store.read("ledger/queue_follow_up", {})] == [conflict.uid]
+
+    [f] = store.read("ledger/followups", {"status": "open", "limit": 10})
+    assert (f["uid"], f["claim"], f["title"], f["status"], f["created_at"]) == (
+        f"followup:{owner.uid}", owner.uid, "Follow up", "open", T2)  # fmt: skip
+    assert store.read("ledger/followups", {"status": "done", "limit": 10}) == []

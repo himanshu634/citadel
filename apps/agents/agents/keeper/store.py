@@ -10,7 +10,8 @@ this store:
 
 Two implementations with the same behaviour:
 - `KeeperStore` runs `apps/brain/queries/ledger/<name>.cypher` on keeper_<slug>. Dedupe and
-  guards (one live gap per question, guarded status moves, one running review) are in the Cypher.
+  guards (one live gap per question, one consult per role per gap, one follow-up per claim,
+  guarded gap and claim status moves, one running review) are in the Cypher.
 - `MemoryKeeperStore` is the offline and test double: the same names, guards and row shapes in
   Python, under one lock (FalkorDB serialises the writes on a graph the same way).
 
@@ -21,6 +22,7 @@ the runner's `work/write_episode` / `memory/write_episode` into a LogEntry with 
 
 from __future__ import annotations
 
+import copy
 import threading
 from collections.abc import Mapping
 from typing import Any
@@ -34,9 +36,14 @@ from agents.graphs import keeper_graph_name
 from agents.keeper.model import (
     LIVE_GAP,
     NOTICING_KINDS,
+    Claim,
+    Consult,
+    FollowUp,
     Gap,
     LogEntry,
     Review,
+    consult_uid,
+    followup_uid,
     iso,
     log_uid,
 )
@@ -48,6 +55,13 @@ READS: tuple[str, ...] = (
     "ledger/gaps",
     "ledger/read_log",
     "ledger/review_current",
+    "ledger/queue_consult",
+    "ledger/consults_for_gap",
+    "ledger/get_claim",
+    "ledger/claims",
+    "ledger/claims_for_subject",
+    "ledger/queue_follow_up",
+    "ledger/followups",
 )
 
 EPISODES: tuple[str, ...] = ("work/write_episode", "memory/write_episode")  # from runner.run_job
@@ -59,6 +73,11 @@ WRITES: tuple[str, ...] = (
     "ledger/review_start",
     "ledger/review_finish",
     "ledger/review_stop_running",
+    "ledger/post_consult",
+    "ledger/answer_consult",
+    "ledger/write_claim",
+    "ledger/set_claim_status",
+    "ledger/open_followup",
     *EPISODES,
 )
 
@@ -70,6 +89,21 @@ OPTIONAL: dict[str, dict[str, Any]] = {
     "ledger/log": {"why": None, "gap": None, "claim": None, "evidence": []},
     "ledger/read_log": {"gap": None, "claim": None},
     "ledger/review_finish": {"stop": None},
+    "ledger/answer_consult": {
+        "kind": None,
+        "subject": None,
+        "statement": None,
+        "value": None,
+        "cites": [],
+    },
+    "ledger/write_claim": {
+        k: f.get_default(call_default_factory=True)
+        for k, f in Claim.model_fields.items()
+        if not f.is_required()
+    },
+    "ledger/set_claim_status": {"by": None, "why": None, "valid_to": None},
+    "ledger/open_followup": {"body": "", "by": "pm"},
+    "ledger/followups": {"status": None},
 }
 
 # Reads that return whole records: one column holding the node's properties, read back through
@@ -79,6 +113,13 @@ RECORDS: dict[str, type[BaseModel]] = {
     "ledger/gaps": Gap,
     "ledger/read_log": LogEntry,
     "ledger/review_current": Review,
+    "ledger/queue_consult": Consult,
+    "ledger/consults_for_gap": Consult,
+    "ledger/get_claim": Claim,
+    "ledger/claims": Claim,
+    "ledger/claims_for_subject": Claim,
+    "ledger/queue_follow_up": Claim,
+    "ledger/followups": FollowUp,
 }
 
 
@@ -108,7 +149,7 @@ class _LedgerStore:
 
     def _params(self, name: str, params: Mapping[str, Any]) -> dict[str, Any]:
         extra = {"slug": self.slug} if name == "ledger/review_start" else {}
-        return {**OPTIONAL.get(name, {}), **params, **extra}
+        return {**copy.deepcopy(OPTIONAL.get(name, {})), **params, **extra}
 
     def _episode(self, p: Mapping[str, Any]) -> list[Row]:
         """A runner Episode as a log line: the agent did `input`; why = its summary; evidence =
@@ -205,6 +246,9 @@ class MemoryKeeperStore(_LedgerStore):
         self.gaps: dict[str, Gap] = {}
         self.log: list[LogEntry] = []  # in write order (the Cypher's `seq`)
         self.reviews: list[Review] = []  # in start order
+        self.consults: dict[str, Consult] = {}
+        self.claims: dict[str, Claim] = {}
+        self.followups: dict[str, FollowUp] = {}
         self._lock = threading.RLock()
 
     def _read(self, name: str, params: dict[str, Any]) -> list[Row]:
@@ -320,3 +364,122 @@ class MemoryKeeperStore(_LedgerStore):
                 r.state, r.stop, r.ended_at = "stopped", "restart", p["now"]
                 out.append({"uid": r.uid})
         return out
+
+    # --- consults -----------------------------------------------------------------------------
+
+    def _w_post_consult(self, p: Mapping[str, Any]) -> list[Row]:
+        uid = consult_uid(p["gap"], p["role"])
+        created = uid not in self.consults
+        if created:
+            self.consults[uid] = Consult(uid=uid, gap=p["gap"], role=p["role"], created_at=p["now"])
+        return [{"uid": uid, "created": created}]
+
+    def _r_queue_consult(self, p: Mapping[str, Any]) -> list[Row]:
+        rows = [c for c in self.consults.values() if c.role == p["role"] and c.status == "open"]
+        rows.sort(key=lambda c: (c.created_at, c.uid))
+        return [c.model_dump() for c in rows]
+
+    def _w_answer_consult(self, p: Mapping[str, Any]) -> list[Row]:
+        c = self.consults.get(p["consult"])
+        if c is None or c.status != "open":
+            return []
+        answer = {k: p[k] for k in ("can_ground", "kind", "subject", "statement", "value")}
+        self.consults[c.uid] = Consult(
+            **{
+                **c.model_dump(),
+                **answer,
+                "status": "answered",
+                "cites": list(p["cites"]),
+                "answered_at": p["now"],
+            }
+        )
+        return [{"uid": c.uid, "status": "answered"}]
+
+    def _r_consults_for_gap(self, p: Mapping[str, Any]) -> list[Row]:
+        rows = sorted(
+            (c for c in self.consults.values() if c.gap == p["gap"]), key=lambda c: c.role
+        )
+        return [c.model_dump() for c in rows]
+
+    # --- claims -------------------------------------------------------------------------------
+
+    def _w_write_claim(self, p: Mapping[str, Any]) -> list[Row]:
+        if p["uid"] in self.claims:
+            return []
+        c = Claim(**{k: p[k] for k in Claim.model_fields})
+        self.claims[c.uid] = c
+        return [{"uid": c.uid}]
+
+    def _r_get_claim(self, p: Mapping[str, Any]) -> list[Row]:
+        c = self.claims.get(p["uid"])
+        return [c.model_dump()] if c else []
+
+    @staticmethod
+    def _newest(claims: list[Claim]) -> list[Claim]:
+        return sorted(claims, key=lambda c: (c.updated_at, c.uid), reverse=True)
+
+    def _r_claims(self, p: Mapping[str, Any]) -> list[Row]:
+        rows = self._newest([c for c in self.claims.values() if c.status in p["statuses"]])
+        return [c.model_dump() for c in rows[: p["limit"]]]
+
+    def _r_claims_for_subject(self, p: Mapping[str, Any]) -> list[Row]:
+        rows = self._newest(
+            [
+                c
+                for c in self.claims.values()
+                if (c.kind, c.subject) == (p["kind"], p["subject"]) and c.status in p["statuses"]
+            ]
+        )
+        return [c.model_dump() for c in rows]
+
+    def _w_set_claim_status(self, p: Mapping[str, Any]) -> list[Row]:
+        c = self.claims.get(p["uid"])
+        if c is None or c.status not in p["from"]:
+            return []
+        to = p["to"]
+        c.status = to
+        c.updated_at = p["now"]
+        if to == "accepted" and c.valid_from is None:
+            c.valid_from = p["now"]
+        if to in ("accepted", "rejected") and p["by"] is not None:
+            c.approved_by = p["by"]
+        if p["why"] is not None:
+            c.why = p["why"]
+        if p["valid_to"] is not None:
+            c.valid_to = p["valid_to"]
+        return [{"uid": c.uid, "status": c.status}]
+
+    # --- follow-ups ---------------------------------------------------------------------------
+
+    def _w_open_followup(self, p: Mapping[str, Any]) -> list[Row]:
+        uid = followup_uid(p["claim"])
+        created = uid not in self.followups
+        if created:
+            self.followups[uid] = FollowUp(
+                uid=uid,
+                claim=p["claim"],
+                title=p["title"],
+                body=p["body"],
+                by=p["by"],
+                created_at=p["now"],
+            )
+        return [{"uid": uid, "created": created}]
+
+    def _r_queue_follow_up(self, p: Mapping[str, Any]) -> list[Row]:
+        done = {f.claim for f in self.followups.values()}
+        rows = [
+            c
+            for c in self.claims.values()
+            if c.uid not in done
+            and (
+                (c.status == "accepted" and c.kind in ("owner", "expert", "decision"))
+                or c.status == "conflicts_with_source"
+            )
+        ]
+        rows.sort(key=lambda c: (c.updated_at, c.uid))
+        return [c.model_dump() for c in rows]
+
+    def _r_followups(self, p: Mapping[str, Any]) -> list[Row]:
+        rows = [f for f in self.followups.values() if p["status"] in (None, f.status)]
+        rows.sort(key=lambda f: (f.created_at, f.uid), reverse=True)
+        return [f.model_dump() for f in rows[: p["limit"]]]
