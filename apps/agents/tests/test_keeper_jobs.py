@@ -200,7 +200,7 @@ def test_keeper_decide_claim_reaches_apply():
     sub = result.submit
     assert sub["outcome"] == "claim" and sub["gap"] == gap
     assert sub["about"] == [sub["subject_uid"]] and set(sub["cites"]) <= FAKE_UIDS
-    assert result.tools_called and set(result.tools_called) == {"get_entity"}
+    assert set(result.tools_called) == {"related_work_items", "get_entity"}
     assert result.stop.startswith("error: NotImplementedError")
     [g] = store.read("ledger/get_gap", {"uid": gap})
     assert g["status"] == "in_review"
@@ -258,3 +258,18 @@ def test_follow_up_job(status, prefix):
     assert f["claim"] == claim and f["title"] == prefix + "Alice owns Auth."
     assert result.submit["cites"] == ["fake:pr:2"]
     assert ROLES["pm"].job("follow_up").queue(store, ctx("pm")) == []
+
+
+def test_keeper_decide_claims_from_the_search_alone():
+    """A brain that only answers the search (get_entity finds nothing) still grounds the claim."""
+
+    def search_only(slug, name, **params):
+        return fake_brain(slug, name, **params) if name == "related_work_items" else []
+
+    store = MemoryKeeperStore(SLUG)
+    seed_gap(store, "Why did the auth refresh token race happen?")
+    run(store, "pm", "consult", graph_run=search_only)
+    run(store, "qa", "consult", graph_run=search_only)
+    result = run(store, "keeper", "decide", graph_run=search_only)
+    assert result.submit["outcome"] == "claim" and set(result.submit["cites"]) <= FAKE_UIDS
+    assert result.stop.startswith("error: NotImplementedError")

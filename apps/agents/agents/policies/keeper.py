@@ -32,17 +32,19 @@ def consult(context: dict[str, Any], results: Results) -> list[Call] | dict[str,
 
 
 def decide(context: dict[str, Any], results: Results) -> list[Call] | dict[str, Any]:
-    """keeper.decide: claim the first grounded consult (its subject and cites re-read with
-    get_entity, so the claim cites only what this run saw); none grounded, or none of its uids
-    found again, gives needs_person."""
+    """keeper.decide: claim the first grounded consult. Its subject and cites are re-read (the
+    consult's search again, and get_entity on each uid), so the claim cites only what this run
+    saw; none grounded, or none of its uids found again, gives needs_person."""
     gap = context["gap"]
     grounded = [c for c in context.get("consults") or [] if c.get("can_ground")]
     if not grounded:
         return _needs_person(gap, "No consult could ground it in the graph.")
     c = grounded[0]
     if not results.called("get_entity"):
-        return [("get_entity", {"uid": u}) for u in uniq([c["subject"], *c["cites"]])]
-    found = {r["uid"] for r in results.rows("get_entity")}
+        search: list[Call] = [("related_work_items", {"text": gap.get("text") or ""})]
+        return search + [("get_entity", {"uid": u}) for u in uniq([c["subject"], *c["cites"]])]
+    rows = [*results.rows("related_work_items"), *results.rows("get_entity")]
+    found = {u for r in rows for u in (r.get("uid"), r.get("system_uid")) if u}
     cites = [u for u in c["cites"] if u in found]
     if c["subject"] not in found or not cites:
         return _needs_person(gap, f"The {c['role']} answer's evidence is no longer in the graph.")
