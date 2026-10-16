@@ -24,6 +24,10 @@ def client() -> FalkorDB:
         port=s.falkordb_port,
         username=s.falkordb_username,
         password=s.falkordb_password,
+        ssl=s.falkordb_tls,
+        # Fail fast on a wrong host/port/TLS setting instead of hanging. No read timeout:
+        # big ingestion batches may legitimately take a while.
+        socket_connect_timeout=10,
     )
 
 

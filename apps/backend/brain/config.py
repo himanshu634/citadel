@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     falkordb_port: int = 6379
     falkordb_username: str | None = None
     falkordb_password: str | None = None
+    falkordb_tls: bool = False  # FalkorDB Cloud offers TLS from the Startup tier up
 
     github_token: str | None = None
 
