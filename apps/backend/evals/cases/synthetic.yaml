@@ -120,6 +120,8 @@
         max_steps: 8
 
 # --- abstention -----------------------------------------------------------------------------
+# An explicit "not found", not just any negation ("alice owns it, not bob" must not pass).
+
 
 - id: no-such-system
   tags: [abstain]
@@ -127,7 +129,7 @@
   turns:
     - question: Who owns the iOS mobile app?
       expect:
-        text_re: "\\b(no|not|isn't|doesn't|does not|couldn't|could not|can't|cannot|none)\\b"
+        text_re: "((couldn't|could not|can't|cannot|did not|didn't) find|there (is|are) no|no (record|person|one|evidence|match|such|mention|information|data)|not (in|found in|present in) the (company |knowledge )?graph|graph (has no|doesn't (show|have|list)|does not (show|have|list)))"
         cite_none: [person:alice, person:bob, person:carol, person:dave, person:erin]
         max_steps: 6
 
@@ -137,8 +139,8 @@
   turns:
     - question: What has zoe been working on lately?
       expect:
-        text_re: "\\b(no|not|isn't|doesn't|does not|couldn't|could not|can't|cannot|none)\\b"
-        text_none: [zoe has been working, zoe worked on]
+        text_re: "((couldn't|could not|can't|cannot|did not|didn't) find|there (is|are) no|no (record|person|one|evidence|match|such|mention|information|data)|not (in|found in|present in) the (company |knowledge )?graph|graph (has no|doesn't (show|have|list)|does not (show|have|list)))"
+        cite_none: [person:alice, person:bob, person:carol, person:dave, person:erin]
         max_steps: 5
 
 # --- follow-ups in one thread ---------------------------------------------------------------

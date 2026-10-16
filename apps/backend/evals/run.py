@@ -125,12 +125,14 @@ def run_all(
 
 
 def summarize(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Per case: passes / runs, mean graph tool calls, rejected answers and tokens per run."""
+    """Per case: passes / runs, graph tool calls, rejected answers and tokens. `in` counts the
+    whole prompt (uncached + cache reads + cache writes); `cached` is the cache-read part."""
     out: dict[str, dict[str, Any]] = {}
     for r in results:
         s = out.setdefault(
             r["case"],
-            {"runs": 0, "passed": 0, "steps": 0, "rejected": 0, "tool_errors": 0, "tokens": 0,
+            {"runs": 0, "passed": 0, "steps": 0, "rejected": 0, "tool_errors": 0, "in": 0,
+             "cached": 0, "out": 0,
              "ms": 0, "errors": 0},
         )  # fmt: skip
         s["runs"] += 1
@@ -140,7 +142,10 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             s["steps"] += len(t["tools"])
             s["rejected"] += len(t["rejected"])
             s["tool_errors"] += len(t["tool_errors"])
-            s["tokens"] += t["usage"].get("input_tokens", 0) + t["usage"].get("output_tokens", 0)
+            u = t["usage"]
+            s["cached"] += u.get("cache_read_input_tokens", 0)
+            s["in"] += sum(u.get(k, 0) for k in _INPUT_KEYS)
+            s["out"] += u.get("output_tokens", 0)
             s["ms"] += t["ms"]
     return out
 
@@ -148,22 +153,28 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 def report(results: list[dict[str, Any]], baseline: dict[str, dict[str, Any]] | None) -> str:
     summary = summarize(results)
     lines = [
-        f"{'case':<28} {'pass':>6} {'steps':>6} {'rej':>4} {'terr':>5} {'tokens':>8} {'sec':>6}"
-        + ("  vs baseline" if baseline else "")
+        f"{'case':<28} {'pass':>6} {'steps':>6} {'rej':>4} {'terr':>5} {'in':>7} {'cached':>7} "
+        f"{'out':>6} {'sec':>6}" + ("  vs baseline" if baseline else "")
     ]
     for case, s in summary.items():
         n = s["runs"]
         row = (
             f"{case:<28} {s['passed']:>3}/{n:<2} {s['steps'] / n:>6.1f} {s['rejected']:>4} "
-            f"{s['tool_errors']:>5} {s['tokens'] // n:>8} {s['ms'] / n / 1000:>6.1f}"
+            f"{s['tool_errors']:>5} {s['in'] // n:>7} {s['cached'] // n:>7} "
+            f"{s['out'] // n:>6} {s['ms'] / n / 1000:>6.1f}"
         )
         if baseline:
             row += "  " + _delta(s, baseline.get(case))
         lines.append(row)
     runs = sum(s["runs"] for s in summary.values())
     passed = sum(s["passed"] for s in summary.values())
-    tokens = sum(s["tokens"] for s in summary.values())
-    lines.append(f"\n{passed}/{runs} runs passed ({passed / max(runs, 1):.0%}), {tokens} tokens")
+    tin = sum(s["in"] for s in summary.values())
+    tcached = sum(s["cached"] for s in summary.values())
+    tout = sum(s["out"] for s in summary.values())
+    lines.append(
+        f"\n{passed}/{runs} runs passed ({passed / max(runs, 1):.0%}); tokens per run above, "
+        f"total in {tin} (cached {tcached}), out {tout}"
+    )
     failed = [r for r in results if not r["passed"]]
     for r in failed:
         lines.append(
@@ -180,6 +191,9 @@ def report(results: list[dict[str, Any]], baseline: dict[str, dict[str, Any]] | 
                         "  turn {} answer: {}".format(i, t["text"][:300].replace("\n", " "))
                     )
     return "\n".join(lines)
+
+
+_INPUT_KEYS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 
 
 def _delta(now: dict[str, Any], before: dict[str, Any] | None) -> str:

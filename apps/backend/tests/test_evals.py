@@ -226,9 +226,10 @@ def test_a_failing_turn_fails_the_run_and_an_exception_is_recorded():
 
 def test_report_and_baseline(tmp_path, monkeypatch):
     def result(case, passed, rep=0):
+        usage = {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 80,
+                 "cache_creation_input_tokens": 10}  # fmt: skip
         turn = {"tools": ["x"], "rejected": [], "tool_errors": [], "ms": 1000, "passed": passed,
-                "usage": {"input_tokens": 10, "output_tokens": 5}, "checks": [], "stop": "tool_use",
-                "text": "t"}  # fmt: skip
+                "usage": usage, "checks": [], "stop": "tool_use", "text": "t"}  # fmt: skip
         return {"kind": "run", "case": case, "repeat": rep, "passed": passed, "error": None,
                 "turns": [turn]}  # fmt: skip
 
@@ -243,4 +244,5 @@ def test_report_and_baseline(tmp_path, monkeypatch):
     assert "-50%  REGRESSED" in text
     assert "new" in text.splitlines()[2]  # case c
     assert "2/3 runs passed" in text
+    assert "total in 300 (cached 240), out 15" in text  # cache reads and writes count as input
     assert "FAIL a #1" in text
