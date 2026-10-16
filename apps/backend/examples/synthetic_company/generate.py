@@ -8,6 +8,14 @@ answer:
 - Web app: owned by identity, but erin (payments) made most changes -> owners_vs_experts flags it.
 - Infra: owned by dave; ci-bot has more commits but is a bot -> dave is still the top expert.
 - Billing and Web app are often changed together -> impact_of(Billing) ranks Web app first.
+- Tickets (tickets/, 10 of them, IDN-1..4 and PAY-1..6):
+  - open_work_for(carol) = IDN-2, IDN-3; open_work_for(erin) = PAY-6, PAY-3, PAY-4.
+  - open_work_for(alice) = IDN-1, which blocks IDN-2 and PAY-4.
+  - blocked_on(carol): IDN-2 <- IDN-1 (alice, depth 1), IDN-2 <- PAY-2 (bob, depth 1),
+    IDN-2 <- PAY-3 (erin, depth 2, via PAY-2, PR #9 open).
+  - blocked_on(alice) = none; waiting_on(alice) = IDN-2 (carol), PAY-4 (erin).
+
+The tickets also seed a real Linear workspace (`tickets/linear_seed.json` names its teams).
 
 Run: `uv run python apps/backend/examples/synthetic_company/generate.py`
 The JSONL files next to this script are the output; edit the data here, not the JSONL.
@@ -193,6 +201,106 @@ THREAD = {
 }
 CLOSES = [(1, 11), (3, 12), (5, 13)]
 MENTIONS = [(6, 1), (9, 3)]
+
+# Ten tickets in two Linear teams, in their own folder (a second canonical_jsonl source).
+TICKET_DIR = OUT / "tickets"
+TICKET_TEAMS = {"IDN": "Identity", "PAY": "Payments"}
+TICKET_REPORTER = {"IDN": "alice", "PAY": "bob"}
+# key, title, assignee, state, status_category, priority, due, created, closed
+TICKETS = [
+    (
+        "IDN-1",
+        "Rotate JWT signing keys",
+        "alice",
+        "In Progress",
+        "in_progress",
+        "high",
+        None,
+        "2026-09-15",
+        None,
+    ),
+    (
+        "IDN-2",
+        "SSO login for enterprise customers",
+        "carol",
+        "Todo",
+        "todo",
+        "urgent",
+        "2026-11-06",
+        "2026-09-20",
+        None,
+    ),
+    ("IDN-3", "Session audit log", "carol", "Backlog", "backlog", "low", None, "2026-08-01", None),
+    (
+        "IDN-4",
+        "Extract token service",
+        "carol",
+        "Done",
+        "done",
+        "medium",
+        None,
+        "2026-08-25",
+        "2026-09-01",
+    ),
+    (
+        "PAY-1",
+        "Speed up invoice batch generation",
+        "bob",
+        "Done",
+        "done",
+        "high",
+        None,
+        "2026-04-01",
+        "2026-04-20",
+    ),
+    (
+        "PAY-2",
+        "Per-seat pricing for SSO plans",
+        "bob",
+        "In Progress",
+        "in_progress",
+        "high",
+        None,
+        "2026-09-05",
+        None,
+    ),
+    (
+        "PAY-3",
+        "Usage-based add-ons",
+        "erin",
+        "In Progress",
+        "in_progress",
+        "medium",
+        "2026-10-30",
+        "2026-08-18",
+        None,
+    ),
+    ("PAY-4", "Refunds in the web app", "erin", "Todo", "todo", "medium", None, "2026-09-25", None),
+    (
+        "PAY-5",
+        "Redesign old pricing page",
+        "bob",
+        "Canceled",
+        "canceled",
+        "low",
+        None,
+        "2026-07-10",
+        "2026-07-15",
+    ),
+    (
+        "PAY-6",
+        "Invoice emails sent twice",
+        "erin",
+        "Todo",
+        "todo",
+        "high",
+        None,
+        "2026-09-11",
+        None,
+    ),
+]
+BLOCKED_BY = [("IDN-1", "IDN-2"), ("PAY-2", "IDN-2"), ("PAY-3", "PAY-2"), ("IDN-1", "PAY-4")]
+TICKET_PRS = [("IDN-4", 10), ("PAY-1", 4), ("PAY-3", 9), ("PAY-6", 14)]  # ticket -> PR / issue
 
 # sha, pr, author, date, subject, files
 CHANGES = [
@@ -438,15 +546,70 @@ def wi_url(number: int) -> str:
     return f"{WEB}/{'pull' if kind == 'pull_request' else 'issues'}/{number}"
 
 
+def ticket_uid(key: str) -> str:
+    return f"synthetic:ticket:{key}"
+
+
 def ts(day: str) -> str:
     return f"{day}T12:00:00Z"
 
 
-def write(name: str, rows: list[dict]) -> None:
-    with (OUT / name).open("w") as fh:
+def write(name: str, rows: list[dict], folder: Path = OUT) -> None:
+    with (folder / name).open("w") as fh:
         for row in rows:
             fh.write(json.dumps(row, sort_keys=True) + "\n")
-    print(f"{name}: {len(rows)}")
+    print(f"{folder.name}/{name}: {len(rows)}")
+
+
+def write_tickets() -> None:
+    TICKET_DIR.mkdir(exist_ok=True)
+    items = [
+        {
+            "uid": ticket_uid(key),
+            "kind": "ticket",
+            "key": key,
+            "number": int(key.split("-")[1]),
+            "title": title,
+            "state": state,
+            "status_category": category,
+            "priority": priority,
+            "due_date": due,
+            "assignees": [assignee],
+            "author_login": TICKET_REPORTER[key.split("-")[0]],
+            "created_at": ts(created),
+            "updated_at": ts(created),
+            "closed_at": ts(closed) if closed else None,
+            "container": key.split("-")[0],
+            "url": f"https://example.com/synthetic/linear/{key}",
+        }
+        for key, title, assignee, state, category, priority, due, created, closed in TICKETS
+    ]
+    write("work_items.jsonl", items, TICKET_DIR)
+    links = [
+        {
+            "rel": "BLOCKS",
+            "from_label": "WorkItem",
+            "from_uid": ticket_uid(blocker),
+            "to_label": "WorkItem",
+            "to_uid": ticket_uid(blocked),
+        }
+        for blocker, blocked in BLOCKED_BY
+    ]
+    links += [
+        {
+            "rel": "MENTIONS",
+            "from_label": "WorkItem",
+            "from_uid": ticket_uid(key),
+            "to_label": "WorkItem",
+            "to_uid": wi_uid(number),
+        }
+        for key, number in TICKET_PRS
+    ]
+    write("links.jsonl", links, TICKET_DIR)
+    (TICKET_DIR / "linear_seed.json").write_text(
+        json.dumps({"teams": TICKET_TEAMS}, indent=2) + "\n"
+    )
+    print("tickets/linear_seed.json")
 
 
 def main() -> None:
@@ -613,6 +776,7 @@ def main() -> None:
             }
         )
     write("links.jsonl", links)
+    write_tickets()
 
 
 if __name__ == "__main__":
