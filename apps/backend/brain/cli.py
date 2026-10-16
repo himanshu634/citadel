@@ -157,6 +157,108 @@ def stats(slug: str) -> None:
     _print_stats(slug, f"{config.graph_name(slug)}:")
 
 
+@app.command()
+def ask(
+    slug: str,
+    question: str,
+    thread: str = typer.Option(None, "--thread", help="Continue an earlier conversation."),
+) -> None:
+    """Ask brain_<slug> a question. Claude answers from the graph, with numbered sources."""
+    _company(slug)
+    _connected()
+    answer = _run_ask(slug, question, thread)
+    _print_answer(answer)
+    typer.secho(f"follow up with --thread {answer.thread_id}", dim=True)
+
+
+@app.command()
+def chat(
+    slug: str,
+    thread: str = typer.Option(None, "--thread", help="Continue an earlier conversation."),
+    offline: bool = typer.Option(
+        False,
+        "--offline",
+        help="One scripted turn (a list_systems call) instead of Claude: no API key needed. "
+        "Checks the router, the graph tools and the checkpointer end to end.",
+    ),
+) -> None:
+    """Talk to brain_<slug> in one thread. An empty line or Ctrl-D ends the chat."""
+    _company(slug)
+    _connected()
+    if offline:
+        from brain.agents.offline import OfflineClient
+
+        answer = _run_ask(slug, "Which systems does the graph know?", thread, OfflineClient())
+        _print_answer(answer)
+        typer.secho(
+            f"thread {answer.thread_id} holds {answer.thread_messages} messages in "
+            f"{config.agent_graph_name(slug)}; add a turn with --thread {answer.thread_id}",
+            dim=True,
+        )
+        return
+    typer.secho("Ask about the graph. An empty line ends the chat.", dim=True)
+    while True:
+        try:
+            question = typer.prompt("you", default="", show_default=False)
+        except typer.Abort:
+            break
+        if not question.strip():
+            break
+        answer = _run_ask(slug, question, thread)
+        thread = answer.thread_id
+        _print_answer(answer)
+    if thread:
+        typer.secho(f"continue later with --thread {thread}", dim=True)
+
+
+def _run_ask(slug: str, question: str, thread: str | None, client=None):
+    import anthropic
+
+    from brain.agents.ask import ask as run_ask
+
+    try:
+        return run_ask(
+            slug, question, thread_id=thread, client=client, checkpointer=db.checkpointer(slug)
+        )
+    except anthropic.AuthenticationError:
+        _fail("Anthropic rejected the credentials. Check ANTHROPIC_API_KEY in .env.")
+    except TypeError as e:  # the SDK raises this when it finds no credentials at all
+        if "authentication" not in str(e):
+            raise
+        _fail("No Anthropic credentials. Set ANTHROPIC_API_KEY in .env, or try --offline.")
+    except anthropic.APIConnectionError as e:
+        _fail(f"Cannot reach the Anthropic API: {e}")
+    except anthropic.APIStatusError as e:
+        _fail(f"Anthropic API error {e.status_code}: {e.message}")
+
+
+def _print_answer(answer) -> None:
+    if answer.text is None:
+        reason = {
+            "refusal": "Claude declined to answer",
+            "max_tokens": "hit the output limit",
+            "step_limit": "too many tool calls",
+        }
+        detail = (answer.stop_details or {}).get("explanation") or ""
+        typer.secho(
+            f"No answer: {reason.get(answer.stop, 'no answer submitted')}. {detail}", fg="yellow"
+        )
+    else:
+        typer.echo(answer.text)
+        if answer.sources:
+            typer.echo("\nSources:")
+            for i, src in enumerate(answer.sources, 1):
+                typer.echo(f"  [{i}] {src.title or src.uid}  {src.url or src.uid}")
+        if answer.path:
+            typer.echo("\nPath: " + " -> ".join(p.title or p.uid for p in answer.path))
+    u = answer.usage
+    typer.secho(
+        f"\n{answer.model} · in {u.get('input_tokens', 0)} (cache read "
+        f"{u.get('cache_read_input_tokens', 0)}) · out {u.get('output_tokens', 0)}",
+        dim=True,
+    )
+
+
 def _print_stats(slug: str, title: str) -> None:
     rows = db.run(slug, "tools/graph_stats", read_only=True)
     typer.echo(title)

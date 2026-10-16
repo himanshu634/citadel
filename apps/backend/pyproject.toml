@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Company Brain backend: ingestion, FalkorDB graph, named queries and agents."
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "anthropic>=1.15.0",
     "falkordb>=1.8.0",
     "google-genai>=2.31.0",
     "httpx>=0.28.1",

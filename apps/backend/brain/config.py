@@ -59,7 +59,16 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-005"
     embedding_dim: int = 768
 
-    @field_validator("falkordb_username", "falkordb_password", "github_token", mode="before")
+    # Claude answers questions over the graph (brain/agents). pydantic-settings reads .env but
+    # does not export it, so llm.py passes the key on; unset lets the SDK use its own chain.
+    anthropic_api_key: str | None = None
+    anthropic_model: str = "claude-sonnet-5-5"
+    anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    anthropic_max_tokens: int = 64000
+
+    @field_validator(
+        "falkordb_username", "falkordb_password", "github_token", "anthropic_api_key", mode="before"
+    )
     @classmethod
     def _empty_is_none(cls, v: str | None) -> str | None:
         return v or None
@@ -152,6 +161,12 @@ def graph_name(slug: str) -> str:
     if not re.fullmatch(SLUG_RE, slug):
         raise ValueError(f"invalid company slug: {slug!r}")
     return f"brain_{slug}"
+
+
+def agent_graph_name(slug: str) -> str:
+    """Agent conversation checkpoints for one company: agent_<slug>, apart from its brain graph."""
+    graph_name(slug)  # same slug rules
+    return f"agent_{slug}"
 
 
 def companies_dir() -> Path:

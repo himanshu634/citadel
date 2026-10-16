@@ -1,0 +1,218 @@
+"""The brain loop: Claude (Anthropic SDK) answering over the named graph tools.
+
+    call_claude --tool_use--> run_tools --(answer accepted)--> END
+         ^                        |
+         +------------------------+
+    call_claude --(end_turn without an answer)--> nudge -> call_claude
+    call_claude --(refusal / max_tokens)--> END
+
+The graph owns the loop (not the SDK tool runner), so every step is checkpointed. Rules it keeps:
+- State holds messages in Anthropic's own block format and is append-only. Assistant content is
+  stored exactly as returned (thinking blocks included); the API rejects edited history.
+- All tool results of one assistant turn go back in a single user message.
+- The answer arrives through the `submit_answer` tool (the current models reject forced tool
+  choice, so the system prompt asks for it). Cited uids must have appeared in a tool result in
+  this thread; otherwise Claude gets an error result and tries again.
+"""
+
+from __future__ import annotations
+
+import operator
+import re
+from importlib import resources
+from typing import Annotated, Any, Literal, TypedDict
+
+import anthropic
+from langgraph.graph import END, StateGraph
+
+from brain import llm
+from brain.agents.toolset import Toolset
+from brain.config import get_settings
+
+SYSTEM_PROMPT = resources.files("brain.agents").joinpath("system_prompt.md").read_text()
+SUBMIT = "submit_answer"
+MAX_NUDGES = 1  # times we ask for submit_answer after a plain-text reply before giving up
+_MARKER = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")  # [1] or [1, 3]
+
+SUBMIT_TOOL: dict[str, Any] = {
+    "name": SUBMIT,
+    "description": (
+        "Submit the final answer with its sources. Call this exactly once, when you are done "
+        "looking things up. Every uid in sources and path must come from an earlier tool result."
+    ),
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "answer": {
+                "type": "string",
+                "description": "Markdown with [n] markers; n is the 1-based index in sources.",
+            },
+            "sources": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "uids of the cited nodes, in marker order.",
+            },
+            "path": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "uids along the graph path that explains the answer, or [].",
+            },
+        },
+        "required": ["answer", "sources", "path"],
+        "additionalProperties": False,
+    },
+}
+
+
+def _merge(a: dict, b: dict) -> dict:
+    return {**a, **b}
+
+
+class AgentState(TypedDict, total=False):
+    slug: str
+    messages: Annotated[list[dict[str, Any]], operator.add]
+    seen: Annotated[dict[str, dict[str, Any]], _merge]  # uid -> {uid, label, title, url}
+    usage: Annotated[list[dict[str, Any]], operator.add]  # one entry per Claude call
+    answer: dict[str, Any] | None  # the accepted submit_answer input
+    stop: str | None  # last stop_reason, or "no_answer"
+    stop_details: dict[str, Any] | None
+    model: str | None  # the model that served the last call (differs after a fallback)
+    nudges: int
+    route: str | None  # set by the router: which part of the graph handles this turn
+
+
+ENTRY = "call_claude"  # where the router hands a turn to this loop
+
+
+def add_brain_loop(g: StateGraph, client: anthropic.Anthropic, toolset: Toolset) -> str:
+    """Add the loop's nodes and edges to `g`; returns the entry node name."""
+    s = get_settings()
+    tool_defs = [*toolset.definitions(), SUBMIT_TOOL]
+
+    def call_claude(state: AgentState) -> dict[str, Any]:
+        with client.beta.messages.stream(
+            model=s.anthropic_model,
+            max_tokens=s.anthropic_max_tokens,
+            system=[{"type": "text", "text": SYSTEM_PROMPT}],
+            tools=tool_defs,
+            messages=state["messages"],
+            output_config={"effort": s.anthropic_effort},
+            cache_control={"type": "ephemeral"},
+            betas=[llm.FALLBACK_BETA],
+            fallbacks="default",
+        ) as stream:
+            msg = stream.get_final_message()
+        details = getattr(msg, "stop_details", None)
+        content = replayable(msg.content)
+        if msg.stop_reason == "max_tokens":
+            # A tool call cut off mid-input never runs; an unanswered tool_use would make the
+            # next request in this thread invalid. Nothing has been sent back yet, so drop it.
+            content = [b for b in content if b["type"] != "tool_use"]
+        return {
+            # An empty turn (e.g. a refusal before any output) has nothing to replay.
+            "messages": [{"role": "assistant", "content": content}] if content else [],
+            "usage": [msg.usage.model_dump(mode="json", exclude_none=True)],
+            "stop": msg.stop_reason,
+            "stop_details": details.model_dump(mode="json") if details else None,
+            "model": msg.model,
+        }
+
+    def run_tools(state: AgentState) -> dict[str, Any]:
+        uses = [b for b in state["messages"][-1]["content"] if b["type"] == "tool_use"]
+        seen = dict(state.get("seen") or {})
+        results: list[dict[str, Any]] = []
+        new_seen: dict[str, dict[str, Any]] = {}
+        # Graph tools first, so a submit_answer in the same turn can cite their results.
+        for use in sorted(uses, key=lambda u: u["name"] == SUBMIT):
+            if use["name"] == SUBMIT:
+                continue
+            out = toolset.call(state["slug"], use["name"], use.get("input"))
+            new_seen.update(out.seen)
+            results.append(result_block(use["id"], out.content, out.is_error))
+        seen.update(new_seen)
+        answer = None
+        for use in uses:
+            if use["name"] != SUBMIT:
+                continue
+            problem = check_answer(use.get("input") or {}, seen)
+            if problem:
+                results.append(result_block(use["id"], problem, True))
+            else:
+                answer = use["input"]
+                results.append(result_block(use["id"], "Answer recorded.", False))
+        return {
+            "messages": [{"role": "user", "content": results}],
+            "seen": new_seen,
+            "answer": answer,
+        }
+
+    def nudge(state: AgentState) -> dict[str, Any]:
+        text = f"Call {SUBMIT} with your final answer and its sources."
+        return {
+            "messages": [{"role": "user", "content": [{"type": "text", "text": text}]}],
+            "nudges": state.get("nudges", 0) + 1,
+        }
+
+    def after_claude(state: AgentState) -> Literal["run_tools", "nudge", "call_claude", "__end__"]:
+        stop = state.get("stop")
+        if stop in ("refusal", "max_tokens"):
+            return END
+        if stop == "pause_turn":
+            return "call_claude"
+        if any(b["type"] == "tool_use" for b in state["messages"][-1]["content"]):
+            return "run_tools"
+        return "nudge" if state.get("nudges", 0) < MAX_NUDGES else END
+
+    def after_tools(state: AgentState) -> Literal["call_claude", "__end__"]:
+        return END if state.get("answer") else "call_claude"
+
+    g.add_node("call_claude", call_claude)
+    g.add_node("run_tools", run_tools)
+    g.add_node("nudge", nudge)
+    g.add_conditional_edges("call_claude", after_claude)
+    g.add_conditional_edges("run_tools", after_tools)
+    g.add_edge("nudge", "call_claude")
+    return ENTRY
+
+
+def result_block(tool_use_id: str, content: str, is_error: bool) -> dict[str, Any]:
+    block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
+    return {**block, "is_error": True} if is_error else block
+
+
+def check_answer(answer: dict[str, Any], seen: dict[str, Any]) -> str | None:
+    """Why an answer can't be accepted, or None. Only uids from tool results may be cited."""
+    if not isinstance(answer.get("answer"), str) or not answer["answer"].strip():
+        return "answer is empty."
+    sources = answer.get("sources", [])
+    unknown = [u for u in [*sources, *answer.get("path", [])] if u not in seen]
+    if unknown:
+        return (
+            f"These uids did not appear in any tool result: {', '.join(unknown)}. Look them up, "
+            f"or remove them, then call {SUBMIT} again."
+        )
+    markers = {int(n) for m in _MARKER.findall(answer["answer"]) for n in m.split(",")}
+    bad = sorted(n for n in markers if not 1 <= n <= len(sources))
+    if bad:
+        return (
+            f"Markers {bad} have no matching entry in sources ({len(sources)} given). "
+            f"Marker [n] cites sources[n-1]; fix them and call {SUBMIT} again."
+        )
+    return None
+
+
+_MODEL_INTERNAL = {"thinking", "redacted_thinking", "tool_use", "server_tool_use"}
+
+
+def replayable(content: list[Any]) -> list[dict[str, Any]]:
+    """Assistant content as dicts to send back next turn, unchanged except after a mid-output
+    fallback: model-internal blocks before the last `fallback` marker belong to the model that
+    declined, so they are dropped (the API's echo rule); text before it and everything after
+    are kept."""
+    blocks = [b.model_dump(mode="json", exclude_none=True) for b in content]
+    marks = [i for i, b in enumerate(blocks) if b["type"] == "fallback"]
+    if not marks:
+        return blocks
+    cut = marks[-1]
+    return [b for i, b in enumerate(blocks) if i >= cut or b["type"] not in _MODEL_INTERNAL]

@@ -24,6 +24,8 @@ make fetch | ingest | sync     # SOURCE=<type> limits to one source; FULL=1 igno
 make stats                     # node/relationship counts
 make tools                     # list the named query tools and their params
 make query TOOL=impact_of P="system=CI"   # run one (SLUG=..., JSON=1 for raw rows)
+make ask SLUG=synthetic Q="who knows Auth?"   # Claude answers from the graph (THREAD=<id> follows up)
+make chat SLUG=synthetic OFFLINE=1   # one scripted turn, no API key: router + tools + checkpointer
 make reset SLUG=x CONFIRM=1    # delete a company graph
 make brain ARGS="..."          # any `brain` CLI command
 
@@ -38,7 +40,9 @@ make fe-install | fe-dev | fe-check | fe-build   # frontend: pnpm install, dev o
 Configuration comes from `.env` (see `.env.example`): FalkorDB host/port/credentials and
 `FALKORDB_TLS` (the same code runs against local Docker or FalkorDB Cloud), `GITHUB_TOKEN`
 (falls back to `gh auth token`), and Vertex AI embedding settings. `EMBEDDING_DIM` must match the
-embedding model because the vector index is created with it.
+embedding model because the vector index is created with it. `ANTHROPIC_API_KEY`,
+`ANTHROPIC_MODEL` (default `claude-sonnet-5-5`) and `ANTHROPIC_EFFORT` (default `medium`) drive
+`brain ask`.
 
 ## Backend architecture (`apps/backend/brain`)
 
@@ -85,6 +89,23 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   rejects undirected traversals).
 - **`db.py`** is the only place that opens a connection and selects the graph (`brain_<slug>`);
   all queries go through `db.run()` so nothing can hit the wrong company's graph.
+
+### Agents (`brain/agents`)
+
+`brain ask` / `brain chat` run the agent graph (`agents/graph.py`): a `router` hands each turn to
+the brain loop; `builder` -> `critic` are placeholders for writing Decision nodes (the router does
+not use them yet). The brain loop (`agents/loop.py`): `call_claude` streams one Messages API call
+(anthropic SDK via `llm.client()`, server-side `fallbacks: "default"` on) and `run_tools` runs the
+requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-written Cypher). Rules:
+- State is append-only and in Anthropic block format; assistant content is replayed exactly as
+  returned (thinking blocks included), because the API rejects edited history. Never trim it.
+- All tool results of one turn go back in one user message; failures are `is_error` results.
+- The answer comes through the `submit_answer` tool (forced `tool_choice` is a 400 on current
+  models). It may cite only uids seen in tool results; anything else is sent back as an error.
+- Keep `agents/system_prompt.md` and the tool list static (no dates, sorted tools) so the prompt
+  prefix stays cacheable. Threads are checkpointed in graph `agent_<slug>` (`db.checkpointer`).
+- Tests use a scripted fake client (`tests/test_agent.py`); nothing in `make test` calls the API.
+  `agents/offline.py` is the same idea for `brain chat --offline`.
 
 ### Named Cypher queries
 

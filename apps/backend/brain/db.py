@@ -11,9 +11,10 @@ from functools import cache
 from typing import Any
 
 from falkordb import FalkorDB, Graph
+from langchain_falkordb.checkpoint import FalkorDBSaver
 
 from brain import queries
-from brain.config import get_settings, graph_name
+from brain.config import agent_graph_name, get_settings, graph_name
 
 
 @cache
@@ -33,6 +34,23 @@ def client() -> FalkorDB:
 
 def graph(slug: str) -> Graph:
     return client().select_graph(graph_name(slug))
+
+
+def checkpointer(slug: str) -> FalkorDBSaver:
+    """LangGraph checkpoints for the company's agent threads, in graph agent_<slug>.
+
+    The saver opens its own connection, so it is built here from the same settings. Kept out of
+    brain_<slug> so conversation state never mixes with the company graph or its stats.
+    """
+    s = get_settings()
+    return FalkorDBSaver(
+        host=s.falkordb_host,
+        port=s.falkordb_port,
+        username=s.falkordb_username,
+        password=s.falkordb_password,
+        ssl=s.falkordb_tls,
+        database=agent_graph_name(slug),
+    )
 
 
 def ping() -> bool:
