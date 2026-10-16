@@ -11,7 +11,7 @@ import pytest
 from brain.adapters.github import codeowners
 from brain.adapters.github.transform import actor_login, records
 from brain.canonical import Change, Comment, Document, Link, Ownership, Review, WorkItem
-from brain.config import CompanyConfig, load_company
+from brain.config import CompanyConfig
 from brain.normalize import normalize
 from pydantic import ValidationError
 
@@ -22,7 +22,22 @@ PR, ISSUE, BOT_PR, OLD_ISSUE = 3063, 2539, 3344, 8
 
 @pytest.fixture
 def company() -> CompanyConfig:
-    return load_company("falkordb")
+    """Fixed rules, so tuning companies/falkordb.yaml never breaks these tests."""
+    return CompanyConfig.model_validate(
+        {
+            "slug": "gh_test",
+            "name": "GH test",
+            "data_permission": "public",
+            "window": {"since": "2026-04-15"},
+            "sources": [{"type": "github", "repo": "FalkorDB/FalkorDB"}],
+            "systems": {
+                "rules": [{"match": ".github/workflows/**", "system": "CI"}],
+                "fallback": "depth_2",
+                "ignore": ["build/graphblas/**"],
+            },
+            "people": {"bots": ["Copilot"]},
+        }
+    )
 
 
 @pytest.fixture

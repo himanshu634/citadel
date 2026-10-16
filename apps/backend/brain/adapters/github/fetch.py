@@ -96,6 +96,7 @@ def fetch_paged(
     window_start: datetime,
     stop_when_older: str | None = None,
     send_since: bool = True,
+    incremental: bool = True,
     log=print,
 ) -> int:
     """Fetch every page of one GraphQL connection into `folder`, resuming an unfinished run.
@@ -103,14 +104,16 @@ def fetch_paged(
     `connection` picks the connection out of the response. If `stop_when_older` names a node
     timestamp field, paging stops once a page reaches nodes older than the run's lower bound
     (used for newest-first lists that have no server-side `since` filter; those also set
-    `send_since=False` because their query declares no $since).
+    `send_since=False` because their query declares no $since). `incremental=False` always
+    starts at the window and keeps only the newest completed run (used for commit history,
+    whose dates come from client clocks, so "since the last run" could miss late pushes).
     Returns the number of pages written in this call.
     """
     state = read_json(folder / "state.json", {"complete_until": None, "completed_runs": []})
     run = state.get("run")
     if run is None:
         lower = window_start
-        if state["complete_until"]:
+        if incremental and state["complete_until"]:
             lower = max(lower, parse_ts(state["complete_until"]) - OVERLAP)
         started = datetime.now(UTC)
         run = {
@@ -145,6 +148,11 @@ def fetch_paged(
         if not conn["pageInfo"]["hasNextPage"] or reached_bottom or not nodes:
             break
 
+    if not incremental:  # this run covers the whole window: older runs are redundant
+        for old in folder.glob("*_*.json"):
+            if old.name.split("_")[0] != run["id"]:
+                old.unlink()
+        state["completed_runs"] = []
     state["completed_runs"].append(run["id"])
     state["complete_until"] = run["started"]
     state["run"] = None
@@ -360,6 +368,7 @@ def run(company: CompanyConfig, source, cache: Path, log=print) -> None:
             lambda d: d["repository"]["defaultBranchRef"]["target"]["history"],
             cache / "history",
             window_start,
+            incremental=False,  # commit dates are client clocks: always re-read the window
             log=log,
         )
         log(f"  commits: {write_commits(repo, branch, window_start, cache)} since window")

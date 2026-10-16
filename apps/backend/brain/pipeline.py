@@ -3,18 +3,22 @@
 Why: this is the glue the CLI calls. It is source-agnostic: it looks up each source's adapter
 in the registry, so a new source type needs no change here.
 
-Incremental by default: each source has a SyncState node holding a cursor (the latest record
-timestamp loaded). Records older than the cursor are skipped; records with no timestamp
-(people, teams, ownership, links) are always loaded, which is cheap and keeps edges complete.
+Incremental by default: each source has a SyncState node holding a cursor (the latest
+`arrival_at` loaded, a source-server timestamp). Records that arrived before the cursor are
+skipped; records without one (people, teams, ownership, links, and git-dated commits and docs)
+are always loaded, which is cheap and keeps edges complete.
 `full=True` ignores the cursor, and so does a changed `window.since` (widening the window must
 pull in records older than the cursor).
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from brain import adapters, loader
+from brain.canonical import CanonicalRecord
 from brain.config import CompanyConfig, load_company, raw_dir
 from brain.normalize import normalize
 
@@ -31,6 +35,21 @@ class SourceResult:
 class IngestReport:
     sources: list[SourceResult] = field(default_factory=list)
     load: loader.LoadReport = field(default_factory=loader.LoadReport)
+
+
+def select_new(records: Iterable[CanonicalRecord], cursor: datetime | None) -> list:
+    """Records that arrived at or after the cursor, plus every record without an arrival time."""
+    if cursor is None:
+        return list(records)
+    return [r for r in records if (t := r.arrival_at()) is None or t >= cursor]
+
+
+def next_cursor(
+    records: Iterable[CanonicalRecord], cursor: datetime | None, now: datetime
+) -> datetime | None:
+    """Latest arrival time loaded, never past `now` (a bad clock must not hide future records)."""
+    latest = max((t for r in records if (t := r.arrival_at())), default=cursor)
+    return min(latest, now) if latest else None
 
 
 def _selected(cfg: CompanyConfig, only: str | None):
@@ -74,12 +93,10 @@ def ingest(slug: str, full: bool = False, only: str | None = None) -> IngestRepo
         result.read = len(records)
 
         cursor = None if full else loader.get_cursor(slug, key, window_since)
-        if cursor is not None:
-            records = [r for r in records if (t := r.changed_at()) is None or t >= cursor]
-        records = list(normalize(records, cfg))
+        records = list(normalize(select_new(records, cursor), cfg))
         result.loaded = len(records)
 
         report.load.merge(loader.load(slug, records))
-        latest = max((t for r in records if (t := r.changed_at())), default=cursor)
+        latest = next_cursor(records, cursor, datetime.now(UTC))
         loader.set_sync_state(slug, adapter.name, key, latest, window_since, result.loaded)
     return report
