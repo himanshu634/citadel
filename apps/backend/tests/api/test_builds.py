@@ -274,7 +274,7 @@ def test_dry_run_reports_rebuild(client, company):
     new = {**current_config(client, company), "window": {"since": "2026-06-01"}}
     before = yaml_text(company)
     d = client.put(f"/api/companies/{company}?dry_run=1", json=new).json()
-    assert d["rebuild"] is True and d["refetch"] == []
+    assert d["slug"] == company and d["rebuild"] is True and d["refetch"] == []
     assert yaml_text(company) == before
 
 
@@ -283,6 +283,7 @@ def test_put_needing_rebuild_without_flag_is_409(client, company):
     before = yaml_text(company)
     r = client.put(f"/api/companies/{company}", json=with_since(cfg, "2026-06-01"))
     assert r.status_code == 409 and r.json()["detail"]["rebuild_required"]["rebuild"]
+    assert r.json()["detail"]["rebuild_required"]["slug"] == company
     assert yaml_text(company) == before
 
 

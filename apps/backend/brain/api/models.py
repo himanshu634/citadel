@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from brain.config_diff import ConfigDiff
 from brain.jobs import BuildSummary
 from brain.registry import FieldError
 from brain.tools import PersonActivity, RecentWorkItem, Stat, SystemSummary
@@ -61,3 +62,20 @@ class ToolInfo(BaseModel):
     name: str
     description: str
     params_schema: dict[str, Any]
+
+
+class ToolList(BaseModel):
+    slug: str
+    tools: list[ToolInfo]
+
+
+class ToolResult(BaseModel):
+    slug: str
+    tool: str
+    rows: list[dict[str, Any]]  # the tool's row model, dumped by alias
+
+
+class ConfigChange(ConfigDiff):
+    """What a Settings save requires (`?dry_run=1`, and the 409 `rebuild_required` detail)."""
+
+    slug: str

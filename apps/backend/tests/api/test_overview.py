@@ -57,23 +57,40 @@ def test_overview_is_scoped_to_its_company(api_client_with, synthetic_graph):
 def test_tool_list_and_call(api_client_with, synthetic_graph):
     client = api_client_with(synthetic_graph)
     listed = client.get(f"/api/companies/{synthetic_graph}/tools").json()
-    assert {t["name"] for t in listed} == set(tools.TOOLS)
-    recent = next(t for t in listed if t["name"] == "recent_work_items")
+    assert listed["slug"] == synthetic_graph
+    assert {t["name"] for t in listed["tools"]} == set(tools.TOOLS)
+    recent = next(t for t in listed["tools"] if t["name"] == "recent_work_items")
     assert recent["description"] and recent["params_schema"]["properties"]["limit"]
 
     response = client.post(
         f"/api/companies/{synthetic_graph}/tools/recent_work_items", json={"limit": 2}
     )
     assert response.status_code == 200
-    assert [r["uid"] for r in response.json()][0] == "synthetic:issue:14"
-    assert len(response.json()) == 2
+    body = response.json()
+    assert body["slug"] == synthetic_graph and body["tool"] == "recent_work_items"
+    assert [r["uid"] for r in body["rows"]] == ["synthetic:issue:14", body["rows"][1]["uid"]]
+    assert len(body["rows"]) == 2
 
 
 @needs_graph
 def test_tool_call_without_body_uses_defaults(api_client_with, synthetic_graph):
     client = api_client_with(synthetic_graph)
     response = client.post(f"/api/companies/{synthetic_graph}/tools/graph_stats")
-    assert response.status_code == 200 and response.json()
+    assert response.status_code == 200 and response.json()["rows"]
+
+
+@pytest.mark.parametrize("body", [{"slug": "other"}, {"name": "x"}, {"limit": 2, "tool": "y"}])
+def test_tool_params_outside_the_model_are_ignored(api_client_with, monkeypatch, body):
+    """Body keys that are not the tool's params never reach tools.call (no TypeError, and the
+    slug and tool always come from the path)."""
+    client = api_client_with("acme")
+    ran: list[tuple] = []
+    monkeypatch.setattr(db, "graph_exists", lambda slug: True)
+    monkeypatch.setattr(db, "run", lambda slug, query, params, **k: ran.append((slug, query)) or [])
+    r = client.post("/api/companies/acme/tools/recent_work_items", json=body)
+    assert r.status_code == 200
+    assert r.json() == {"slug": "acme", "tool": "recent_work_items", "rows": []}
+    assert ran == [("acme", "tools/recent_work_items")]
 
 
 def test_unknown_tool_is_404_and_bad_params_are_422(api_client_with, monkeypatch):
@@ -128,7 +145,7 @@ def test_tool_call_on_a_graph_deleted_mid_request_is_empty(
     api_client_with, graph_deleted_after_the_check
 ):
     r = api_client_with("test_gone").post("/api/companies/test_gone/tools/recent_work_items")
-    assert r.status_code == 200 and r.json() == []
+    assert r.status_code == 200 and r.json()["rows"] == []
 
 
 @needs_graph

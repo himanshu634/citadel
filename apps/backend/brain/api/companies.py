@@ -21,9 +21,8 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from brain import config_diff, db, registry
 from brain.api.deps import company_slug, get_runner, start_lock
-from brain.api.models import CompanyDetail, CompanyOut, Status, ValidateOut
+from brain.api.models import CompanyDetail, CompanyOut, ConfigChange, Status, ValidateOut
 from brain.config import CompanyConfig
-from brain.config_diff import ConfigDiff
 from brain.jobs import ACTIVE, BuildSnapshot, BuildSummary, JobRunner, JobRunning
 
 log = logging.getLogger(__name__)
@@ -169,7 +168,7 @@ def get_company(slug: Annotated[str, Depends(company_slug)], runner: Runner) -> 
 
 @router.put(
     "/{slug}",
-    response_model=CompanyDetail | ConfigDiff | BuildSnapshot,
+    response_model=CompanyDetail | ConfigChange | BuildSnapshot,
     responses={202: {"model": BuildSnapshot}, 409: {}, 422: {}},
 )
 def save_company(
@@ -192,7 +191,7 @@ def save_company(
         return _field_errors([registry.FieldError(loc=["slug"], msg=msg)])
     change = config_diff.diff(read_config(slug), cfg)
     if dry_run:
-        return change
+        return ConfigChange(slug=slug, **change.model_dump())
     if not change.changed and not rebuild:
         return _detail(cfg, runner)
     with lock:  # check, write and start as one step; POST /builds takes the same lock
@@ -202,7 +201,8 @@ def save_company(
         if snap is not None and snap.state in ACTIVE:
             raise HTTPException(status_code=409, detail=str(JobRunning(slug)))
         if change.rebuild and not rebuild:
-            detail = {"rebuild_required": change.model_dump(mode="json")}
+            required = ConfigChange(slug=slug, **change.model_dump())
+            detail = {"rebuild_required": required.model_dump(mode="json")}
             return JSONResponse(status_code=409, content={"detail": detail})
         if change.changed:
             registry.update(slug, cfg)
