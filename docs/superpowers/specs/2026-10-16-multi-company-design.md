@@ -259,22 +259,34 @@ adapter's `source_model` themselves and report `["sources", i, <field>]`.
 
 | Method and path | Does |
 | --- | --- |
-| `GET /api/companies` | List from `companies/*.yaml`: `slug`, `name`, `data_permission`, `status` (`ready`, `building`, `failed`, `empty`, `invalid` when the YAML no longer validates, with `error`), `last_synced_at`, `build` summary if one is running. |
-| `GET /api/companies/{slug}` | The full config plus status. |
-| `PUT /api/companies/{slug}` | Replace the config (Settings). Slug must match the path. With `?dry_run=1` it writes nothing and returns `{rebuild: bool, refetch: [source keys], reasons: [...]}`. Without it: if a rebuild is needed it requires `?rebuild=1` (else 409), writes the YAML and starts the rebuild job (5.7); otherwise it writes the YAML only. |
+| `GET /api/companies` | List from `companies/*.yaml`, one `CompanyOut` each: `slug`, `name`, `data_permission`, `status` (`ready`, `building`, `failed`, `empty`, `unknown`, `invalid` when the YAML no longer validates, with `error`), `last_synced_at`, `error`, `build` (the current or last build's summary), `graph_reachable`. |
+| `GET /api/companies/{slug}` | `CompanyOut` plus `config` (the full config). |
+| `PUT /api/companies/{slug}` | Replace the config (Settings). Slug must match the path. With `?dry_run=1` it writes nothing and returns `{slug, changed, rebuild, refetch: [source keys], reasons: [...]}`. Without it: if a rebuild is needed it requires `?rebuild=1` (else 409 with `{detail: {rebuild_required: <the same object>}}`), writes the YAML and starts the rebuild job (5.7, 202 with the build snapshot); otherwise it writes the YAML only and returns the company. |
 
-`status` comes from: a running job → `building`; last job failed → `failed`; graph missing or
-no `SyncState` nodes → `empty`; otherwise `ready`. `last_synced_at` is the latest `SyncState`
-update.
+`status` comes from: a queued or running job → `building`; last job failed → `failed`; graph
+missing or no `SyncState` nodes → `empty`; otherwise `ready`. When FalkorDB does not answer
+and no job says `building` or `failed`, the status is `unknown` (never a guessed `empty`) and
+`graph_reachable` is false; these routes and `/api/events` still answer 200/201, while the
+overview and tool routes answer 503. `last_synced_at` is the latest `SyncState` update, also
+while a build runs (so the UI can tell "building, graph empty" from "building over data").
+`build` is `{kind, state, stage, stages, started_at}`: `stage` is the latest event's stage and
+`stages` the planned order (`reset` only for rebuilds, `fetch` only when something is
+fetched; the ingest stages repeat per source).
 
 ### 6.2 Create and validate
 
 | Method and path | Does |
 | --- | --- |
-| `POST /api/companies/validate` | Body: a draft config. Returns `{ok, errors, yaml}`. `yaml` is the text that would be written. Also reports `slug_taken`. Writes nothing. |
-| `POST /api/companies` | Validate, refuse if `companies/<slug>.yaml` exists (409), write it, return the company. |
+| `POST /api/companies/validate` | Body: a draft config. Returns `{ok, errors, yaml, slug_taken, slug_taken_detail}`. `yaml` is the text that would be written. `slug_taken_detail` is the sentence a create would answer with. Writes nothing. |
+| `POST /api/companies` | Validate, refuse (409) if the slug is taken, write the YAML, return the company (201). |
 | `GET /api/checks/github` | `{token: "env" \| "gh" \| null}`. |
-| `GET /api/checks/github/{owner}/{name}` | `{exists, private}` for the repository, so step 2 can warn early. |
+| `GET /api/checks/github/{owner}/{name}` | `{exists, private}` for the repository, so step 2 can warn early. One attempt with a 10 s timeout: 424 without a GitHub token, 429 when GitHub rate-limits, 502 when GitHub fails or does not answer. |
+
+A slug is taken when `companies/<slug>.yaml` exists ("already a company"), or when a former
+company with that slug left graph `brain_<slug>`, graph `agent_<slug>` or its build history
+`data/jobs/<slug>.json` (the message says to run `make reset SLUG=<slug> CONFIRM=1`, which
+deletes those three and keeps the raw cache). While FalkorDB is down only the files are
+checked.
 
 YAML is written by the server from the validated model, keeping the field order of the existing
 files (`slug, name, data_permission, window, sources, systems, people`). Writes are atomic
@@ -288,7 +300,7 @@ files (`slug, name, data_permission, window, sources, systems, people`). Writes 
 | `GET /api/companies/{slug}/builds/current` | The current or last build: stages per source, counts, errors, start and end times. |
 | `GET /api/companies/{slug}/builds/current/events` | SSE stream of build events (below). Sends the current snapshot first. |
 | `DELETE /api/companies/{slug}/builds/current` | Ask the build to stop at the next safe point (between sources or batches). |
-| `GET /api/events` | One SSE stream of status changes for all companies, for the rail badges. |
+| `GET /api/events` | One SSE stream of status changes for all companies, for the rail badges: a `status` message per build event whose data is that company's `CompanyOut` (6.1, without `config`). |
 
 Build event: `{slug, stage, source, status, count, message, at}` where `stage` is one of
 `reset` (rebuilds only), `prepare`, `fetch`, `records`, `normalize`, `load`, `done`, and `status` one of `waiting`,
@@ -304,7 +316,7 @@ Pipeline change: `fetch`, `ingest` and `apply_schema` take an optional
 | Method and path | Does |
 | --- | --- |
 | `GET /api/companies/{slug}/overview` | Counts per node type, recent work items, changes per system, people with PR and review counts, and the date window. |
-| `GET /api/companies/{slug}/tools` and `POST /api/companies/{slug}/tools/{name}` | Thin wrappers over `brain.tools.call(slug, name, **params)` once `feat/named-tools` is on `main`. |
+| `GET /api/companies/{slug}/tools` and `POST /api/companies/{slug}/tools/{name}` | Thin wrappers over `brain.tools.call(slug, name, **params)`. The list returns `{slug, tools: [{name, description, params_schema}]}`; a call takes the params as its body (validated by the tool's model; other keys are dropped) and returns `{slug, tool, rows}`. |
 | `POST /api/companies/{slug}/ask` | Wraps `agents.ask(slug, question, ...)` once `feat/claude-agent` is on `main`. Out of this round's build plan except as a stub. |
 
 The overview reads through `brain.tools` (C10): `graph_stats` for counts, and the new
