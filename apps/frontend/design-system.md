@@ -133,6 +133,7 @@ not add another component library.
 | ------------ | ---------------------------------------------------------------------------------------------- |
 | `Button`     | Variants: `primary` (one per view), `secondary` (default), `ghost` (toolbars), `danger` (destructive). Sizes `sm` 32, `md` 40, `lg` 48. Icon-only needs `label`. The label says what happens ("Delete graph", not "OK"). |
 | `Badge`      | Status words. The word carries the meaning; the tone repeats it.                               |
+| `Banner`     | The state of a whole view (building, failed, invalid, unreachable) with its one action. Icon and title carry the state; tone repeats it. |
 | `NodeChip`   | A graph node reference: type dot plus label. Type is in the accessible name.                   |
 | `Avatar`     | Initials on the node colour of what it stands for. Always next to the name.                    |
 | `Card`       | A titled panel. Title in wide type, optional description and actions. No nesting, no shadow.   |

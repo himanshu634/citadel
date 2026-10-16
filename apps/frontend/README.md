@@ -1,8 +1,8 @@
 # frontend
 
 The Company Brain UI: SvelteKit 2, Svelte 5 (runes), TypeScript, bits-ui primitives, Lucide
-icons. It reads from the backend (`apps/backend`), never from FalkorDB directly. Until the
-backend API exists, pages use sample data from the synthetic company (`src/lib/data/sample.ts`).
+icons. It reads from the backend API (`apps/backend`, `make api`; vite proxies `/api`), never from
+FalkorDB directly.
 
 Design rules: [design-system.md](design-system.md). Live component gallery: `/components`.
 

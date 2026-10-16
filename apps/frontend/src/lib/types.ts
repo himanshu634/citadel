@@ -20,8 +20,7 @@ export const NODE_PLURALS: Record<NodeType, string> = {
 	document: 'Documents'
 };
 
-export type WorkItemKind = 'pull_request' | 'issue' | 'thread';
-export type WorkItemState = 'open' | 'merged' | 'closed';
+export type WorkItemKind = 'pull_request' | 'issue' | 'ticket' | 'thread';
 
 export interface GraphNodeRef {
 	uid: string;
@@ -55,29 +54,13 @@ export interface WorkItem {
 	kind: WorkItemKind;
 	number?: number;
 	title: string;
-	state: WorkItemState;
-	author: string;
-	date: string;
+	/** Source-specific (open, closed, merged, done ...); the row styles `open` and `merged`. */
+	state: string;
+	author?: string;
+	/** An ISO date or timestamp; omitted when the source gave none. */
+	date?: string;
+	/** The systems it touched, comma-separated. */
 	system?: string;
-}
-
-export interface Person {
-	login: string;
-	name: string;
-	team: string;
-	prs: number;
-	reviews: number;
-}
-
-export interface SystemActivity {
-	name: string;
-	team: string;
-	changes: number;
-}
-
-export interface GraphCount {
-	type: NodeType;
-	count: number;
 }
 
 export interface MenuItem {

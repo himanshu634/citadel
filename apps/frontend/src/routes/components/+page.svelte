@@ -1,10 +1,11 @@
 <!-- Living gallery of the design system: every component and its states. Keep it in sync. -->
 <script lang="ts">
-	import { Inbox, Plus, Search, Trash2 } from '@lucide/svelte';
+	import { CloudOff, Inbox, LoaderCircle, Plus, Search, Trash2 } from '@lucide/svelte';
 	import {
 		ActivityBars,
 		Avatar,
 		Badge,
+		Banner,
 		Button,
 		Card,
 		CitedAnswer,
@@ -21,8 +22,59 @@
 		Tooltip,
 		WorkItemRow
 	} from '$lib';
-	import { featuredAnswer, recentWork } from '$lib/data/sample';
-	import { NODE_LABELS, type Company, type CompanyStatus, type NodeType } from '$lib/types';
+	import {
+		NODE_LABELS,
+		type CitedAnswer as Answer,
+		type Company,
+		type CompanyStatus,
+		type NodeType,
+		type WorkItem
+	} from '$lib/types';
+
+	// Example content for the gallery, taken from apps/backend/examples/synthetic_company.
+	const featuredAnswer: Answer = {
+		question: 'Why did we replace sessions with JWTs?',
+		parts: [
+			{
+				text: 'Alice replaced server-side sessions with short-lived JWTs because the session table was the main source of database load',
+				cite: [1, 2]
+			},
+			{ text: '. Refresh tokens stay server-side', cite: [3] },
+			{ text: '.' }
+		],
+		path: [
+			{ node: { uid: 'person:alice', type: 'person', label: 'alice' }, edge: 'AUTHORED' },
+			{ node: { uid: 'synthetic:pr:1', type: 'work-item', label: 'PR #1' }, edge: 'CLOSES' },
+			{ node: { uid: 'synthetic:issue:11', type: 'work-item', label: 'Issue #11' }, edge: 'TOUCHES' },
+			{ node: { uid: 'system:Auth', type: 'system', label: 'Auth' } }
+		],
+		sources: [
+			{
+				uid: 'synthetic:pr:1',
+				title: 'feat(auth): switch sessions to JWT',
+				meta: 'PR #1, merged 6 Feb by alice',
+				url: 'https://example.com/synthetic/app/pull/1'
+			},
+			{
+				uid: 'synthetic:issue:11',
+				title: 'Session table causes DB load spikes',
+				meta: 'Issue #11, closed 6 Feb'
+			},
+			{
+				uid: 'synthetic:doc:docs/auth-design.md',
+				title: 'Auth design',
+				meta: 'docs/auth-design.md'
+			}
+		]
+	};
+	const recentWork: WorkItem[] = [
+		{ uid: 'synthetic:issue:14', kind: 'issue', number: 14, title: 'Invoice emails sometimes sent twice', state: 'open', author: 'erin', date: '2026-09-10', system: 'Billing' },
+		{ uid: 'synthetic:pr:10', kind: 'pull_request', number: 10, title: 'refactor(auth): extract token service', state: 'merged', author: 'carol', date: '2026-09-01', system: 'Auth' },
+		{ uid: 'synthetic:slack:thread:eng-2026-07-15', kind: 'thread', title: '#eng: should billing own the checkout page?', state: 'open', author: 'bob', date: '2026-07-15' },
+		{ uid: 'synthetic:ticket:7', kind: 'ticket', number: 7, title: 'Ticket with no author, date or system', state: 'done' }
+	];
+	const longError =
+		'fetch failed for github:FalkorDB/FalkorDB: GraphQL returned 502 after 5 retries; the partial clone under data/raw/falkordb/github/clone was left in place and the next build resumes from its last completed run';
 
 	const company = (name: string, status: CompanyStatus = 'ready'): Company => ({
 		slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
@@ -169,6 +221,27 @@
 		</Card>
 	</div>
 
+	<Card title="Banner">
+		<p class="note">
+			The state of a whole view, with the one thing to do about it. The icon and the title say
+			the state, so colour is never the only signal. Long text wraps and never scrolls sideways.
+		</p>
+		<div class="stack">
+			<Banner tone="warning" title="Building, step 2 of 5" icon={LoaderCircle} spin>
+				{#snippet action()}<Button>See progress</Button>{/snippet}
+			</Banner>
+			<Banner tone="danger" title="Last build failed">
+				{longError}
+				{#snippet action()}<Button>See details</Button>{/snippet}
+			</Banner>
+			<Banner tone="neutral" title="Graph unreachable" icon={CloudOff}>
+				Citadel can't reach FalkorDB, so counts and answers are unavailable. Start it with
+				<code>make up</code>.
+			</Banner>
+			<Banner tone="danger" title="Config invalid">sources.0.repo: field required</Banner>
+		</div>
+	</Card>
+
 	<div class="two">
 		<Card title="Input">
 			<div class="stack">
@@ -275,6 +348,7 @@
 			<EntityRow name="Billing" type="system" meta="services/billing/**" value={8} valueLabel="changes" />
 			<WorkItemRow item={recentWork[0]} />
 			<WorkItemRow item={recentWork[1]} />
+			<WorkItemRow item={recentWork[2]} />
 			<WorkItemRow item={recentWork[3]} />
 		</Card>
 		<Card title="Stat and bars">

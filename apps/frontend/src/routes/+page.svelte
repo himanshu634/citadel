@@ -7,9 +7,12 @@ are none yet. Why: every company page lives under `/c/<slug>/`, so `/` only deci
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { getCompanies } from '$lib/companies.svelte';
-	import { EmptyState } from '$lib';
+	import { Plus } from '@lucide/svelte';
+	import { Button, EmptyState } from '$lib';
 
 	const companies = getCompanies();
+	// The /new route arrives with onboarding; the cast goes when its route type exists.
+	const newCompany = resolve('/new' as '/');
 
 	function lastUsed(): string | null {
 		try {
@@ -30,10 +33,18 @@ are none yet. Why: every company page lives under `/c/<slug>/`, so `/` only deci
 <svelte:head><title>Citadel</title></svelte:head>
 
 {#if companies.ready && companies.list.length === 0}
-	<EmptyState
-		title="Your first company brain will appear here"
-		description="Add a company and Citadel builds a graph of its engineering activity."
-	/>
+	<div class="first-run">
+		<h1>Company brains</h1>
+		<EmptyState
+			title="Your first company brain will appear here"
+			description="Add a company and Citadel builds a graph of its engineering activity."
+		>
+			{#snippet action()}
+				<Button variant="primary" href={newCompany}><Plus aria-hidden="true" />Add a company</Button>
+			{/snippet}
+		</EmptyState>
+		<p class="demo">Want demo data first? Run <code>make synthetic</code> to load a small made-up company.</p>
+	</div>
 {:else if !companies.ready && companies.error}
 	<EmptyState title="Can't reach the Citadel API" description={companies.error} />
 {:else}
@@ -41,6 +52,17 @@ are none yet. Why: every company page lives under `/c/<slug>/`, so `/` only deci
 {/if}
 
 <style>
+	.first-run {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-5);
+	}
+	h1 {
+		font-size: var(--text-2xl);
+		font-variation-settings: 'wdth' var(--width-brand);
+		font-weight: var(--weight-black);
+	}
+	.demo,
 	.loading {
 		color: var(--color-text-muted);
 	}

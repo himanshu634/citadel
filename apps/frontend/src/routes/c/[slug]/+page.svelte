@@ -1,134 +1,238 @@
+<!--
+@component
+One company's overview: the counts and lists from `GET /api/companies/<slug>/overview`, and a
+banner or empty state for every status the company can be in. Why: the status decides what exists
+to show. A building company has no graph yet, an invalid one has no config to read, an unreachable
+one cannot be asked, so only `ready` and `failed` fetch. The fetch is guarded (`companies.guard`)
+so a slow answer for the company you just left is never drawn under the one you are on.
+-->
 <script lang="ts">
-	import { ArrowUpRight, Network, RefreshCw } from '@lucide/svelte';
+	import { CloudOff, LoaderCircle, Network, RefreshCw } from '@lucide/svelte';
+	import { resolve } from '$app/paths';
 	import {
 		ActivityBars,
+		Banner,
 		Button,
 		Card,
-		CitedAnswer,
+		EmptyState,
 		EntityRow,
 		Stat,
 		Tabs,
 		Tooltip,
 		WorkItemRow
 	} from '$lib';
+	import { api, ApiError } from '$lib/api/client';
+	import { getCompanies } from '$lib/companies.svelte';
 	import {
-		company,
-		featuredAnswer,
-		graphCounts,
-		people,
-		recentWork,
-		suggestedQuestions,
-		systemActivity
-	} from '$lib/data/sample';
-	import { NODE_PLURALS } from '$lib/types';
+		buildingTitle,
+		peopleRows,
+		sinceLabel,
+		statCards,
+		systemBars,
+		viewOf,
+		workItemOf
+	} from '$lib/overview';
+	import type { Overview } from '$lib/types';
+
+	let { data } = $props();
+	const companies = getCompanies();
+
+	const company = $derived(companies.byslug(data.slug));
+	const view = $derived(company ? viewOf(company) : null);
+	// Primitives, so a status event that changes nothing here does not refetch.
+	const fetchable = $derived(view?.kind === 'data');
+	const syncedAt = $derived(company?.last_synced_at ?? null);
+	const buildPath = $derived(resolve(`/c/${data.slug}/build` as `/c/${string}`));
+
+	/** The last answer, whichever company it was for; only the current slug's is ever shown. */
+	let loaded = $state<Overview | null>(null);
+	let problem = $state<{ slug: string; message: string } | null>(null);
+	let attempt = $state(0);
+
+	const overview = $derived(loaded?.slug === data.slug ? loaded : null);
+	const error = $derived(problem?.slug === data.slug ? problem.message : null);
+	const loading = $derived(fetchable && !overview && !error);
+
+	function describe(e: unknown): string {
+		if (e instanceof ApiError) {
+			if (typeof e.detail === 'string') return e.detail;
+			if (e.status === 503) return "FalkorDB isn't answering. Start it with make up, then try again.";
+			if (e.status < 500) return `The API refused the request (${e.status}).`;
+		}
+		// A dev proxy answers 500 with no body when nothing listens behind it.
+		return "The Citadel API isn't answering. Start it with make api, then try again.";
+	}
+
+	$effect(() => {
+		const slug = data.slug;
+		void attempt;
+		void syncedAt; // a finished sync or build refreshes the numbers
+		if (!fetchable) return;
+		let live = true;
+		api.overview(slug).then(
+			(answer) => {
+				const mine = companies.guard(slug, answer);
+				if (!live || !mine) return;
+				loaded = mine;
+				problem = null;
+			},
+			(e) => {
+				if (live && slug === companies.current) problem = { slug, message: describe(e) };
+			}
+		);
+		return () => {
+			live = false;
+		};
+	});
+
+	function retry() {
+		problem = null;
+		attempt++;
+	}
+
+	const cards = $derived(overview ? statCards(overview.counts) : []);
+	const work = $derived((overview?.recent ?? []).map(workItemOf));
+	const empty = $derived(overview !== null && cards.length === 0 && work.length === 0);
+	const since = $derived(overview ? sinceLabel(overview.since) : null);
 
 	let workFilter = $state('all');
-	const openCount = $derived(recentWork.filter((w) => w.state === 'open').length);
+	const openCount = $derived(work.filter((w) => w.state === 'open').length);
 	const tabItems = $derived([
-		{ value: 'all', label: 'All', count: recentWork.length },
+		{ value: 'all', label: 'All', count: work.length },
 		{ value: 'open', label: 'Open', count: openCount },
-		{ value: 'merged', label: 'Merged', count: recentWork.length - openCount }
+		{ value: 'closed', label: 'Closed', count: work.length - openCount }
 	]);
-	const since = new Date(company.since).toLocaleDateString('en-GB', {
-		day: 'numeric',
-		month: 'short',
-		year: 'numeric'
-	});
 </script>
 
-<svelte:head><title>Overview, {company.name} | Citadel</title></svelte:head>
+<svelte:head><title>{company?.name ?? 'Overview'} | Citadel</title></svelte:head>
 
-<div class="page">
-	<header class="page-head">
-		<div>
-			<h1>{company.name}</h1>
-			<p>Engineering activity since {since}, in graph <code>brain_{company.slug}</code>.</p>
-		</div>
-		<div class="head-actions">
-			<Tooltip text="Pull new activity from every source">
-				{#snippet trigger(props)}
-					<Button {...props}><RefreshCw aria-hidden="true" />Sync now</Button>
-				{/snippet}
-			</Tooltip>
-			<Button variant="primary"><Network aria-hidden="true" />Open graph</Button>
-		</div>
-	</header>
+{#if company && view}
+	<div class="page">
+		<header class="page-head">
+			<div>
+				<h1>{company.name}</h1>
+				<p>
+					{#if since}Engineering activity since {since}, in graph{:else}Graph{/if}
+					<code>brain_{company.slug}</code>.
+				</p>
+			</div>
+			{#if view.kind === 'data'}
+				<div class="head-actions">
+					<Tooltip text="Pull new activity from every source">
+						{#snippet trigger(props)}
+							<Button {...props}><RefreshCw aria-hidden="true" />Sync now</Button>
+						{/snippet}
+					</Tooltip>
+					<Button variant="primary"><Network aria-hidden="true" />Open graph</Button>
+				</div>
+			{/if}
+		</header>
 
-	<section aria-labelledby="graph-heading" class="summary">
-		<h2 id="graph-heading" class="sr-only">Graph contents</h2>
-		<dl class="stats">
-			{#each graphCounts as g (g.type)}
-				<Stat type={g.type} label={NODE_PLURALS[g.type]} value={g.count} />
-			{/each}
-		</dl>
-	</section>
-
-	<div class="grid">
-		<Card title="Latest answer" description="Asked today by an agent on the identity team" class="answer-card">
-			{#snippet actions()}
-				<Button variant="ghost" size="sm">See all answers</Button>
-			{/snippet}
-			<CitedAnswer answer={featuredAnswer}>
-				{#snippet actions()}
-					<Button size="sm"><Network aria-hidden="true" />Show in graph</Button>
-				{/snippet}
-			</CitedAnswer>
-		</Card>
-
-		<Card title="Try asking" description="Questions this graph can answer with sources">
-			<ul class="suggestions">
-				{#each suggestedQuestions as q (q)}
-					<li>
-						<button type="button" class="suggestion">
-							<span>{q}</span>
-							<ArrowUpRight aria-hidden="true" />
-						</button>
-					</li>
-				{/each}
-			</ul>
-		</Card>
-
-		<Card title="Recent work" description="Pull requests, issues and threads" class="work-card">
-			<Tabs items={tabItems} bind:value={workFilter} label="Filter work items">
-				{#snippet panel(filter)}
-					{@const list =
-						filter === 'all'
-							? recentWork
-							: recentWork.filter((w) =>
-									filter === 'open' ? w.state === 'open' : w.state !== 'open'
-								)}
-					<ul class="list">
-						{#each list as item (item.uid)}
-							<li><WorkItemRow {item} /></li>
-						{/each}
-					</ul>
-				{/snippet}
-			</Tabs>
-		</Card>
-
-		<Card title="Changes by system" description="Commits touching each system since {since}">
-			<ActivityBars
-				unit="changes"
-				items={systemActivity.map((s) => ({ label: s.name, value: s.changes, meta: s.team }))}
+		{#if view.kind === 'invalid'}
+			<Banner tone="danger" title="Config invalid">{view.error}</Banner>
+		{:else if view.kind === 'unreachable'}
+			<Banner tone="neutral" title="Graph unreachable" icon={CloudOff}>
+				Citadel can't reach FalkorDB, so counts and answers are unavailable. Start it with
+				<code>make up</code>.
+			</Banner>
+		{:else if view.kind === 'waiting'}
+			<Banner
+				tone="warning"
+				title={buildingTitle(company)}
+				icon={company.status === 'building' ? LoaderCircle : undefined}
+				spin={company.status === 'building'}
+			>
+				{#snippet action()}<Button href={buildPath}>See progress</Button>{/snippet}
+			</Banner>
+			<EmptyState
+				title="Answers appear when the first build finishes"
+				description="Counts, recent work and people show up here once Citadel has loaded {company.name}'s activity into the graph."
 			/>
-		</Card>
+		{:else}
+			{#if view.failure}
+				<Banner tone="danger" title="Last build failed">
+					{view.failure}
+					{#snippet action()}<Button href={buildPath}>See details</Button>{/snippet}
+				</Banner>
+			{/if}
 
-		<Card title="People" description="Authors and reviewers in this graph">
-			<ul class="list people">
-				{#each people as p, i (p.login)}
-					<li>
-						<EntityRow
-							name={p.name}
-							type="person"
-							meta="{p.team}, {p.prs} PRs, {p.reviews} reviews"
-							selected={i === 0}
-						/>
-					</li>
-				{/each}
-			</ul>
-		</Card>
+			{#if error}
+				<EmptyState title="Can't read {company.name}'s graph" description={error}>
+					{#snippet action()}<Button onclick={retry}>Try again</Button>{/snippet}
+				</EmptyState>
+			{:else if loading}
+				<div class="skeleton" role="status" aria-busy="true">
+					<span class="sr-only">Loading overview</span>
+					<div class="block summary-skeleton"></div>
+					<div class="skeleton-grid">
+						<div class="block tall"></div>
+						<div class="block tall"></div>
+					</div>
+				</div>
+			{:else if empty}
+				<EmptyState
+					title="Nothing in this graph yet"
+					description="No work items or changes are loaded. Run a build to read {company.name}'s sources."
+				>
+					{#snippet action()}<Button href={buildPath}>See build</Button>{/snippet}
+				</EmptyState>
+			{:else if overview}
+				<section aria-labelledby="graph-heading" class="summary">
+					<h2 id="graph-heading" class="sr-only">Graph contents</h2>
+					<dl class="stats">
+						{#each cards as c (c.type)}
+							<Stat type={c.type} label={c.label} value={c.value} />
+						{/each}
+					</dl>
+				</section>
+
+				<div class="grid">
+					<Card title="Recent work" description="Pull requests, issues and threads" class="work-card">
+						{#if work.length === 0}
+							<p class="muted">No work items in this window.</p>
+						{:else}
+							<Tabs items={tabItems} bind:value={workFilter} label="Filter work items">
+								{#snippet panel(filter)}
+									{@const list =
+										filter === 'all'
+											? work
+											: work.filter((w) => (filter === 'open') === (w.state === 'open'))}
+									<ul class="list">
+										{#each list as item (item.uid)}
+											<li><WorkItemRow {item} /></li>
+										{/each}
+									</ul>
+								{/snippet}
+							</Tabs>
+						{/if}
+					</Card>
+
+					<div class="side-col">
+						<Card title="Changes by system" description="Commits touching each system since {since}">
+							{#if overview.systems.length === 0}
+								<p class="muted">No systems yet.</p>
+							{:else}
+								<ActivityBars unit="changes" items={systemBars(overview.systems)} />
+							{/if}
+						</Card>
+
+						<Card title="People" description="Authors and reviewers in this graph">
+							{#if overview.people.length === 0}
+								<p class="muted">No people yet.</p>
+							{:else}
+								<ul class="list people">
+									{#each peopleRows(overview.people) as p (p.key)}
+										<li><EntityRow name={p.name} type="person" meta={p.meta} /></li>
+									{/each}
+								</ul>
+							{/if}
+						</Card>
+					</div>
+				</div>
+			{/if}
+		{/if}
 	</div>
-</div>
+{/if}
 
 <style>
 	.page {
@@ -147,6 +251,7 @@
 		font-size: var(--text-2xl);
 		font-variation-settings: 'wdth' var(--width-brand);
 		font-weight: var(--weight-black);
+		overflow-wrap: anywhere;
 	}
 	.page-head p {
 		margin-top: var(--space-1);
@@ -172,39 +277,22 @@
 	.grid {
 		display: grid;
 		grid-template-columns: repeat(12, minmax(0, 1fr));
-		grid-auto-flow: row dense;
 		gap: var(--space-4);
 		align-items: start;
-	}
-	.grid > :global(*) {
-		grid-column: span 4;
-	}
-	.grid > :global(.answer-card) {
-		grid-column: span 8;
-		grid-row: span 2;
 	}
 	.grid > :global(.work-card) {
 		grid-column: span 8;
 	}
-	.grid > :global(:last-child) {
+	.side-col {
 		grid-column: span 4;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-4);
+		min-width: 0;
 	}
 	@media (max-width: 1100px) {
-		.grid > :global(*),
-		.grid > :global(.answer-card),
 		.grid > :global(.work-card),
-		.grid > :global(:last-child) {
-			grid-column: span 6;
-			grid-row: auto;
-		}
-		.grid > :global(.answer-card),
-		.grid > :global(.work-card) {
-			grid-column: 1 / -1;
-		}
-	}
-	@media (max-width: 720px) {
-		.grid > :global(*),
-		.grid > :global(:last-child) {
+		.side-col {
 			grid-column: 1 / -1;
 		}
 	}
@@ -219,36 +307,32 @@
 	.people > li + li {
 		border-top: 0;
 	}
-	.suggestions {
+	.muted {
+		color: var(--color-text-muted);
+	}
+	.skeleton {
 		display: flex;
 		flex-direction: column;
-		gap: var(--space-2);
-		margin: 0;
-		padding: 0;
-		list-style: none;
+		gap: var(--space-4);
 	}
-	.suggestion {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: var(--space-3);
-		width: 100%;
-		min-height: var(--control-lg);
-		padding: var(--space-2) var(--space-3);
-		border: var(--border-hair) solid var(--color-line);
+	.block {
+		background: var(--color-surface-sunken);
 		border-radius: var(--radius-md);
-		background: var(--color-surface);
-		text-align: left;
-		cursor: pointer;
 	}
-	.suggestion:hover {
-		border-color: var(--color-accent);
-		color: var(--color-accent);
+	.summary-skeleton {
+		height: 6rem;
 	}
-	.suggestion :global(svg) {
-		width: 1rem;
-		height: 1rem;
-		flex: none;
-		color: var(--color-text-muted);
+	.skeleton-grid {
+		display: grid;
+		grid-template-columns: 2fr 1fr;
+		gap: var(--space-4);
+	}
+	.tall {
+		height: 16rem;
+	}
+	@media (max-width: 720px) {
+		.skeleton-grid {
+			grid-template-columns: 1fr;
+		}
 	}
 </style>

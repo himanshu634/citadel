@@ -1,6 +1,7 @@
 // Public surface of the design system. Import components from here: `import { Button } from '$lib'`.
 export { default as Avatar } from './components/ui/Avatar.svelte';
 export { default as Badge } from './components/ui/Badge.svelte';
+export { default as Banner } from './components/ui/Banner.svelte';
 export { default as Button } from './components/ui/Button.svelte';
 export { default as Card } from './components/ui/Card.svelte';
 export { default as Dialog } from './components/ui/Dialog.svelte';
