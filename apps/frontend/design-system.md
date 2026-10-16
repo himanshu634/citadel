@@ -187,7 +187,12 @@ Rules:
   there is no splitter.
 - **The sidebar folds** to its icons (`--sidebar-folded`, 56px) from the top bar's fold button or
   the `[` key, and the choice is kept (`citadel-sidebar`). Folded items are named by tooltips and
-  for screen readers. Below 900px the drawer is never folded. The Ask page, like the Graph page,
+  for screen readers. The fold animates: the sidebar column's width eases over `--duration-base`,
+  the labels fade out at once (`--duration-fast`) and fade back in once there is room, folded
+  headings turn into the hairlines between groups, and the fold button's chevron turns over. Open
+  and folded are one markup, so no icon or row moves. A page load never animates: a kept fold is
+  drawn folded. Below 900px the drawer is never folded; it slides in and out with a fading scrim.
+  The Ask page, like the Graph page,
   fills the height under the top bar (a bleed page).
 - **Past chats** (`ChatList`) are a column left of the lanes, with New chat at its top; below
   1400px they sit above the lanes as a short scrolling strip. "Hide past chats" folds the column
@@ -266,6 +271,10 @@ Adding a component:
   `prefers-reduced-motion`. `--duration-slow` (320ms) is for motion that shows where something
   came from in a walk: a link drawing on from its ends and a node gliding to its new place (with
   its links). The scroll to a new question is the browser's native smooth scroll, not a token.
+- Micro-interactions in the frame are `--duration-fast`: hover fills and colours fade, pressed
+  controls give a little (`scale(0.97)` for sidebar items, `0.94` for rail tiles, `0.92` for the
+  fold button), tooltips fade in a few pixels from their trigger, and the drawer's scrim fades in.
+  The press is dropped under reduced motion.
 
 ## 9. Writing
 
