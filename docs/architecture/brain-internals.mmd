@@ -1,0 +1,47 @@
+graph TB
+  CFG["companies/slug.yaml<br/>path rules, bots, window,<br/>data_permission"]
+
+  subgraph INGEST["Ingest: one-way pipeline"]
+    direction LR
+    AD["Adapters<br/>GitHub · Linear · JSONL · docs<br/>fetch into raw cache"]
+    CAN["Canonical records<br/>stable uids, no emails"]
+    NORM["Normalize<br/>path to System, bots,<br/>aliases, activity window"]
+    LOAD["Loader<br/>UNWIND + MERGE on uid<br/>named load queries"]
+    AD --> CAN --> NORM --> LOAD
+  end
+
+  subgraph GRAPH["FalkorDB"]
+    G[("brain_slug<br/>Person · Team · System<br/>Change · WorkItem · Document<br/>Decision · Claim (curator)")]
+    IDX["Indexes<br/>range · full-text · vector"]
+    AG[("agent_slug<br/>chat checkpoints")]
+    G --- IDX
+  end
+
+  subgraph READ["Read side"]
+    TOOLS["Named tools<br/>16 Cypher files, typed params,<br/>rows carry uids + urls"]
+    LOOP["Brain agent loop<br/>Claude picks tools,<br/>never writes Cypher"]
+    CHECK{"Grounding check<br/>cites only uids<br/>it has seen"}
+  end
+
+  OUT["Answer<br/>sources + graph path"]
+  TRACE["Traces<br/>no-answer, zero-source,<br/>thumbs down"]
+  API["HTTP API · MCP server · CLI"]
+
+  CFG -.-> NORM
+  LOAD -->|"idempotent writes"| G
+  G --> TOOLS
+  TOOLS --> LOOP
+  LOOP --> CHECK
+  CHECK -->|pass| OUT
+  CHECK -->|"reject, retry"| LOOP
+  LOOP --- AG
+  OUT --> TRACE
+  API --> TOOLS
+  API --> LOOP
+
+  classDef engine fill:#e0f2fe,stroke:#0369a1,stroke-width:2px
+  classDef thin fill:#f8fafc,stroke:#94a3b8
+  classDef gate fill:#fff7ed,stroke:#d97706,stroke-width:2px
+  class AD,CAN,NORM,LOAD,G,IDX,TOOLS engine
+  class CHECK gate
+  class CFG,AG,LOOP,OUT,TRACE,API thin

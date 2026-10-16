@@ -1,89 +1,119 @@
 # Company Brain
 
-Every engineering team keeps asking the same three questions: *who knows this system?*, *why
-was this decided, and where?*, and *what breaks if we change it?* The answers already exist,
-scattered across commits, pull requests, reviews, issues, CODEOWNERS and docs. Company Brain
-turns a company's public engineering activity into **one FalkorDB graph** (people, teams, code
-areas, changes, work items, documents) and answers those questions with **deterministic,
-named graph queries**. Every answer comes with its sources (URLs) and the graph path behind it.
-Any company can be added with a config file. The first one is FalkorDB itself.
+**A living memory of how your company builds software, one that agents can query and that
+repairs itself.**
 
 Entry for *Graph Hacks: Context for AI Agents* (FalkorDB × WeMakeDevs, Oct 15–18 2026).
 Tracks: **Company Brain** and **Agent Memory & Coordination**.
 
-## Architecture
+## The problem
 
-Company Brain is three packages. **The brain** is a dedicated engine that turns sources into one
-FalkorDB graph per company and answers through named tools. **Agents** are its first user, and
-reach the graph only through those named tools. **Backend** is the HTTP layer for the UI.
+Every team keeps asking the same questions: *who knows this system? why was this decided? what
+breaks if we change it?* The answers already exist, scattered across commits, pull requests,
+reviews, tickets and docs. Nobody can hold all of it in their head, and AI assistants without
+that context guess.
 
-![Company Brain architecture](docs/architecture/architecture.svg)
+Company Brain puts it all in **one graph per company** and answers from it, with the sources and
+the graph path behind every answer. When the graph does not know something, it does not guess:
+the **Brain Curator** finds out, checks the answer, and writes it back. Each question it cannot
+answer makes the brain better for the next person.
 
-The editable source is `docs/architecture/architecture.excalidraw` (open it at excalidraw.com,
-File, Open). The extractor stage in the diagram is planned, not built.
+## What we are building
 
-- **FalkorDB is the only store.** Each company is an isolated graph, `brain_<slug>`. Raw API
-  responses are cached on disk as ingestion input; nothing reads them at runtime.
-- **No LLM-generated Cypher.** Every query the product runs is a `.cypher` file with a header
-  (purpose, params, returns, example). Python loads them by name.
-- **Expertise is derived, not stored**: Person → Change → System, weighted by recency, computed
-  at query time, so it is current as soon as new commits land.
-- **Company-agnostic.** A new company is a YAML file. A new kind of source is one adapter
-  module plus one registry line, with no change to the loader, schema or queries.
-- **Only public, synthetic or own data.** Each config declares `data_permission`. Private
-  GitHub repos are refused unless it is `own`. No email addresses are stored anywhere.
+| Part | What it does | Status |
+|---|---|---|
+| **The Brain** | One FalkorDB graph per company (`brain_<slug>`), built from GitHub, Linear, docs and chat exports: people, teams, systems, changes, work items, documents | Built |
+| **Named graph tools** | 16 read queries, each a reviewed `.cypher` file with typed params. Agents pick a tool and fill its params; no LLM ever writes Cypher | Built |
+| **Ask** | A Claude agent that answers from the tools and may cite only the nodes it has seen. Every turn is traced (no-answer, zero-source, thumbs) | Built |
+| **Role agents** | PM, Developer, QA, DevOps, Reviewer, Risk, Builder and Critic, working a shared task board inside the graph. They never message each other: the graph is the only channel ([spec](docs/agents.md)) | Built offline, FalkorDB work store next |
+| **Brain Curator** | Turns unanswered or stale questions into gaps, consults the role agents, verifies their claims, gets a human yes, and writes the new knowledge into the brain | Planned |
+| **MCP server** | The same named tools for any outside agent (Claude, an IDE, a Slack bot), read-only, plus one gated `propose_claim` write | Planned |
+| **Designer agent** | A design-review voice for the curator to consult | Planned |
+
+## How it works
+
+![Company Brain overview: people, the brain, the curator and the role agents](docs/architecture/overview.svg)
+
+- **People ask, the brain answers.** A CEO or tech lead asks in the app; any other AI agent asks
+  over MCP. Both go through the same named tools and get an answer with sources and a graph path.
+- **The curator takes over when the brain cannot answer.** The answer may be missing, have no
+  source, get a thumbs down, or contradict a newer fact. The curator works out who should know,
+  posts consult tasks, and collects the replies.
+- **Agents talk through the graph.** Each role agent reads its queue on the shared board, answers
+  with claims that cite real nodes, and writes them back. No agent calls another directly, so
+  every exchange is stored, can be audited and can be replayed.
+- **Only verified knowledge reaches the brain.** The curator checks the evidence and asks the lead
+  to confirm. It then writes the fact as its own dated node, linked to its evidence.
+
+## Inside the brain
+
+![Ingest pipeline, FalkorDB graphs and the read side with the grounding check](docs/architecture/brain-internals.svg)
+
+- **Ingest is a one-way pipeline.** Adapters fetch into a raw cache, records become canonical
+  (stable uids, no emails), company rules from `companies/<slug>.yaml` are applied, and the loader
+  `MERGE`s everything on uid. Loads are idempotent, and a re-ingest makes no API calls.
+- **FalkorDB is the only store.** Each company is an isolated graph `brain_<slug>`, with range,
+  full-text and vector indexes. Chat state is checkpointed in `agent_<slug>`.
+- **The read side is deterministic.** Claude chooses which named tool to call. The query is always
+  one we wrote and reviewed. A grounding check rejects any answer that cites a node the agent did
+  not see.
+- **Expertise is derived, not stored.** It is computed from Person → Change → System, weighted by
+  recency, at query time, so it is current the moment new commits land.
+
+## The self-healing loop
+
+![The self-healing loop: gap, curator, consult, verify, approve, write, re-ask](docs/architecture/self-healing-loop.svg)
+
+The plan for the curator, based on how Graphiti, Mem0, Wikidata and others keep a graph honest:
+
+1. **Detect gaps** from live traffic (no answer, zero sources, thumbs down) and from a sweeper
+   that looks for stale owners, expired facts and conflicting decisions.
+2. **Consult the right people.** `experts_for_system` names who knows the area, and the matching
+   role agents get consult tasks on the board.
+3. **Verify before writing.** Every claim must cite uids that really exist. The Critic labels each
+   claim as superseding, contradicting or unrelated to what the brain already holds. A lead
+   approves the result.
+4. **Never delete, invalidate.** New knowledge lives in its own `Claim` / `Decision` nodes, so a
+   re-ingest never overwrites it. An outdated fact gets a `valid_to` date and stays for history.
+   Rejected claims are kept with the reason.
+5. **Prove the fix.** The original question is asked again and becomes an eval case, so the
+   brain cannot quietly forget it.
+
+The diagrams are Excalidraw scenes: open the `.excalidraw` files in
+[docs/architecture/](docs/architecture/) at [excalidraw.com](https://excalidraw.com) (File → Open)
+to edit them, then export SVG over the old one. The `.mmd` files are the Mermaid sources the
+scenes were first generated from.
 
 ## Quick start
 
-Needs Docker, [uv](https://docs.astral.sh/uv/), and a GitHub token (`GITHUB_TOKEN` in `.env`
-or a logged-in `gh` CLI) for GitHub sources.
+Full setup, prerequisites and troubleshooting: **[DEVELOPMENT.md](DEVELOPMENT.md)**.
 
 ```bash
-make setup                      # uv sync + .env from .env.example
-make up                         # FalkorDB on :6379, Browser UI on http://localhost:3000
-make schema                     # indexes on brain_falkordb (SLUG defaults to falkordb)
-make sync                       # fetch FalkorDB/FalkorDB since 2026-04-15 (~3 min first time) + ingest
-make query TOOL=experts_for_system P="system=CI"
-```
-
-No token? The offline demo company works with no network at all:
-
-```bash
-make synthetic                  # brain_synthetic: 6 people, 2 teams, 4 systems, 15 work items
+make setup        # uv sync + .env from .env.example
+make up           # FalkorDB on :6379, Browser UI on http://localhost:3000
+make synthetic    # offline demo company, no tokens needed
 make query SLUG=synthetic TOOL=owners_vs_experts
-make query SLUG=synthetic TOOL=path_between P="from_uid=person:erin to_uid=system:Auth"
+make dev          # API on :8000 + app on http://localhost:5173
 ```
 
-`make tools` lists every tool and its parameters; `JSON=1` prints raw rows. The CLI underneath
-is `uv run brain query <slug> <tool> key=value ...` (or `--param key=value`).
-
-Ask the Claude agent (a LangGraph loop over these same tools, conversation state checkpointed in
-FalkorDB graph `agent_<slug>`; on branch `feat/claude-agent` until it is merged):
-
-```bash
-make chat SLUG=synthetic OFFLINE=1          # one scripted turn, no API key: proves router, tools, checkpointer
-make ask SLUG=synthetic Q="Who should review a change to Billing, and why?"   # needs ANTHROPIC_API_KEY
-make chat SLUG=synthetic                    # multi-turn on one thread
-```
-
-What `brain_falkordb` held after the first sync (window from 2026-04-15): 750 PRs, 994 issues,
-259 commits, 190 people, 71 systems, 16 docs, 2,733 comment chunks.
+With a GitHub token, `make sync` builds `brain_falkordb` from the FalkorDB repo itself. With
+`ANTHROPIC_API_KEY` set, `make ask SLUG=synthetic Q="who knows Auth?"` gets an answer from Claude.
 
 ## The graph
 
-Full model, with the Mermaid diagram: **[docs/graph-model.md](docs/graph-model.md)**.
+Full model: **[docs/graph-model.md](docs/graph-model.md)**.
 
 Nodes: `Person`, `Team`, `System`, `Change`, `WorkItem` (PRs, issues, tickets, threads),
-`Document`, `Chunk`, `Decision` and `Episode` (defined, written by the agents later), `SyncState`.
+`Document`, `Chunk`, `Decision` and `Episode` (written by the agents), `SyncState`.
 Relationships: `AUTHORED`, `REVIEWED`, `COMMENTED_ON`, `MEMBER_OF`, `OWNS`, `TOUCHES`,
-`PART_OF`, `CLOSES`, `MENTIONS`, `FROM`.
+`PART_OF`, `CLOSES`, `MENTIONS`, `BLOCKS`, `ASSIGNED_TO`, `FROM`.
 
 ## Every Cypher query
 
 All under [`apps/brain/queries/`](apps/brain/queries/). Each file starts with a header:
 purpose, parameters, returns, example.
 
-### Tools (read side: CLI, agents, UI)
+### Tools (read side: CLI, agents, UI, MCP)
 
 | File | Purpose |
 |---|---|
@@ -95,6 +125,9 @@ purpose, parameters, returns, example.
 | `tools/related_work_items.cypher` | Full-text search over PRs/issues/threads, expanded to authors, systems and closing links |
 | `tools/related_documents.cypher` | Full-text search over docs/ADRs, with the systems and work items they mention |
 | `tools/person_profile.cypher` | One person's teams, systems, recent PRs, reviews and declared ownership |
+| `tools/open_work_for.cypher` | A person's open tickets |
+| `tools/blocked_on.cypher` | What a person's tickets are waiting on |
+| `tools/waiting_on.cypher` | Other people's tickets blocked by this person |
 | `tools/get_entity.cypher` | Open any node by uid: fields, text and direct neighbours |
 | `tools/list_systems.cypher` | All systems with change counts, people and owners |
 | `tools/recent_work_items.cypher` | Most recent PRs, issues and threads, newest first (dashboard overview) |
@@ -115,18 +148,16 @@ purpose, parameters, returns, example.
 | File | Purpose |
 |---|---|
 | `load/person.cypher`, `load/team.cypher`, `load/system.cypher` | Upsert people, teams, systems (MERGE on uid, then SET) |
-| `load/work_item.cypher`, `load/document.cypher`, `load/change.cypher` | Upsert PRs/issues/threads, documents, commits |
-| `load/authored_change.cypher`, `load/authored_work_item.cypher`, `load/authored_document.cypher` | `(Person)-[:AUTHORED]->(...)`, one file per target label |
+| `load/work_item.cypher`, `load/document.cypher`, `load/change.cypher` | Upsert PRs/issues/tickets/threads, documents, commits |
+| `load/authored_*.cypher` | `(Person)-[:AUTHORED]->(...)`, one file per target label |
 | `load/touches.cypher` | `(Change)-[:TOUCHES {files}]->(System)` |
 | `load/reviewed.cypher` | `(Person)-[:REVIEWED {state}]->(WorkItem)`, latest review wins |
-| `load/comment_chunk.cypher` | Comment text as a `Chunk` FROM its work item |
-| `load/commented_on.cypher` | `(Person)-[:COMMENTED_ON {count, last_at}]->(WorkItem)`, count recomputed from chunks |
+| `load/comment_chunk.cypher`, `load/commented_on.cypher` | Comment text as a `Chunk` FROM its work item; `COMMENTED_ON {count, last_at}` |
 | `load/owns_team.cypher`, `load/owns_person.cypher` | Declared ownership `OWNS {pattern}` |
-| `load/link_closes.cypher` | `(WorkItem)-[:CLOSES]->(WorkItem)` |
-| `load/link_part_of.cypher` | `(Change)-[:PART_OF]->(WorkItem)` |
-| `load/link_member_of.cypher` | `(Person)-[:MEMBER_OF]->(Team)` |
-| `load/link_mentions_workitem_workitem.cypher`, `load/link_mentions_workitem_system.cypher`, `load/link_mentions_document_workitem.cypher`, `load/link_mentions_document_system.cypher` | `MENTIONS`, one file per allowed label pair |
-| `load/sync_state_set.cypher`, `load/sync_state_get.cypher` | Incremental-ingest cursor per configured source |
+| `load/assigned_to.cypher` | Ticket assignee, replaced on every load |
+| `load/link_blocks.cypher`, `load/prune_blocks.cypher` | `BLOCKS` between tickets; edges a source no longer reports are pruned |
+| `load/link_*.cypher` | `CLOSES`, `PART_OF`, `MEMBER_OF` and `MENTIONS` (one file per allowed label pair, plus by-url) |
+| `load/sync_state_*.cypher` | Incremental-ingest cursor per configured source |
 
 Relationship types and labels cannot be Cypher parameters, which is why each allowed
 combination has its own small file rather than one query built from strings.
@@ -134,11 +165,30 @@ combination has its own small file rather than one query built from strings.
 ## Adding a company
 
 **[docs/adding-a-company.md](docs/adding-a-company.md)**: (a) a public GitHub repo (copy the
-config, edit the path rules, sync), (b) Slack/Jira/Linear exports via
-[canonical JSONL](docs/canonical-format.md) or a new adapter (skeleton in
-`apps/brain/brain/adapters/_template.py`), (c) a synthetic demo company.
+config, edit the path rules, sync), (b) Linear, or Slack/Jira exports via
+[canonical JSONL](docs/canonical-format.md), or a new adapter (skeleton in
+`apps/brain/brain/adapters/_template.py`), (c) a synthetic demo company. In the app, the **+**
+on the company rail adds any public GitHub repo.
+
+## Ground rules
+
+- **Only public, synthetic or own data.** Each config declares `data_permission`. Private
+  GitHub repos are refused unless it is `own`. No email addresses are stored anywhere.
+- **Company-agnostic.** A new company is a YAML file. A new kind of source is one adapter module
+  plus one registry line, with no change to the loader, schema or queries.
+- **Every answer is grounded.** Cited uids must come from this run's tool results; anything else
+  is sent back to the agent as an error.
 
 ## Repository
+
+Company Brain is three packages. **The brain** is a dedicated engine that turns sources into one
+FalkorDB graph per company and answers through named tools. **Agents** are its first user, and
+reach the graph only through those named tools. **Backend** is the HTTP layer for the UI.
+
+![The three packages: brain, agents and backend](docs/architecture/architecture.svg)
+
+The editable source is `docs/architecture/architecture.excalidraw`. The extractor stage in this
+diagram is planned, not built.
 
 ```
 apps/brain/       Python 3.12 (uv): the engine. CLI: brain
@@ -154,19 +204,14 @@ apps/agents/      Python: agents that use the brain through named tools. CLI: ag
 apps/backend/     Python: HTTP for the UI. CLI: backend
   backend/          api/ (FastAPI), jobs, registry, onboard, config_diff
   tests/            pytest
-apps/frontend/    SvelteKit UI and design system (make fe-install, make fe-dev)
+apps/frontend/    SvelteKit app and design system
 companies/        one YAML per company -> graph brain_<slug>
-docs/             graph model, canonical format, adding a company, architecture diagram
-data/             gitignored: raw API caches and inbox folders
+docs/             graph model, agents spec, architecture diagrams, adding a company
+data/             gitignored: raw API caches, build history, traces
 ```
 
 Dependencies run one way: backend, then agents, then brain (checked by
-`apps/brain/tests/test_package_boundaries.py`).
-
-`make test` runs the suites of all three packages (graph tests are skipped when FalkorDB is not
-running), `make lint` runs ruff. The same code runs against FalkorDB Cloud: set
-`FALKORDB_HOST/PORT/USERNAME/PASSWORD` (and `FALKORDB_TLS=true` when the instance uses TLS) in
-`.env`.
+`apps/brain/tests/test_package_boundaries.py`). `make test` runs the suites of all three packages.
 
 ## AI usage
 
