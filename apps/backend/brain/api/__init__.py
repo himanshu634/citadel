@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from brain.api import checks, companies
 
@@ -21,6 +22,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=[DEV_ORIGIN], allow_methods=["*"])
 
     @app.exception_handler(RedisConnectionError)
+    @app.exception_handler(RedisTimeoutError)  # a host that does not answer (connect timeout)
     async def graph_down(_: Request, exc: RedisConnectionError) -> JSONResponse:
         return JSONResponse(status_code=503, content={"detail": "FalkorDB is not reachable"})
 

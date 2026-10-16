@@ -7,6 +7,7 @@ from brain import config, db, loader
 from brain.api.companies import status_of
 from conftest import needs_graph
 from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from .conftest import write
 
@@ -134,11 +135,23 @@ def test_create_non_object_body_is_422(client, api_root):
     assert client.post("/api/companies", json=["not", "an", "object"]).status_code == 422
 
 
-def test_create_succeeds_when_the_graph_is_down(client, api_root, monkeypatch):
+@pytest.mark.parametrize("error", [RedisConnectionError, RedisTimeoutError])
+def test_create_succeeds_when_the_graph_is_down(client, api_root, monkeypatch, error):
     def down(slug):
-        raise RedisConnectionError("refused")
+        raise error("unreachable")
 
     monkeypatch.setattr("brain.api.companies.status_of", down)
     r = client.post("/api/companies", json=VALID_DRAFT)
     assert r.status_code == 201 and r.json()["status"] == "empty"
     assert config.load_company("acme_labs").name == "Acme Labs"
+
+
+def test_graph_connect_timeout_is_503(client, api_root, monkeypatch):
+    write(api_root, "acme_labs", name="Acme Labs")
+
+    def timeout(slug):
+        raise RedisTimeoutError("Timeout connecting to server")
+
+    monkeypatch.setattr("brain.api.companies.status_of", timeout)
+    r = client.get("/api/companies")
+    assert r.status_code == 503 and r.json() == {"detail": "FalkorDB is not reachable"}

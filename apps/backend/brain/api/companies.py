@@ -12,6 +12,7 @@ import yaml
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from brain import db, registry
 from brain.api.deps import company_slug
@@ -83,7 +84,8 @@ def create_company(draft: Annotated[dict, Body()]):
         raise HTTPException(status_code=409, detail=detail) from exc
     try:
         out = _out(cfg)
-    except RedisConnectionError:  # the file is saved; onboarding must not depend on the graph
+    except (RedisConnectionError, RedisTimeoutError):
+        # The file is saved; onboarding must not depend on the graph.
         out = CompanyOut(
             slug=cfg.slug, name=cfg.name, data_permission=cfg.data_permission, status="empty"
         )
