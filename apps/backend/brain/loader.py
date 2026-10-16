@@ -289,15 +289,17 @@ def _load_ownership(slug: str, owns: list[Ownership], rep: LoadReport) -> None:
 # --- sync state -------------------------------------------------------------------------------
 
 
-def get_cursor(slug: str, key: str) -> datetime | None:
+def get_cursor(slug: str, key: str, window_since: str) -> datetime | None:
+    """The source's ingest cursor, or None (= load everything) if there is none yet or the
+    config window changed since the last ingest (widening it must pull in older records)."""
     rows = db.run(slug, "load/sync_state_get", {"uid": f"sync:{key}"}, read_only=True)
-    if not rows or not rows[0]["cursor"]:
+    if not rows or not rows[0]["cursor"] or rows[0]["window_since"] != window_since:
         return None
     return datetime.fromisoformat(rows[0]["cursor"].replace("Z", "+00:00"))
 
 
 def set_sync_state(
-    slug: str, adapter: str, key: str, cursor: datetime | None, records: int
+    slug: str, adapter: str, key: str, cursor: datetime | None, window_since: str, records: int
 ) -> None:
     db.run(
         slug,
@@ -308,6 +310,7 @@ def set_sync_state(
             "adapter": adapter,
             "key": key,
             "cursor": iso(cursor),
+            "window_since": window_since,
             "last_run": iso(datetime.now(UTC)),
             "records": records,
         },

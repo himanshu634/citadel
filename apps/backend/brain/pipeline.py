@@ -6,7 +6,8 @@ in the registry, so a new source type needs no change here.
 Incremental by default: each source has a SyncState node holding a cursor (the latest record
 timestamp loaded). Records older than the cursor are skipped; records with no timestamp
 (people, teams, ownership, links) are always loaded, which is cheap and keeps edges complete.
-`full=True` ignores the cursor.
+`full=True` ignores the cursor, and so does a changed `window.since` (widening the window must
+pull in records older than the cursor).
 """
 
 from __future__ import annotations
@@ -54,6 +55,7 @@ def fetch(slug: str, only: str | None = None) -> list[str]:
 def ingest(slug: str, full: bool = False, only: str | None = None) -> IngestReport:
     """Transform step: cached/local data -> canonical records -> graph brain_<slug>."""
     cfg = load_company(slug)
+    window_since = cfg.window.since.isoformat()
     report = IngestReport()
     for source, adapter in _selected(cfg, only):
         if adapter is None:
@@ -71,7 +73,7 @@ def ingest(slug: str, full: bool = False, only: str | None = None) -> IngestRepo
             continue
         result.read = len(records)
 
-        cursor = None if full else loader.get_cursor(slug, key)
+        cursor = None if full else loader.get_cursor(slug, key, window_since)
         if cursor is not None:
             records = [r for r in records if (t := r.changed_at()) is None or t >= cursor]
         records = list(normalize(records, cfg))
@@ -79,5 +81,5 @@ def ingest(slug: str, full: bool = False, only: str | None = None) -> IngestRepo
 
         report.load.merge(loader.load(slug, records))
         latest = max((t for r in records if (t := r.changed_at())), default=cursor)
-        loader.set_sync_state(slug, adapter.name, key, latest, result.loaded)
+        loader.set_sync_state(slug, adapter.name, key, latest, window_since, result.loaded)
     return report
