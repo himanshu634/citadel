@@ -27,6 +27,17 @@ const EXAMPLES = [
 	'Where do the declared owners differ from who does the work?'
 ];
 
+export const NOT_RUN = 'Not run: the answer ended before this call.';
+
+/** A turn is over: any call still shown as running never will run. */
+function endSteps(turn: Turn): void {
+	for (const s of turn.steps) {
+		if (s.status !== 'running') continue;
+		s.status = 'done';
+		s.error = NOT_RUN;
+	}
+}
+
 export class AskThread {
 	turns = $state<Turn[]>([]);
 	threadId = $state<string | null>(null);
@@ -71,13 +82,13 @@ export class AskThread {
 		} catch (e) {
 			if (abort.signal.aborted) {
 				turn.status = 'stopped';
-				for (const s of turn.steps) s.status = 'done';
 			} else {
 				turn.status = 'failed';
 				turn.error = describeError(e);
 			}
 		} finally {
 			if (this.#abort === abort) this.#abort = null;
+			endSteps(turn);
 		}
 	}
 

@@ -27,8 +27,10 @@ carry that citation's number, and the active citation's rows are tinted. Paths r
 	function citesOf(uids: string[]): number[] {
 		return [...new Set(uids.flatMap((u) => cites.get(u) ?? []))].sort((a, b) => a - b);
 	}
+	const notRun = (step: WalkStep) => step.error?.startsWith('Not run') ?? false;
 	function meta(step: WalkStep): string {
 		if (step.status === 'running') return 'running';
+		if (notRun(step)) return 'not run';
 		if (step.error) return 'failed';
 		if (step.count == null) return 'not run';
 		return step.count === 1 ? '1 row' : `${step.count} rows`;
@@ -47,6 +49,7 @@ carry that citation's number, and the active citation's rows are tinted. Paths r
 					<span class="call">Answer check</span>
 					<span class="meta">
 						{#if step.status === 'running'}checking the citations
+						{:else if notRun(step)}not run: the answer ended first
 						{:else if failed}sent back: {step.error}
 						{:else}every citation was returned by a step above{/if}
 					</span>
@@ -95,7 +98,9 @@ carry that citation's number, and the active citation's rows are tinted. Paths r
 										{:else}
 											<span class="text">{row.text}</span>
 										{/if}
-										{#each used as n (n)}<span class={['cite', { on: n === active }]} aria-label="cited as {n}">{n}</span>{/each}
+										{#each used as n (n)}<span class={['cite', { on: n === active }]}
+												><span class="sr-only">cited as </span>{n}</span
+											>{/each}
 									</li>
 								{/each}
 							</ul>

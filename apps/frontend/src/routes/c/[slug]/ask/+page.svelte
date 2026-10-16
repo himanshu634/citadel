@@ -71,7 +71,11 @@ field) asks once on arrival and is then removed from the address, so a reload do
 	}
 
 	function ask(text: string) {
-		if (field.disabled || thread.running || !text.trim()) return;
+		if (field.disabled || !text.trim()) return;
+		if (thread.running) {
+			question = text; // asked from the top bar mid-answer: keep it ready to send
+			return;
+		}
 		active = pinned = null;
 		open = null;
 		void thread.ask(text);

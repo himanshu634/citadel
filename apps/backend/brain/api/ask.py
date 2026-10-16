@@ -36,6 +36,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["ask"])
 
 PING_SECONDS = 15
+CLAIM_WAIT_SECONDS = 60.0  # how long a follow-up waits for its thread's stopped run to end
 Slug = Annotated[str, Depends(company_slug)]
 
 _MODELS: dict[str, type[BaseModel]] = {
@@ -55,19 +56,23 @@ class Asker:
     toolset: Callable[[], Toolset] = graph_toolset
     checkpointer: Callable[[str], Any] = db.checkpointer
     graph_exists: Callable[[str], bool] = db.graph_exists
+    claim_wait: float = CLAIM_WAIT_SECONDS
     _busy: set[str] = field(default_factory=set)
-    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _free: threading.Condition = field(default_factory=threading.Condition)
 
     def claim(self, thread_id: str) -> bool:
-        with self._lock:
-            if thread_id in self._busy:
+        """Take the thread for a run. A thread still finishing a stopped run (its Claude call in
+        flight) is waited for, so Stop and then a follow-up does not bounce."""
+        with self._free:
+            if not self._free.wait_for(lambda: thread_id not in self._busy, self.claim_wait):
                 return False
             self._busy.add(thread_id)
             return True
 
     def release(self, thread_id: str) -> None:
-        with self._lock:
+        with self._free:
             self._busy.discard(thread_id)
+            self._free.notify_all()
 
 
 def get_asker(request: Request) -> Asker:

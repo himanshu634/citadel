@@ -97,8 +97,36 @@ def test_stop_ends_the_run_and_leaves_the_thread_valid():
     assert calls == answered  # every tool call has its result
 
 
-def test_step_limit_ends_with_an_answer_event(monkeypatch):
+def test_step_limit_ends_every_asked_step_then_answers(monkeypatch):
     monkeypatch.setattr(agent, "RECURSION_LIMIT", 4)
     turns = [reply(tool_use(f"t{i}", "related_work_items", {"text": "jwt"})) for i in range(3)]
     out = events(FakeClient(*turns), checkpointer=InMemorySaver())
     assert out[-1]["kind"] == "answer" and out[-1]["stop"] == "step_limit"
+    asked = {e["id"] for e in out if e["kind"] == "step"}
+    done = {e["id"]: e for e in out if e["kind"] == "step_done"}
+    assert asked == set(done)  # no step is left spinning on the page
+    assert done["t1"]["error"] == "Not run: the step limit was reached." and done["t1"]["n"] == 2
+
+
+def test_a_thread_left_broken_is_repaired_before_the_next_run():
+    saver = InMemorySaver()
+    client = FakeClient(
+        reply(tool_use("t1", "related_work_items", {"text": "jwt"})),
+        reply(submit("t2", "Fine.", [])),
+    )
+    graph = agent.build_graph(client, TOOLSET, saver)
+    config = {"configurable": {"thread_id": "broken"}}
+    graph.update_state(  # a run that died after Claude asked for a tool
+        config,
+        {"messages": [{"role": "user", "content": [{"type": "text", "text": "q"}]},
+                      {"role": "assistant", "content": [{"type": "tool_use", "id": "dead",
+                       "name": "related_work_items", "input": {"text": "x"}}]}]},
+        as_node="call_claude",
+    )  # fmt: skip
+    client.replies.pop(0)  # the dead run used the first reply
+    answer = agent.ask("synthetic", "Again", "broken", client=client, toolset=TOOLSET,
+                       checkpointer=saver)  # fmt: skip
+    assert answer.text == "Fine."
+    blocks = [b for m in client.requests[-1]["messages"] for b in m["content"]]
+    results = [b for b in blocks if b["type"] == "tool_result"]
+    assert results[0]["tool_use_id"] == "dead" and "previous answer ended" in results[0]["content"]

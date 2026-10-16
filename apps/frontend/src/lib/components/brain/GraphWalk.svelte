@@ -120,6 +120,7 @@ dim everything that does not back it. Layout and rules live in `src/lib/walk.ts`
 				style:top={pct(p, 'y')}
 				style:--node="var(--node-{type})"
 				title="{NODE_LABELS[type]}: {node.title} (step {node.step})"
+				aria-label="{NODE_LABELS[type]}: {node.title}, found in step {node.step}"
 			>
 				<span class="dot" aria-hidden="true"></span>
 				<span class="sr-only">{NODE_LABELS[type]}:</span>

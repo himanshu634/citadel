@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { AskThread } from './ask.svelte';
+import { AskThread, NOT_RUN } from './ask.svelte';
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -86,6 +86,22 @@ describe('AskThread', () => {
 		t.stop();
 		await asking;
 		expect(t.turns[0].status).toBe('stopped');
+	});
+
+	test('steps still running when the turn ends become "not run", never stuck spinning', async () => {
+		serve(
+			sse([
+				['start', { thread_id: 'x' }],
+				['step', { id: 'a', n: 1, tool: 'person_profile', input: {} }],
+				['step', { id: 'z', n: null, tool: 'submit_answer', input: {} }]
+			])
+		);
+		const t = new AskThread('acme');
+		await t.ask('Q');
+		expect(t.turns[0].steps.map((s) => [s.status, s.error])).toEqual([
+			['done', NOT_RUN],
+			['done', NOT_RUN]
+		]);
 	});
 
 	test('replay shows the steps one at a time, or all at once under reduced motion', async () => {

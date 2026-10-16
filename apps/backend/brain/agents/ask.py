@@ -118,6 +118,9 @@ def _run(slug, question, thread_id, client, toolset, checkpointer, stop) -> Iter
     config = {"configurable": {"thread_id": thread_id}, "recursion_limit": RECURSION_LIMIT}
     before = {"usage": 0, "trace": 0}
     if checkpointer is not None:
+        # A run that died mid-step (a crash, a server reload) can leave calls without results;
+        # the API would reject every later turn of the thread, so answer them first.
+        _close_open_tool_calls(graph, config, "Not run: the previous answer ended before it.")
         saved = graph.get_state(config).values
         before = {k: len(saved.get(k, [])) for k in before}
     inputs = {
@@ -150,7 +153,12 @@ def _run(slug, question, thread_id, client, toolset, checkpointer, stop) -> Iter
         ended = "step_limit"
     if ended:
         if checkpointer is not None:
-            _close_open_tool_calls(graph, config)
+            reason = _NOT_RUN[ended]
+            for use in _close_open_tool_calls(graph, config, reason):
+                # The page saw this call asked for: tell it the call will never run.
+                n = None if use["name"] == SUBMIT else numbers.get(use["id"])
+                yield {"kind": "step_done", "id": use["id"], "n": n, "tool": use["name"],
+                       "input": use.get("input") or {}, "error": reason}  # fmt: skip
             state = graph.get_state(config).values
         state = {**state, "answer": None, "stop": ended}
     elif checkpointer is not None:
@@ -160,19 +168,26 @@ def _run(slug, question, thread_id, client, toolset, checkpointer, stop) -> Iter
     yield _to_answer(question, thread_id, state, usage, trace)
 
 
-def _close_open_tool_calls(graph, config: dict) -> None:
-    """After the step limit, the saved thread may end on tool calls that never ran. Answer them
-    with error results (appended, never edited) so a follow-up in the thread stays valid."""
+_NOT_RUN = {
+    "step_limit": "Not run: the step limit was reached.",
+    "stopped": "Not run: the answer was stopped.",
+}
+
+
+def _close_open_tool_calls(graph, config: dict, reason: str) -> list[dict]:
+    """The saved thread may end on tool calls that never ran (step limit, Stop, a run that
+    died). Answer them with error results (appended, never edited) so a follow-up in the thread
+    stays valid. Returns the calls it closed."""
     messages = graph.get_state(config).values.get("messages") or []
     last = messages[-1] if messages else {}
     uses = [b for b in last.get("content", []) if b.get("type") == "tool_use"]
     if last.get("role") == "assistant" and uses:
-        results = [
-            result_block(u["id"], "Not run: the step limit was reached.", True) for u in uses
-        ]
+        results = [result_block(u["id"], reason, True) for u in uses]
         graph.update_state(
             config, {"messages": [{"role": "user", "content": results}]}, as_node="run_tools"
         )
+        return uses
+    return []
 
 
 def _to_answer(
@@ -180,17 +195,18 @@ def _to_answer(
 ) -> Answer:
     seen = state.get("seen") or {}
     steps = [t for t in trace if t.get("tool") != SUBMIT]
-    # Rows name a node's label only sometimes; the steps' subgraphs always do.
-    labels = {n["uid"]: n["label"] for t in steps for n in t.get("nodes", ())}
+    # Rows name a node's label and title only sometimes; the steps' subgraphs always do.
+    drawn = {n["uid"]: n for t in steps for n in t.get("nodes", ())}
 
     def source(uid: str) -> Source:
         node = seen.get(uid, {})
         step = next((i for i, t in enumerate(steps, 1) if uid in t.get("uids", ())), None)
+        other = drawn.get(uid, {})
         return Source(
             uid=uid,
-            title=node.get("title"),
-            url=node.get("url"),
-            label=node.get("label") or labels.get(uid),
+            title=node.get("title") or other.get("title"),
+            url=node.get("url") or other.get("url"),
+            label=node.get("label") or other.get("label"),
             step=step,
         )
 

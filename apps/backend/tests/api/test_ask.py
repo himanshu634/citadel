@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 from brain.api import create_app
@@ -78,11 +79,18 @@ def test_unknown_company_and_bad_bodies(company, runner):
 
 
 def test_a_busy_thread_is_refused(company, runner):
-    asker = Asker(graph_exists=lambda slug: True)
+    asker = Asker(graph_exists=lambda slug: True, claim_wait=0.05)
     asker.claim("abc123")
     client = TestClient(create_app(runner, asker))
     r = client.post(f"/api/companies/{company}/ask", json={"question": "x", "thread_id": "abc123"})
     assert r.status_code == 409 and "still answering" in r.json()["detail"]
+
+
+def test_a_follow_up_waits_for_the_stopped_run_to_let_go():
+    asker = Asker(claim_wait=5)
+    asker.claim("abc123")
+    threading.Timer(0.05, asker.release, ["abc123"]).start()
+    assert asker.claim("abc123")  # waited for the release instead of refusing
 
 
 def test_missing_credentials_become_an_error_event(company, runner):
