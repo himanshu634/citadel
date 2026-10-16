@@ -16,7 +16,7 @@ and the node count instead. Below 1100px the walk goes under the conversation.
 	import type { Attachment } from 'svelte/attachments';
 	import type { Turn } from '$lib/ask.svelte';
 	import type { Rating, WalkStep } from '$lib/types';
-	import { carryOver, highlightFor, mergeWalk, stepHighlight } from '$lib/walk';
+	import { answerPlainText, carryOver, highlightFor, mergeWalk, stepHighlight } from '$lib/walk';
 	import Banner from '../ui/Banner.svelte';
 	import Button from '../ui/Button.svelte';
 	import AnswerRating from './AnswerRating.svelte';
@@ -113,14 +113,12 @@ and the node count instead. Below 1100px the walk goes under the conversation.
 	});
 	const carried = $derived(carryOver(earlier, shown));
 
-	/** The answer as plain text: the [n] citation markers taken out. */
-	const plainText = (text: string) => text.replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, '');
 	let copyTimer: ReturnType<typeof setTimeout> | undefined;
 	async function copy() {
 		const text = turn.answer?.text;
 		if (!text) return;
 		try {
-			await navigator.clipboard.writeText(plainText(text));
+			await navigator.clipboard.writeText(answerPlainText(text));
 			copied = 'copied';
 		} catch {
 			copied = 'failed';

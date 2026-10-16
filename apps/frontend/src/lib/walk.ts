@@ -576,7 +576,9 @@ export type Block =
 	| { kind: 'p'; inlines: Inline[] }
 	| { kind: 'ul' | 'ol'; items: Inline[][] };
 
-const INLINE = /\*\*(.+?)\*\*|`([^`]+)`|\[(\d+(?:\s*,\s*\d+)*)\]/g;
+/** A citation marker: [1] or [1, 2]; group 1 holds the numbers. */
+const CITE = String.raw`\[(\d+(?:\s*,\s*\d+)*)\]`;
+const INLINE = new RegExp(`${/\*\*(.+?)\*\*|`([^`]+)`/.source}|${CITE}`, 'g');
 
 export function inlines(text: string): Inline[] {
 	const out: Inline[] = [];
@@ -620,4 +622,9 @@ export function answerBlocks(text: string): Block[] {
 	}
 	flush();
 	return blocks;
+}
+
+/** The answer's text without its citation markers (and the space before each), for copying. */
+export function answerPlainText(text: string): string {
+	return text.replace(new RegExp(String.raw`\s*${CITE}`, 'g'), '');
 }
