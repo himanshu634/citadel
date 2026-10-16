@@ -1,0 +1,24 @@
+# Company Brain config for FalkorDB (public repo). Graph: brain_falkordb.
+slug: falkordb
+name: FalkorDB
+data_permission: public          # public | synthetic | own
+window:
+  since: 2026-04-15              # ingest activity on/after this date
+sources:
+  - type: github
+    repo: FalkorDB/FalkorDB
+    include: [commits, pull_requests, issues, reviews, codeowners, repo_docs]
+  - type: local_docs             # optional: extra markdown/txt the company published
+    path: data/inbox/falkordb/docs
+  - type: canonical_jsonl        # optional: pre-normalised records
+    path: data/inbox/falkordb/jsonl
+systems:                         # how file paths map to System nodes
+  rules:                         # first match wins; glob on repo-relative path
+    - { match: "src/index/**",          system: "Indexing" }
+    - { match: "src/execution_plan/**", system: "Query execution" }
+    - { match: ".github/workflows/**",  system: "CI" }
+  fallback: depth_2              # e.g. src/serializers/x.c -> "src/serializers"
+  ignore: ["deps/**", "build/graphblas/**", "**/*.lock"]
+people:
+  bots: ["dependabot[bot]", "github-actions[bot]", "Copilot"]
+  aliases: {}                    # "git author name" -> "github_login" when they differ

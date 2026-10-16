@@ -1,0 +1,100 @@
+"""The `brain` command line.
+
+Why: one entry point for every operator action (set up a company, build its schema, ingest,
+query, reset). Each command takes the company slug and works only on graph brain_<slug>.
+Commands stay thin: they parse arguments and call plain functions in the other modules.
+"""
+
+from __future__ import annotations
+
+from importlib import resources
+
+import typer
+from pydantic import ValidationError
+from redis.exceptions import ConnectionError as RedisConnectionError
+
+from brain import config, db, schema
+
+app = typer.Typer(help="Company Brain: a company's engineering activity as one FalkorDB graph.")
+
+
+def _connected() -> None:
+    s = config.get_settings()
+    try:
+        db.ping()
+    except RedisConnectionError:
+        typer.secho(
+            f"Cannot reach FalkorDB at {s.falkordb_host}:{s.falkordb_port}. "
+            "Start it with `docker compose up -d` or check FALKORDB_* in .env.",
+            fg="red",
+            err=True,
+        )
+        raise typer.Exit(1) from None
+
+
+def _fail(msg: str) -> None:
+    typer.secho(msg, fg="red", err=True)
+    raise typer.Exit(1)
+
+
+def _graph_name(slug: str) -> str:
+    try:
+        return config.graph_name(slug)
+    except ValueError as e:
+        _fail(f"{e}. Use lowercase letters, digits and underscores, e.g. 'acme'.")
+
+
+def _company(slug: str) -> config.CompanyConfig:
+    _graph_name(slug)
+    try:
+        return config.load_company(slug)
+    except (FileNotFoundError, ValueError) as e:  # ValidationError is a ValueError
+        detail = str(e) if not isinstance(e, ValidationError) else f"invalid config:\n{e}"
+        _fail(f"companies/{slug}.yaml: {detail}")
+
+
+@app.command()
+def init(slug: str, name: str = typer.Option(None, help="Display name (default: slug).")) -> None:
+    """Write a commented template config at companies/<slug>.yaml."""
+    _graph_name(slug)
+    path = config.companies_dir() / f"{slug}.yaml"
+    if path.exists():
+        typer.secho(f"{path} already exists; not overwriting.", fg="yellow")
+        raise typer.Exit(1)
+    template = resources.files("brain").joinpath("templates/company.yaml").read_text()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(template.format(slug=slug, name=name or slug))
+    typer.echo(f"Wrote {path}. Edit sources and systems.rules, then run `brain schema {slug}`.")
+
+
+@app.command("schema")
+def schema_cmd(slug: str) -> None:
+    """Create the range, full-text and vector indexes on brain_<slug> (idempotent)."""
+    cfg = _company(slug)
+    _connected()
+    report = schema.apply_schema(slug)
+    typer.echo(
+        f"{cfg.graph_name}: {len(report.created)} index statements applied, "
+        f"{len(report.existing)} already present."
+    )
+    for idx in schema.list_indexes(slug):
+        kinds = ", ".join(f"{p}:{'/'.join(t)}" for p, t in idx["types"].items())
+        typer.echo(f"  {idx['label']:<10} {kinds}  [{idx['status']}]")
+    for w in report.warnings:
+        typer.secho(f"warning: {w}", fg="yellow")
+
+
+@app.command()
+def reset(slug: str, yes: bool = typer.Option(False, "--yes", help="Confirm deletion.")) -> None:
+    """Delete the whole graph brain_<slug>. Raw caches in data/ are kept."""
+    name = _graph_name(slug)
+    if not yes:
+        typer.secho(f"This deletes graph {name}. Re-run with --yes to confirm.", fg="yellow")
+        raise typer.Exit(1)
+    _connected()
+    deleted = db.delete_graph(slug)
+    typer.echo(f"Deleted {name}." if deleted else f"{name} does not exist; nothing to delete.")
+
+
+if __name__ == "__main__":
+    app()

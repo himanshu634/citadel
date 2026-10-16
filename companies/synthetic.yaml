@@ -1,0 +1,20 @@
+# A tiny fake company used for offline demos and tests. Graph: brain_synthetic.
+slug: synthetic
+name: Synthetic Co
+data_permission: synthetic
+window:
+  since: 2026-01-01
+sources:
+  - type: canonical_jsonl
+    path: apps/backend/examples/synthetic_company
+systems:
+  rules:
+    - { match: "services/auth/**",    system: "Auth" }
+    - { match: "services/billing/**", system: "Billing" }
+    - { match: "web/**",              system: "Web app" }
+    - { match: "infra/**",            system: "Infra" }
+  fallback: depth_1
+  ignore: ["**/*.lock"]
+people:
+  bots: ["ci-bot"]
+  aliases: {}

@@ -1,0 +1,32 @@
+# Company Brain config for "{name}". Graph: brain_{slug}.
+# Validated by brain.config.CompanyConfig. See docs/adding-a-company.md.
+slug: {slug}
+name: "{name}"
+
+# public    = public repos / published material only
+# synthetic = made-up demo data
+# own       = data you own; the only value that allows private GitHub repos
+data_permission: public
+
+window:
+  since: 2026-01-01              # ingest activity on/after this date
+
+sources:                         # remove the ones you don't use
+  - type: github
+    repo: owner/name
+    include: [commits, pull_requests, issues, reviews, codeowners, repo_docs]
+  # - type: local_docs           # markdown/txt files from a folder (repo-root relative)
+  #   path: data/inbox/{slug}/docs
+  # - type: canonical_jsonl      # Slack/Jira/Linear exports converted to docs/canonical-format.md
+  #   path: data/inbox/{slug}/jsonl
+
+systems:                         # file path -> System node
+  # first match wins; glob on repo-relative path, e.g.
+  #   - {{ match: "src/api/**", system: "API" }}
+  rules: []
+  fallback: depth_2              # depth_1 | depth_2 | depth_3 | none
+  ignore: ["**/*.lock"]
+
+people:
+  bots: []                       # logins ending in [bot] are bots automatically
+  aliases: {{}}                  # "git author name" -> "login" when they differ
