@@ -8,7 +8,7 @@
   the synthetic company (brain's tests/test_graph.py has the real thing): four systems, a fix PR
   in Auth and in Web app (the regressions QA looks for), Billing and Web app coupled.
 - `FakeBrainFacts`: the Keeper's `BrainFacts` (agents/keeper/decide.py) over the same nodes,
-  recording what is projected and retired.
+  recording what is projected and retired, with scripted noticing rows (`notices`).
 """
 
 from __future__ import annotations
@@ -363,6 +363,12 @@ class FakeBrainFacts:
     projected: list[dict[str, Any]] = field(default_factory=list)
     project_calls: int = 0
     retired: list[tuple[str, str, str]] = field(default_factory=list)
+    notices: dict[str, list[dict[str, Any]]] = field(default_factory=dict)  # kind -> rows
+    notice_limits: list[int] = field(default_factory=list)
+
+    def notice(self, slug: str, kind: str, limit: int) -> list[dict[str, Any]]:
+        self.notice_limits.append(limit)
+        return [dict(r) for r in self.notices.get(kind, [])[:limit]]
 
     def evidence(self, slug: str, uids: list[str]) -> dict[str, str]:
         return {u: self.labels[u] for u in uids if u in self.labels}

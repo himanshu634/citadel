@@ -77,7 +77,8 @@ class BrainFacts(Protocol):
 
 
 class _Brain:
-    """The real brain facts: `brain.keeper`, and `brain.db.graph_exists`."""
+    """The real brain facts: `brain.keeper`, and `brain.db.graph_exists`. `notice` is for the
+    review run (`keeper/review.py`), which shares this default."""
 
     evidence = staticmethod(brain_keeper.evidence)
     source_facts = staticmethod(brain_keeper.source_facts)
@@ -85,6 +86,7 @@ class _Brain:
     project = staticmethod(brain_keeper.project)
     retire = staticmethod(brain_keeper.retire)
     graph_exists = staticmethod(db.graph_exists)
+    notice = staticmethod(brain_keeper.notice)
 
 
 # Read at call time, so tests and offline runs can swap it (a job's apply has no brain argument).
