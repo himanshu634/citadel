@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from brain.adapters.github import codeowners
-from brain.adapters.github.fetch import check_permission, completed_pages, read_json
+from brain.adapters.github.fetch import check_permission
+from brain.adapters.runs import completed_pages, read_json
 from brain.canonical import (
     CanonicalRecord,
     Change,
