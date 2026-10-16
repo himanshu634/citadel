@@ -224,6 +224,49 @@ class PersonProfile(_Model):
     owns: list[str]
 
 
+class WorkParams(PersonParams):
+    limit: int = Field(20, ge=1, le=100, description="Max rows.")
+
+
+class TicketRef(_Model):
+    uid: str
+    key: str | None = None
+    title: str
+    url: str | None = None
+    status_category: str | None = None
+    assignees: list[str]
+
+
+class OpenWork(_Model):
+    person_uid: str
+    uid: str
+    key: str | None
+    title: str
+    url: str | None
+    state: str
+    status_category: str | None
+    priority: str | None
+    due_date: str | None
+    container: str | None
+    blocked_by: list[TicketRef]
+    blocks: list[TicketRef]
+
+
+class Blocker(_Model):
+    person_uid: str
+    ticket: TicketRef
+    blocker: TicketRef
+    depth: int
+    via: str | None  # key of the next ticket on the chain; None for a direct blocker
+    linked: list[LinkRef]  # PRs and issues the blocker mentions
+
+
+class Waiting(_Model):
+    person_uid: str
+    mine: TicketRef
+    waiting: TicketRef
+
+
 class EntityParams(_Model):
     uid: str = Field(description="uid of any node, e.g. 'github:FalkorDB/FalkorDB:pr:3063'.")
     limit: int = Field(25, ge=1, le=200, description="Max neighbours to return.")
@@ -400,6 +443,29 @@ TOOLS: dict[str, Tool] = {
             _person,
         ),
         Tool(
+            "open_work_for",
+            "Open tickets assigned to a person, most urgent first, with what blocks them and "
+            "what they block.",
+            WorkParams,
+            OpenWork,
+            _person,
+        ),
+        Tool(
+            "blocked_on",
+            "What a person's open tickets are waiting on: open blockers up to three steps away, "
+            "who owns each, and linked PRs.",
+            WorkParams,
+            Blocker,
+            _person,
+        ),
+        Tool(
+            "waiting_on",
+            "Other people's open tickets that are blocked by a person's open tickets.",
+            WorkParams,
+            Waiting,
+            _person,
+        ),
+        Tool(
             "get_entity",
             "Open any node by uid: its fields, text and direct neighbours.",
             EntityParams,
@@ -485,6 +551,18 @@ def related_documents(slug: str, text: str, limit: int = 5) -> list[RelatedDocum
 def person_profile(slug: str, login: str) -> PersonProfile | None:
     rows = call(slug, "person_profile", login=login)
     return rows[0] if rows else None
+
+
+def open_work_for(slug: str, login: str, limit: int = 20) -> list[OpenWork]:
+    return call(slug, "open_work_for", login=login, limit=limit)
+
+
+def blocked_on(slug: str, login: str, limit: int = 20) -> list[Blocker]:
+    return call(slug, "blocked_on", login=login, limit=limit)
+
+
+def waiting_on(slug: str, login: str, limit: int = 20) -> list[Waiting]:
+    return call(slug, "waiting_on", login=login, limit=limit)
 
 
 def get_entity(slug: str, uid: str, limit: int = 25) -> Entity | None:

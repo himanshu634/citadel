@@ -17,6 +17,7 @@ Relationships:
 - `(Change)-[:TOUCHES]->(System)`, `(Change)-[:PART_OF]->(WorkItem)`
 - `(WorkItem)-[:CLOSES]->(WorkItem)`
 - `(WorkItem | Document)-[:MENTIONS]->(System | WorkItem)`
+- `(Person)-[:ASSIGNED_TO]->(WorkItem)`, `(WorkItem)-[:BLOCKS]->(WorkItem)` (tickets)
 
 ## How to work
 
@@ -25,6 +26,7 @@ Relationships:
 - Search by topic before concluding that something is missing. If the graph has no evidence,
   say so plainly. Do not fill gaps from general knowledge.
 - Independent lookups can run in parallel.
+- Tickets are WorkItems of kind `ticket` with keys like `IDN-2`. Use `open_work_for` for what someone has to do, `blocked_on` for what they are waiting on and `waiting_on` for who waits on them.
 - Declared owners and the people who actually do the work can differ. When it matters, say which
   one you are reporting. When team membership is unknown (`members_known` is false), say the
   ownership can't be confirmed rather than calling the owner wrong.
