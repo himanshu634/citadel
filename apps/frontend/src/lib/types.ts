@@ -357,3 +357,73 @@ export interface Entity {
 	body: string;
 	neighbour_count: number;
 }
+
+// --- Ask (POST /api/companies/{slug}/ask, Server-Sent Events; brain/api/models.py Ask*) -------
+
+/** A node one step touched. `label` is the graph label (Person, Team, System, WorkItem ...). */
+export interface WalkNode {
+	uid: string;
+	label: string;
+	title: string;
+	url: string | null;
+}
+
+/** A relationship one step touched. `inferred`: implied by the rows, not stored in the graph. */
+export interface WalkRel {
+	from: string;
+	to: string;
+	/** A stored relationship (AUTHORED) or, when inferred, words (works on). */
+	type: string;
+	inferred: boolean;
+	/** e.g. "score 0.88". */
+	note?: string | null;
+}
+
+export interface AskStepEvent {
+	id: string;
+	/** The graph step's number in this answer; null for submit_answer, the answer check. */
+	n: number | null;
+	tool: string;
+	input: Record<string, unknown> | null;
+}
+
+export interface AskStepDoneEvent extends AskStepEvent {
+	ms: number | null;
+	/** Rows returned, all of them; `rows` holds the first few. */
+	count: number | null;
+	error: string | null;
+	rows: unknown[];
+	nodes: WalkNode[];
+	rels: WalkRel[];
+}
+
+export interface AskSource {
+	uid: string;
+	title: string | null;
+	url: string | null;
+	label: string | null;
+	/** The step that first returned it. */
+	step: number | null;
+}
+
+export interface AskAnswer {
+	thread_id: string;
+	/** Markdown with [n] markers; null when there is no answer (see stop). */
+	text: string | null;
+	sources: AskSource[];
+	path: AskSource[];
+	/** Claude's stop reason, or refusal, max_tokens, step_limit, stopped, no_answer. */
+	stop: string | null;
+	model: string | null;
+}
+
+/** One tool call as the page shows it: asked for (running), then done. */
+export interface WalkStep extends AskStepEvent {
+	status: 'running' | 'done';
+	ms?: number | null;
+	count?: number | null;
+	error?: string | null;
+	rows?: unknown[];
+	nodes?: WalkNode[];
+	rels?: WalkRel[];
+}

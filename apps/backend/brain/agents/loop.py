@@ -17,17 +17,21 @@ The graph owns the loop (not the SDK tool runner), so every step is checkpointed
 
 from __future__ import annotations
 
+import json
 import operator
 import re
+import time
 from collections.abc import Callable
 from importlib import resources
 from typing import Annotated, Any, Literal, TypedDict
 
 import anthropic
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
 
 from brain import llm
 from brain.agents.toolset import Toolset
+from brain.agents.walk import preview_rows, subgraph
 from brain.config import get_settings
 
 SYSTEM_PROMPT = resources.files("brain.agents").joinpath("system_prompt.md").read_text()
@@ -81,6 +85,7 @@ class AgentState(TypedDict, total=False):
     model: str | None  # the model that served the last call (differs after a fallback)
     nudges: int
     route: str | None  # set by the router: which part of the graph handles this turn
+    trace: Annotated[list[dict[str, Any]], operator.add]  # one entry per tool call (run_tools)
 
 
 ENTRY = "call_claude"  # where the router hands a turn to this loop
@@ -125,6 +130,10 @@ def add_brain_loop(
             # A tool call cut off mid-input never runs; an unanswered tool_use would make the
             # next request in this thread invalid. Nothing has been sent back yet, so drop it.
             content = [b for b in content if b["type"] != "tool_use"]
+        writer = get_stream_writer()
+        for b in content:
+            if b["type"] == "tool_use":
+                writer({"kind": "step", "id": b["id"], "tool": b["name"], "input": b.get("input")})
         return {
             # An empty turn (e.g. a refusal before any output) has nothing to replay.
             "messages": [{"role": "assistant", "content": content}] if content else [],
@@ -139,13 +148,37 @@ def add_brain_loop(
         seen = dict(state.get("seen") or {})
         results: list[dict[str, Any]] = []
         new_seen: dict[str, dict[str, Any]] = {}
+        trace: list[dict[str, Any]] = []
+        writer = get_stream_writer()  # the Ask page draws each step as soon as it is done
+
+        def record(entry: dict[str, Any]) -> None:
+            trace.append(entry)
+            writer({"kind": "step_done", **entry})
+
         # Graph tools first, so a submit_answer in the same turn can cite their results.
         for use in sorted(uses, key=lambda u: u["name"] == submit):
             if use["name"] == submit:
                 continue
+            started = time.perf_counter()
             out = toolset.call(state["slug"], use["name"], use.get("input"))
+            ms = round((time.perf_counter() - started) * 1000)
             new_seen.update(out.seen)
             results.append(result_block(use["id"], out.content, out.is_error))
+            nodes, rels = subgraph(use["name"], out.params, out.rows)
+            record(
+                {
+                    "id": use["id"],
+                    "tool": use["name"],
+                    "input": use.get("input") or {},
+                    "ms": ms,
+                    "count": len(out.rows),
+                    "error": _error_text(out.content) if out.is_error else None,
+                    "rows": preview_rows(out.rows),
+                    "nodes": nodes,
+                    "rels": rels,
+                    "uids": sorted(out.seen),
+                }
+            )
         seen.update(new_seen)
         answer = None
         for use in uses:
@@ -157,10 +190,12 @@ def add_brain_loop(
             else:
                 answer = use["input"]
                 results.append(result_block(use["id"], "Answer recorded.", False))
+            record({"id": use["id"], "tool": SUBMIT, "input": {}, "error": problem})
         return {
             "messages": [{"role": "user", "content": results}],
             "seen": new_seen,
             "answer": answer,
+            "trace": trace,
         }
 
     def nudge(state: AgentState) -> dict[str, Any]:
@@ -195,6 +230,14 @@ def add_brain_loop(
 def result_block(tool_use_id: str, content: str, is_error: bool) -> dict[str, Any]:
     block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
     return {**block, "is_error": True} if is_error else block
+
+
+def _error_text(content: str) -> str:
+    """The sentence inside a toolset error result ({"error": "..."})."""
+    try:
+        return str(json.loads(content).get("error") or content)
+    except (ValueError, AttributeError):
+        return content
 
 
 def check_answer(answer: dict[str, Any], seen: dict[str, Any]) -> str | None:

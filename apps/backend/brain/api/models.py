@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from brain.config_diff import ConfigDiff
 from brain.jobs import BuildSnapshot, BuildSummary
@@ -114,3 +114,72 @@ class ConfigChange(ConfigDiff):
     """What a Settings save requires (`?dry_run=1`, and the 409 `rebuild_required` detail)."""
 
     slug: str
+
+
+# --- Ask (POST /api/companies/{slug}/ask, answered as Server-Sent Events) ---------------------
+
+
+class AskIn(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    thread_id: str | None = Field(None, pattern=r"^[A-Za-z0-9_-]{1,64}$")  # a follow-up
+
+
+class WalkNode(BaseModel):
+    uid: str
+    label: str  # the graph label: Person, Team, System, WorkItem, Change, Document
+    title: str
+    url: str | None = None
+
+
+class WalkRel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    from_: str = Field(alias="from")
+    to: str
+    type: str  # a stored relationship (AUTHORED) or, when inferred, words (works on)
+    inferred: bool = False  # implied by the rows, not stored in the graph
+    note: str | None = None  # e.g. "score 0.88"
+
+
+class AskStart(BaseModel):
+    thread_id: str
+
+
+class AskStep(BaseModel):
+    """Claude asked for a tool. `n` numbers the graph steps of one answer; submit_answer (the
+    answer check) has none."""
+
+    id: str
+    n: int | None
+    tool: str
+    input: dict[str, Any] | None = None
+
+
+class AskStepDone(AskStep):
+    ms: int | None = None
+    count: int | None = None  # rows returned (all of them; `rows` holds the first few)
+    error: str | None = None
+    rows: list[Any] = []
+    nodes: list[WalkNode] = []
+    rels: list[WalkRel] = []
+
+
+class AskSource(BaseModel):
+    uid: str
+    title: str | None = None
+    url: str | None = None
+    label: str | None = None
+    step: int | None = None  # the step that first returned it
+
+
+class AskAnswer(BaseModel):
+    thread_id: str
+    text: str | None  # None when there is no answer (see stop)
+    sources: list[AskSource]
+    path: list[AskSource]
+    stop: str | None  # end_turn ... or refusal, max_tokens, step_limit, stopped, no_answer
+    model: str | None = None
+
+
+class AskError(BaseModel):
+    detail: str

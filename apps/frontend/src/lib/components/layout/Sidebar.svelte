@@ -34,7 +34,7 @@ the shell. Sections that are not built yet stay visible but inert, marked "Soon"
 		heading: 'Brain',
 		items: [
 			{ label: 'Overview', path: '', icon: LayoutDashboard },
-			{ label: 'Ask', icon: MessageSquareText },
+			{ label: 'Ask', path: 'ask', icon: MessageSquareText },
 			{ label: 'Graph', path: 'graph', icon: Network },
 			{ label: 'People', icon: Users },
 			{ label: 'Systems', icon: Boxes },

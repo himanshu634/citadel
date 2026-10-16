@@ -26,6 +26,7 @@ make tools                     # list the named query tools and their params
 make query TOOL=impact_of P="system=CI"   # run one (SLUG=..., JSON=1 for raw rows)
 make ask SLUG=synthetic Q="who knows Auth?"   # Claude answers from the graph (THREAD=<id> follows up)
 make chat SLUG=synthetic OFFLINE=1   # one scripted turn, no API key: router + tools + checkpointer
+make eval                      # agent evals on brain_synthetic (calls the API): CASE=id|tag REPEAT=3 MODEL=.. EFFORT=.. BASELINE=<file>
 make agents                    # list the agent roles, their jobs and read tools
 make sim SLUG=synthetic SCENARIO=sprint OFFLINE=1   # run the agents (sprint, race, regression)
 make reset SLUG=x CONFIRM=1    # delete brain_x, agent_x and its build history (frees the slug)
@@ -96,8 +97,8 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
 - **`db.py`** is the only place that opens a connection and selects the graph (`brain_<slug>`);
   all queries go through `db.run()` so nothing can hit the wrong company's graph.
 - **API** (`brain/api`, FastAPI; `brain.api:app`, run with `make api`): the frontend's only way in.
-  Routes sit under `/api/companies/{slug}/...` (overview, builds, tools, graph); the slug is resolved
-  only by `deps.company_slug`, which 404s unless `companies/<slug>.yaml` exists. Behind it:
+  Routes sit under `/api/companies/{slug}/...` (overview, builds, tools, ask, graph); the slug is
+  resolved only by `deps.company_slug`, which 404s unless `companies/<slug>.yaml` exists. Behind it:
   `registry.py` (`companies/*.yaml` is the registry; a bad file is reported, not fatal; edits
   round-trip so hand-written comments survive; writes are atomic), `config_diff.py` (says if a
   saved change needs a graph rebuild or a new download), and `jobs.py` (one build per company,
@@ -105,7 +106,9 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   build cut off by a restart is marked `stopped`). `/api/onboard/github` adds a company from one
   public GitHub repo (the rail's + dialog): `brain/onboard.py` derives name, slug and window; the
   create re-checks visibility (private repos are refused) and writes and starts under the
-  start lock.
+  start lock. `api/ask.py`: POST `.../ask` answers one question as SSE (`start`, `step` /
+  `step_done` per tool call, `answer` or `error`) from a worker thread; one run per thread_id;
+  closing the stream stops the run at its next step.
 
 ### Agents (`brain/agents`)
 
@@ -122,8 +125,23 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
   models). It may cite only uids seen in tool results; anything else is sent back as an error.
 - Keep `agents/system_prompt.md` and the tool list static (no dates, sorted tools) so the prompt
   prefix stays cacheable. Threads are checkpointed in graph `agent_<slug>` (`db.checkpointer`).
+- `ask.ask_events` streams a run for the Ask page (`ask()` is its last item): each tool call is
+  timed and recorded in the append-only `trace` channel with the subgraph it touched
+  (`agents/walk.py` turns any tool's rows into nodes + relationships; links the rows only imply
+  are `inferred`). A stop is honoured only between saved steps, so the thread stays valid.
 - Tests use a scripted fake client (`tests/test_agent.py`); nothing in `make test` calls the API.
   `agents/offline.py` is the same idea for `brain chat --offline`.
+
+### Evals (`apps/backend/evals`)
+
+`make eval` asks the real agent each question in `evals/cases/<slug>.yaml` against brain_<slug>
+and grades it with deterministic checks (`graders.py`): uids cited (`cite_any/all/none`), graph
+tools that ran, answer text (substrings or a regex) and a step budget. Expected uids are literals
+or gold refs (`{tool, params, field, top}`) read from the graph when the run starts, so cases
+follow the data. Each case runs `REPEAT` times and reports a pass rate; turns of one case share a
+thread. Results: `data/evals/<slug>/<time>-<model>-<effort>.jsonl`; `BASELINE=` diffs pass rates
+against an earlier file. It calls the API, so it is not part of `make test`;
+`tests/test_evals.py` checks the case files and the harness with the scripted client.
 
 ### Named Cypher queries
 

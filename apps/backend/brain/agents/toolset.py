@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from pydantic import BaseModel, ValidationError
@@ -32,6 +32,10 @@ class ToolOutcome:
     content: str  # JSON text for the tool_result block
     is_error: bool
     seen: dict[str, dict[str, Any]]  # uid -> {uid, label, title, url} for every node in the rows
+    # What the call ran with and returned, before `content` is cut to size: the Ask page draws
+    # its step from these (brain.agents.walk), never by parsing `content` back.
+    params: dict[str, Any] = field(default_factory=dict)
+    rows: list[Any] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -64,7 +68,9 @@ class Toolset:
         text = json.dumps({"rows": data, "count": len(data)}, default=str, ensure_ascii=False)
         if len(text) > MAX_RESULT_CHARS:
             text = text[:MAX_RESULT_CHARS] + ' ... [cut: ask for fewer rows with "limit"]'
-        return ToolOutcome(content=text, is_error=False, seen=seen)
+        return ToolOutcome(
+            content=text, is_error=False, seen=seen, params=params.model_dump(), rows=data
+        )
 
 
 def graph_toolset() -> Toolset:

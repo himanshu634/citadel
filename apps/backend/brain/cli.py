@@ -224,24 +224,20 @@ def chat(
 
 
 def _run_ask(slug: str, question: str, thread: str | None, client=None):
-    import anthropic
-
+    from brain import llm
     from brain.agents.ask import ask as run_ask
 
     try:
         return run_ask(
             slug, question, thread_id=thread, client=client, checkpointer=db.checkpointer(slug)
         )
-    except anthropic.AuthenticationError:
-        _fail("Anthropic rejected the credentials. Check ANTHROPIC_API_KEY in .env.")
-    except TypeError as e:  # the SDK raises this when it finds no credentials at all
-        if "authentication" not in str(e):
+    except Exception as e:
+        problem = llm.describe_error(e)
+        if problem is None:
             raise
-        _fail("No Anthropic credentials. Set ANTHROPIC_API_KEY in .env, or try --offline.")
-    except anthropic.APIConnectionError as e:
-        _fail(f"Cannot reach the Anthropic API: {e}")
-    except anthropic.APIStatusError as e:
-        _fail(f"Anthropic API error {e.status_code}: {e.message}")
+        if "No Anthropic credentials" in problem:
+            problem += " Or try --offline."
+        _fail(problem)
 
 
 def _print_answer(answer) -> None:
