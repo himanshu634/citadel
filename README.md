@@ -68,8 +68,16 @@ make query SLUG=synthetic TOOL=path_between P="from_uid=person:erin to_uid=syste
 ```
 
 `make tools` lists every tool and its parameters; `JSON=1` prints raw rows. The CLI underneath
-is `uv run brain query <slug> <tool> key=value ...` (or `--param key=value`). The Claude agent
-that answers questions over these tools (`brain ask`) is on branch `feat/claude-agent`.
+is `uv run brain query <slug> <tool> key=value ...` (or `--param key=value`).
+
+Ask the Claude agent (a LangGraph loop over these same tools, conversation state checkpointed in
+FalkorDB graph `agent_<slug>`; on branch `feat/claude-agent` until it is merged):
+
+```bash
+make chat SLUG=synthetic OFFLINE=1          # one scripted turn, no API key: proves router, tools, checkpointer
+make ask SLUG=synthetic Q="Who should review a change to Billing, and why?"   # needs ANTHROPIC_API_KEY
+make chat SLUG=synthetic                    # multi-turn on one thread
+```
 
 What `brain_falkordb` held after the first sync (window from 2026-04-15): 750 PRs, 994 issues,
 259 commits, 190 people, 71 systems, 16 docs, 2,733 comment chunks.
