@@ -77,13 +77,19 @@ class _Builder:
 # --- one function per tool ------------------------------------------------------------------
 
 
+def _changes(n: Any) -> str | None:
+    if not isinstance(n, int):
+        return None
+    return "1 change" if n == 1 else f"{n} changes"
+
+
 def _person_profile(b: _Builder, params: Row, rows: list[Row]) -> None:
     for r in rows:
         me = b.person(r.get("login"), r.get("person_uid"))
         for t in r.get("teams") or []:
             b.rel(me, b.team(t), "MEMBER_OF")
         for s in r.get("systems") or []:
-            note = f"{s.get('changes')} changes" if s.get("changes") is not None else None
+            note = _changes(s.get("changes"))
             b.rel(me, b.system(s.get("system")), "works on", inferred=True, note=note)
         for pr in r.get("recent_prs") or []:
             b.rel(me, b.item(pr), "AUTHORED")
@@ -108,7 +114,7 @@ def _owners_vs_experts(b: _Builder, params: Row, rows: list[Row]) -> None:
     for r in rows:
         sys = b.system(r.get("system"), r.get("system_uid"))
         for c in r.get("top_contributors") or []:
-            note = f"{c.get('changes')} changes" if c.get("changes") is not None else None
+            note = _changes(c.get("changes"))
             b.rel(b.person(c.get("login")), sys, "works on", inferred=True, note=note)
 
 

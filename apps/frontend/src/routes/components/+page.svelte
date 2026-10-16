@@ -19,6 +19,7 @@
 		EmptyState,
 		EntityRow,
 		GraphPath,
+		GraphWalk,
 		Input,
 		Menu,
 		NodeChip,
@@ -29,10 +30,14 @@
 		Tabs,
 		TagInput,
 		Tooltip,
+		WalkAnswer,
+		WalkSteps,
 		WorkItemRow
 	} from '$lib';
 	import { RepoChecks, type RepoResult } from '$lib/repochecks.svelte';
 	import * as builds from './build-samples';
+	import * as walks from './walk-samples';
+	import { highlightFor } from '$lib/walk';
 	import {
 		NODE_LABELS,
 		type CitedAnswer as Answer,
@@ -43,6 +48,12 @@
 		type SourceConfig,
 		type WorkItem
 	} from '$lib/types';
+
+	// The Ask walk: citation 1 stays lit unless another is hovered.
+	let walkHover = $state<number | null>(null);
+	const walkActive = $derived(walkHover ?? 1);
+	const walkLit = $derived(highlightFor(walks.answer.sources[walkActive - 1], walks.done));
+	const walkCites = new Map(walks.answer.sources.map((s, i) => [s.uid, [i + 1]]));
 
 	// Example content for the gallery, taken from apps/backend/examples/synthetic_company.
 	const featuredAnswer: Answer = {
@@ -630,6 +641,42 @@
 		</Tabs>
 	</Card>
 
+	<Card title="Graph walk, steps and answer (Ask)">
+		<div class="walks">
+			<figure>
+				<GraphWalk steps={walks.running} fresh={null} />
+				<WalkSteps steps={walks.running} />
+				<figcaption>Running: step 2 asked for, step 1 drawn</figcaption>
+			</figure>
+			<figure>
+				<GraphWalk
+					steps={walks.done}
+					highlight={walkLit}
+					cited={new Set(walks.answer.sources.map((s) => s.uid))}
+				/>
+				<WalkSteps
+					steps={walks.done}
+					open="s3"
+					ontoggle={() => {}}
+					cites={walkCites}
+					active={walkActive}
+				/>
+				<figcaption>Done: citation 1 lit, step 3 open with its rows</figcaption>
+			</figure>
+			<figure>
+				<WalkAnswer answer={walks.answer} active={walkActive} onactive={(n) => (walkHover = n)} />
+				<figcaption>Answer: hover a chip or a source</figcaption>
+			</figure>
+			<figure>
+				<WalkSteps steps={walks.rough} />
+				<GraphWalk steps={[]} />
+				<WalkAnswer answer={walks.stopped} />
+				<WalkAnswer answer={walks.refused} />
+				<figcaption>A failed call, an empty call, a rejected check; empty stage; no answer</figcaption>
+			</figure>
+		</div>
+	</Card>
+
 	<div class="two">
 		<Card title="Rows">
 			<EntityRow name="Alice Kim" type="person" meta="identity, 2 PRs" value={3} valueLabel="reviews" selected />
@@ -745,6 +792,18 @@
 		grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
 		gap: var(--space-5);
 		align-items: start;
+	}
+	.walks {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr));
+		gap: var(--space-6);
+		align-items: start;
+	}
+	.walks figure {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+		margin: 0;
 	}
 	.note {
 		max-width: 70ch;

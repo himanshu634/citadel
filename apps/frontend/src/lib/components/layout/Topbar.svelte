@@ -8,6 +8,8 @@ nothing to ask (building, empty, unreachable, invalid) and says why in its place
 <script lang="ts">
 	import { CircleAlert, CloudOff, LoaderCircle, Menu as MenuIcon, Search } from '@lucide/svelte';
 	import type { Component } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import Input from '$lib/components/ui/Input.svelte';
 	import ThemeToggle from './ThemeToggle.svelte';
 	import { getCompanies } from '$lib/companies.svelte';
@@ -41,6 +43,16 @@ nothing to ask (building, empty, unreachable, invalid) and says why in its place
 		void companies.current;
 		question = '';
 	});
+
+	// The Ask page asks it on arrival (and drops ?q= so a reload does not ask again).
+	function submit(e: SubmitEvent) {
+		e.preventDefault();
+		const text = question.trim();
+		if (!text || ask.disabled || !company) return;
+		question = '';
+		const path = `/c/${company.slug}/ask?q=${encodeURIComponent(text)}`;
+		void goto(resolve(path as '/'));
+	}
 </script>
 
 <header class="topbar">
@@ -59,7 +71,7 @@ nothing to ask (building, empty, unreachable, invalid) and says why in its place
 		{/if}
 	</button>
 
-	<form class="ask" role="search" onsubmit={(e) => e.preventDefault()}>
+	<form class="ask" role="search" onsubmit={submit}>
 		<Input
 			label="Ask the brain"
 			hideLabel

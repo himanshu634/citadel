@@ -1,0 +1,483 @@
+/**
+ * The agent's walk through the graph, as the Ask page draws it (design direction D).
+ *
+ * Why: each tool call arrives with the nodes and relationships it touched (brain/agents/walk.py).
+ * This module merges the steps of one answer into one picture, lays it out so earlier nodes stay
+ * put as new steps arrive, works out what a citation lights up, and turns rows, calls and the
+ * answer's Markdown into plain values the components render. Pure: no Svelte, no fetch.
+ */
+import type { AskSource, NodeType, WalkNode, WalkRel, WalkStep } from './types';
+
+const TYPES: Record<string, NodeType> = {
+	Person: 'person',
+	Team: 'team',
+	System: 'system',
+	WorkItem: 'work-item',
+	Change: 'change',
+	Document: 'document'
+};
+
+/** The UI's node type for a graph label (unknown labels draw as documents: grey). */
+export function nodeType(label: string | null | undefined): NodeType {
+	return (label && TYPES[label]) || 'document';
+}
+
+export const relKey = (r: Pick<WalkRel, 'from' | 'to' | 'type'>) => `${r.from}|${r.type}|${r.to}`;
+
+export interface MergedNode extends WalkNode {
+	/** The step that first touched it. */
+	step: number;
+}
+export interface MergedRel extends WalkRel {
+	step: number;
+	key: string;
+}
+export interface Walk {
+	nodes: MergedNode[];
+	rels: MergedRel[];
+	/** The node the walk starts from: drawn in ink at the centre. */
+	focus: string | null;
+}
+
+/** The graph steps (not the answer check) merged in order; each node and link keeps its first step. */
+export function mergeWalk(steps: WalkStep[]): Walk {
+	const nodes = new Map<string, MergedNode>();
+	const rels = new Map<string, MergedRel>();
+	let focus: string | null = null;
+	for (const s of steps) {
+		if (s.n === null) continue;
+		for (const n of s.nodes ?? []) {
+			focus ??= n.uid;
+			if (!nodes.has(n.uid)) nodes.set(n.uid, { ...n, step: s.n });
+		}
+		for (const r of s.rels ?? []) {
+			const key = relKey(r);
+			if (!rels.has(key)) rels.set(key, { ...r, step: s.n, key });
+		}
+	}
+	return { nodes: [...nodes.values()], rels: [...rels.values()], focus };
+}
+
+// --- layout -------------------------------------------------------------------------------
+
+export interface Point {
+	x: number;
+	y: number;
+}
+
+/** The stage's coordinate space; the component scales it to its box. */
+export const STAGE = { width: 640, height: 420 } as const;
+const MARGIN_X = 104; // node pills are wide: keep their centres this far from the sides
+const MARGIN_Y = 26;
+const SQUASH = 2; // lay out in a space this much narrower, so pills repel more sideways
+const ITERATIONS = 180;
+
+function hash(s: string): number {
+	let h = 2166136261;
+	for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+	return (h >>> 0) / 4294967296;
+}
+
+/**
+ * Positions for every node. Deterministic. Nodes in `prev` start where they were and move little,
+ * so a new step adds to the picture instead of reshuffling it; new nodes start beside a neighbour.
+ * `halfWidth` says how wide each node is drawn (see `pillHalfWidth`), so names never overlap.
+ */
+export function layoutWalk(
+	walk: Walk,
+	prev: ReadonlyMap<string, Point> = new Map(),
+	halfWidth: (uid: string) => number = (uid) => pillHalfWidth(walk.nodes.find((n) => n.uid === uid)?.title ?? '')
+): Map<string, Point> {
+	const W = STAGE.width / SQUASH;
+	const H = STAGE.height;
+	const cx = W / 2;
+	const cy = H / 2;
+	const minX = MARGIN_X / SQUASH;
+	const maxX = W - minX;
+	const clampX = (x: number) => Math.min(maxX, Math.max(minX, x));
+	const clampY = (y: number) => Math.min(H - MARGIN_Y, Math.max(MARGIN_Y, y));
+
+	const pos = new Map<string, Point>();
+	const old = new Set<string>();
+	const neighbours = new Map<string, string[]>();
+	for (const r of walk.rels) {
+		neighbours.set(r.from, [...(neighbours.get(r.from) ?? []), r.to]);
+		neighbours.set(r.to, [...(neighbours.get(r.to) ?? []), r.from]);
+	}
+	walk.nodes.forEach((n, i) => {
+		const p = prev.get(n.uid);
+		if (p) {
+			pos.set(n.uid, { x: p.x / SQUASH, y: p.y });
+			old.add(n.uid);
+			return;
+		}
+		if (n.uid === walk.focus) {
+			pos.set(n.uid, { x: cx, y: cy });
+			return;
+		}
+		const angle = hash(n.uid) * Math.PI * 2;
+		const anchor = (neighbours.get(n.uid) ?? []).map((u) => pos.get(u)).find(Boolean);
+		const base = anchor ?? { x: cx, y: cy };
+		const r = anchor ? 110 : 90 + (i % 5) * 18;
+		pos.set(n.uid, { x: clampX(base.x + Math.cos(angle) * r / SQUASH), y: clampY(base.y + Math.sin(angle) * r) });
+	});
+
+	const ids = walk.nodes.map((n) => n.uid);
+	const start = new Map([...old].map((u) => [u, { ...pos.get(u)! }]));
+	const k =Math.sqrt((W * H) / Math.max(ids.length, 1)) * 0.85;
+	for (let it = 0; it < ITERATIONS; it++) {
+		const temp = (W / 8) * (1 - it / ITERATIONS) + 0.5;
+		const disp = new Map<string, Point>(ids.map((u) => [u, { x: 0, y: 0 }]));
+		for (let i = 0; i < ids.length; i++) {
+			for (let j = i + 1; j < ids.length; j++) {
+				const a = pos.get(ids[i])!;
+				const b = pos.get(ids[j])!;
+				let dx = a.x - b.x;
+				let dy = a.y - b.y;
+				let d = Math.hypot(dx, dy);
+				if (d < 0.01) {
+					dx = hash(ids[i] + ids[j]) - 0.5;
+					dy = 0.5;
+					d = Math.hypot(dx, dy);
+				}
+				const f = (k * k) / d;
+				const da = disp.get(ids[i])!;
+				const db = disp.get(ids[j])!;
+				da.x += (dx / d) * f;
+				da.y += (dy / d) * f;
+				db.x -= (dx / d) * f;
+				db.y -= (dy / d) * f;
+			}
+		}
+		for (const r of walk.rels) {
+			const a = pos.get(r.from);
+			const b = pos.get(r.to);
+			if (!a || !b) continue;
+			const dx = a.x - b.x;
+			const dy = a.y - b.y;
+			const d = Math.max(Math.hypot(dx, dy), 0.01);
+			const f = (d * d) / k;
+			const da = disp.get(r.from)!;
+			const db = disp.get(r.to)!;
+			da.x -= (dx / d) * f;
+			da.y -= (dy / d) * f;
+			db.x += (dx / d) * f;
+			db.y += (dy / d) * f;
+		}
+		for (const u of ids) {
+			if (u === walk.focus) continue; // the start stays in the middle
+			const p = pos.get(u)!;
+			const v = disp.get(u)!;
+			v.x += (cx - p.x) * GRAVITY * k; // a little gravity keeps islands on stage
+			v.y += (cy - p.y) * GRAVITY * k;
+			const len = Math.max(Math.hypot(v.x, v.y), 0.01);
+			const step = Math.min(len, old.has(u) ? temp * 0.2 : temp);
+			p.x = clampX(p.x + (v.x / len) * step);
+			p.y = clampY(p.y + (v.y / len) * step);
+			const from = start.get(u);
+			if (from) {
+				// A node already drawn may drift only a little from where the reader saw it.
+				const dx = (p.x - from.x) * SQUASH;
+				const dy = p.y - from.y;
+				const drift = Math.hypot(dx, dy);
+				if (drift > MAX_DRIFT) {
+					p.x = from.x + ((dx / drift) * MAX_DRIFT) / SQUASH;
+					p.y = from.y + (dy / drift) * MAX_DRIFT;
+				}
+			}
+		}
+	}
+	const out = new Map([...pos].map(([u, p]) => [u, { x: p.x * SQUASH, y: p.y }]));
+	separate(out, walk.focus, old, halfWidth);
+	return out;
+}
+
+const GRAVITY = 0.004;
+const MAX_DRIFT = 36; // stage units a drawn node may move when a step adds to the walk
+const NODE_HALF_HEIGHT = 15;
+const GAP = 6;
+
+/**
+ * Push apart nodes whose boxes overlap, along the axis that needs the smaller move. Forces work on
+ * centres; pills are wide, so this last pass is what keeps two names from printing on each other.
+ */
+function separate(
+	pos: Map<string, Point>,
+	focus: string | null,
+	old: ReadonlySet<string>,
+	halfWidth: (uid: string) => number
+) {
+	const ids = [...pos.keys()];
+	const weight = (u: string) => (u === focus ? 0 : old.has(u) ? 0.15 : 1);
+	const clamp = (u: string, p: Point) => {
+		const hw = halfWidth(u) + GAP;
+		p.x = Math.min(STAGE.width - hw, Math.max(hw, p.x));
+		p.y = Math.min(STAGE.height - MARGIN_Y, Math.max(MARGIN_Y, p.y));
+	};
+	for (let round = 0; round < 60; round++) {
+		let moved = false;
+		for (let i = 0; i < ids.length; i++) {
+			for (let j = i + 1; j < ids.length; j++) {
+				const a = pos.get(ids[i])!;
+				const b = pos.get(ids[j])!;
+				const dx = b.x - a.x;
+				const dy = b.y - a.y;
+				const ox = halfWidth(ids[i]) + halfWidth(ids[j]) + GAP - Math.abs(dx);
+				const oy = NODE_HALF_HEIGHT * 2 + GAP - Math.abs(dy);
+				if (ox <= 0 || oy <= 0) continue;
+				moved = true;
+				const alongY = oy <= ox;
+				const sign = (alongY ? dy : dx) >= 0 ? 1 : -1;
+				const amount = alongY ? oy : ox;
+				// The start never moves; nodes already drawn give way less than new ones.
+				const wa = weight(ids[i]);
+				const wb = weight(ids[j]);
+				const shareA = wa + wb === 0 ? 0.5 : wa / (wa + wb);
+				const shareB = 1 - shareA;
+				if (alongY) {
+					a.y -= sign * amount * shareA;
+					b.y += sign * amount * shareB;
+				} else {
+					a.x -= sign * amount * shareA;
+					b.x += sign * amount * shareB;
+				}
+				clamp(ids[i], a);
+				clamp(ids[j], b);
+			}
+		}
+		if (!moved) break;
+	}
+}
+
+/** Half the width of a node's pill in stage units, from its name: what `separate` keeps apart. */
+export function pillHalfWidth(title: string | null, maxChars = 26): number {
+	if (title === null) return 8; // a dot
+	return (Math.min(title.length, maxChars) * 7 + 34) / 2;
+}
+
+// --- what a citation lights up -----------------------------------------------------------
+
+export interface Highlight {
+	nodes: Set<string>;
+	rels: Set<string>;
+}
+
+interface PathRow {
+	nodes?: { uid: string }[];
+	rels?: { type: string; from: string; to: string }[];
+}
+
+/**
+ * The part of the walk that backs a cited node: in the step that first returned it, the paths
+ * (from path_between) that run through it, else its own links in that step. Never the whole merged
+ * graph: a team or system is linked to almost everything, and lighting everything shows nothing.
+ */
+export function highlightFor(source: Pick<AskSource, 'uid' | 'step'>, steps: WalkStep[]): Highlight {
+	const { uid } = source;
+	const nodes = new Set([uid]);
+	const rels = new Set<string>();
+	const step =
+		steps.find((s) => s.n !== null && s.n === source.step) ??
+		steps.find((s) => s.n !== null && (s.nodes ?? []).some((n) => n.uid === uid));
+	if (!step) return { nodes, rels };
+	if (step.tool === 'path_between') {
+		const through = ((step.rows ?? []) as PathRow[]).filter((r) => r.nodes?.some((n) => n.uid === uid));
+		for (const row of through) {
+			row.nodes?.forEach((n) => nodes.add(n.uid));
+			row.rels?.forEach((r) => rels.add(relKey(r)));
+		}
+		if (through.length) return { nodes, rels };
+	}
+	for (const r of step.rels ?? []) {
+		if (r.from !== uid && r.to !== uid) continue;
+		rels.add(relKey(r));
+		nodes.add(r.from);
+		nodes.add(r.to);
+	}
+	return { nodes, rels };
+}
+
+// --- words for steps and rows ------------------------------------------------------------
+
+/** A uid as a person reads it: person:alice -> alice, x:pr:10 -> PR #10. */
+export function shortUid(uid: string): string {
+	const parts = uid.split(':');
+	const [kind, id] = parts.slice(-2);
+	if (parts.length >= 3 && kind === 'pr') return `PR #${id}`;
+	if (parts.length >= 3 && kind === 'issue') return `issue #${id}`;
+	if (parts.length >= 3 && kind === 'commit') return `commit ${id}`;
+	return parts.slice(1).join(':') || uid;
+}
+
+const str = (v: unknown) => (typeof v === 'string' ? v : v === undefined || v === null ? '' : String(v));
+
+/** What the agent is doing in this step, in plain words (the thread's live line). */
+export function stepSentence(step: Pick<WalkStep, 'tool' | 'input'>): string {
+	const p = step.input ?? {};
+	switch (step.tool) {
+		case 'person_profile':
+			return `Looking up ${str(p.login)}'s profile`;
+		case 'experts_for_system':
+			return `Asking who knows ${str(p.system)} best`;
+		case 'path_between':
+			return `Finding how ${shortUid(str(p.from_uid))} and ${shortUid(str(p.to_uid))} connect`;
+		case 'work_history':
+			return `Reading recent work on ${str(p.system)}`;
+		case 'impact_of':
+			return `Checking what changes together with ${str(p.system)}`;
+		case 'related_work_items':
+			return `Searching PRs and issues for "${str(p.text)}"`;
+		case 'related_documents':
+			return `Searching docs for "${str(p.text)}"`;
+		case 'get_entity':
+			return `Opening ${shortUid(str(p.uid))}`;
+		case 'list_systems':
+			return 'Listing the systems';
+		case 'owners_vs_experts':
+			return 'Comparing declared owners with who does the work';
+		case 'recent_work_items':
+			return 'Reading the latest work';
+		case 'people_activity':
+			return 'Listing people and their activity';
+		case 'graph_stats':
+			return 'Counting what the graph holds';
+		case 'submit_answer':
+			return 'Checking the answer against what was found';
+		default:
+			return `Running ${step.tool}`;
+	}
+}
+
+/** The call as code: experts_for_system(system: "Auth"); paths read alice → carol. */
+export function stepCall(step: Pick<WalkStep, 'tool' | 'input'>): string {
+	const p = step.input ?? {};
+	if (step.tool === 'path_between') return `path_between(${shortUid(str(p.from_uid))} → ${shortUid(str(p.to_uid))})`;
+	const args = Object.entries(p).map(([k, v]) => `${k}: ${JSON.stringify(v)}`);
+	return `${step.tool}(${args.join(', ')})`;
+}
+
+export interface ChainLink {
+	title: string;
+	uid: string;
+	/** The relationship to the next node and which way it points; absent on the last node. */
+	rel?: string;
+	forward?: boolean;
+}
+export interface RowView {
+	/** A path, node by node (path_between rows). */
+	chain?: ChainLink[];
+	/** Otherwise one line: the row's name and a few of its numbers. */
+	text?: string;
+	/** The nodes the row names, to mark the citations that used it. */
+	uids: string[];
+}
+
+const NAME_KEYS = ['title', 'login', 'system', 'name', 'subject', 'path', 'kind'];
+const NUMBER_KEYS: [string, string][] = [
+	['score', 'score'],
+	['changes', 'changes'],
+	['reviews', 'reviews'],
+	['prs', 'PRs'],
+	['prs_authored', 'PRs'],
+	['co_changes', 'changed together'],
+	['count', ''],
+	['neighbour_count', 'links']
+];
+
+function uidsOf(value: unknown, out: string[] = []): string[] {
+	if (Array.isArray(value)) value.forEach((v) => uidsOf(v, out));
+	else if (value && typeof value === 'object') {
+		for (const [k, v] of Object.entries(value)) {
+			if ((k === 'uid' || k.endsWith('_uid')) && typeof v === 'string') out.push(v);
+			else if (typeof v === 'object') uidsOf(v, out);
+		}
+	}
+	return out;
+}
+
+/** The rows a step returned, ready to list under it. */
+export function rowViews(step: Pick<WalkStep, 'tool' | 'rows'>): RowView[] {
+	return (step.rows ?? []).map((raw) => {
+		const row = (raw ?? {}) as Record<string, unknown>;
+		if (step.tool === 'path_between') {
+			const nodes = (row.nodes ?? []) as { uid: string; name?: string | null }[];
+			const rels = (row.rels ?? []) as { type: string; from: string; to: string }[];
+			const chain = nodes.map((n, i): ChainLink => {
+				const next = nodes[i + 1];
+				const rel = next && rels.find((r) => (r.from === n.uid && r.to === next.uid) || (r.from === next.uid && r.to === n.uid));
+				return {
+					title: n.name ?? shortUid(n.uid),
+					uid: n.uid,
+					...(rel ? { rel: rel.type, forward: rel.from === n.uid } : {})
+				};
+			});
+			return { chain, uids: nodes.map((n) => n.uid) };
+		}
+		const nameKey = NAME_KEYS.find((k) => typeof row[k] === 'string');
+		let name = nameKey ? str(row[nameKey]) : '';
+		if (typeof row.number === 'number' && nameKey === 'title') name = `#${row.number} ${name}`;
+		const numbers = NUMBER_KEYS.filter(([k]) => typeof row[k] === 'number')
+			.slice(0, 3)
+			.map(([k, label]) => {
+				const v = row[k] as number;
+				const n = Number.isInteger(v) ? String(v) : v.toFixed(2);
+				return label ? `${label} ${n}` : n;
+			});
+		return { text: [name || 'row', ...numbers].join(' · '), uids: uidsOf(row) };
+	});
+}
+
+// --- the answer's Markdown ---------------------------------------------------------------
+
+export type Inline =
+	| { kind: 'text' | 'bold' | 'code'; text: string }
+	| { kind: 'cite'; n: number };
+export type Block =
+	| { kind: 'p'; inlines: Inline[] }
+	| { kind: 'ul' | 'ol'; items: Inline[][] };
+
+const INLINE = /\*\*(.+?)\*\*|`([^`]+)`|\[(\d+(?:\s*,\s*\d+)*)\]/g;
+
+export function inlines(text: string): Inline[] {
+	const out: Inline[] = [];
+	let at = 0;
+	for (const m of text.matchAll(INLINE)) {
+		if (m.index > at) out.push({ kind: 'text', text: text.slice(at, m.index) });
+		if (m[1] !== undefined) out.push({ kind: 'bold', text: m[1] });
+		else if (m[2] !== undefined) out.push({ kind: 'code', text: m[2] });
+		else for (const n of m[3].split(',')) out.push({ kind: 'cite', n: Number(n.trim()) });
+		at = m.index + m[0].length;
+	}
+	if (at < text.length) out.push({ kind: 'text', text: text.slice(at) });
+	return out;
+}
+
+/**
+ * The few Markdown forms answers use: paragraphs, - and 1. lists, **bold**, `code` and [n]
+ * citations. Everything is text; nothing becomes HTML, so an answer can never inject markup.
+ */
+export function answerBlocks(text: string): Block[] {
+	const blocks: Block[] = [];
+	let para: string[] = [];
+	const flush = () => {
+		if (para.length) blocks.push({ kind: 'p', inlines: inlines(para.join(' ')) });
+		para = [];
+	};
+	for (const raw of text.split('\n')) {
+		const line = raw.trim();
+		const item = /^([-*]|\d+[.)])\s+(.*)$/.exec(line);
+		if (!line) {
+			flush();
+		} else if (item) {
+			flush();
+			const kind = /^\d/.test(item[1]) ? 'ol' : 'ul';
+			const last = blocks.at(-1);
+			if (last && last.kind === kind) last.items.push(inlines(item[2]));
+			else blocks.push({ kind, items: [inlines(item[2])] });
+		} else {
+			para.push(line.replace(/^#+\s*/, ''));
+		}
+	}
+	flush();
+	return blocks;
+}
