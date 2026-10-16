@@ -161,3 +161,48 @@ def test_system_path_rule_survives_an_earlier_mention():
     ]
     out = {r.uid: r for r in normalize(records, company())}
     assert out["system:Indexing"].path_rule == "src/index/**"
+
+
+def test_assignees_are_aliased_and_people_derived():
+    item = WorkItem(
+        uid="t1",
+        kind="ticket",
+        title="t",
+        state="Todo",
+        created_at="2026-05-01T00:00:00Z",
+        assignees=["Alice K"],
+    )
+    out = list(normalize([item], company()))
+    assert next(r for r in out if isinstance(r, WorkItem)).assignees == ["alice"]
+    assert Person(login="alice") in [
+        r.model_copy(update={"source": "unknown"}) for r in out if isinstance(r, Person)
+    ]
+
+
+def test_assignees_none_stays_none():
+    item = WorkItem(
+        uid="t1", kind="ticket", title="t", state="Todo", created_at="2026-05-01T00:00:00Z"
+    )
+    out = next(r for r in normalize([item], company()) if isinstance(r, WorkItem))
+    assert out.assignees is None
+
+
+def _old_ticket(status_category: str) -> WorkItem:
+    return WorkItem(
+        uid="t1",
+        kind="ticket",
+        title="t",
+        state="x",
+        status_category=status_category,
+        created_at="2025-01-01T00:00:00Z",
+    )
+
+
+def test_open_ticket_outside_window_is_kept():
+    cfg = company(window={"since": date(2026, 1, 1)})
+    assert "t1" in {r.uid for r in normalize([_old_ticket("todo")], cfg)}
+
+
+def test_closed_ticket_outside_window_is_dropped():
+    cfg = company(window={"since": date(2026, 1, 1)})
+    assert "t1" not in {r.uid for r in normalize([_old_ticket("done")], cfg)}

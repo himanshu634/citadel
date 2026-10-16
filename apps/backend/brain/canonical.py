@@ -15,7 +15,7 @@ Identity rules:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -148,6 +148,10 @@ class Change(Record):
 
 
 WorkItemKind = Literal["pull_request", "issue", "ticket", "thread"]
+# Where a ticket is in its workflow, whatever the tracker calls its states (`state` keeps those).
+StatusCategory = Literal["backlog", "todo", "in_progress", "done", "canceled"]
+CLOSED_STATUS: frozenset[str] = frozenset({"done", "canceled"})
+Priority = Literal["urgent", "high", "medium", "low"]
 
 
 class WorkItem(Record):
@@ -165,6 +169,23 @@ class WorkItem(Record):
     author_login: str | None = None
     labels: list[str] = []
     container: str | None = None  # repo, Jira project, Slack channel ...
+    # Ticket fields; None = the source does not have them (GitHub PRs and issues leave them out).
+    key: str | None = None  # the tracker's human id, e.g. "ENG-123"
+    status_category: StatusCategory | None = None
+    priority: Priority | None = None
+    due_date: date | None = None
+    assignees: list[str] | None = None  # logins; None = source has no assignees, [] = unassigned
+
+    @field_validator("assignees")
+    @classmethod
+    def _assignees_not_emails(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None and any("@" in a for a in v):
+            raise ValueError("assignees must be handles, not email addresses")
+        return v
+
+    def is_open_ticket(self) -> bool:
+        """A ticket that is still on someone's plate: normalize keeps it whatever its dates."""
+        return self.status_category is not None and self.status_category not in CLOSED_STATUS
 
     def changed_at(self) -> datetime | None:
         return _latest(self.created_at, self.updated_at, self.closed_at, self.merged_at)
@@ -218,7 +239,7 @@ class Ownership(Record):
     systems: list[str] = []  # explicit; if empty, normalize maps the pattern via path rules
 
 
-LinkRel = Literal["CLOSES", "MENTIONS", "PART_OF", "MEMBER_OF"]
+LinkRel = Literal["CLOSES", "MENTIONS", "PART_OF", "MEMBER_OF", "BLOCKS"]
 LinkLabel = Literal["Person", "Team", "System", "Change", "WorkItem", "Document"]
 
 # The only (rel, from, to) combinations the graph model allows. Each one has its own load query
@@ -231,7 +252,21 @@ ALLOWED_LINKS: set[tuple[str, str, str]] = {
     ("MENTIONS", "WorkItem", "System"),
     ("MENTIONS", "Document", "WorkItem"),
     ("MENTIONS", "Document", "System"),
+    ("BLOCKS", "WorkItem", "WorkItem"),
 }
+
+# A link may point at a work item by URL when the target is not an id the source knows (a ticket
+# mentioning a GitHub PR). The loader matches such a ref to the work item with that `url`.
+URL_PREFIX = "url:"
+URL_LINKS: set[tuple[str, str, str]] = {("MENTIONS", "WorkItem", "WorkItem")}
+
+
+def url_ref(url: str) -> str:
+    return URL_PREFIX + url
+
+
+def is_url_ref(uid: str) -> bool:
+    return uid.startswith(URL_PREFIX)
 
 
 class Link(Record):
@@ -255,6 +290,10 @@ class Link(Record):
 
     @model_validator(mode="after")
     def _allowed(self):
+        if is_url_ref(self.from_uid):
+            raise ValueError("a url ref can only be the target of a link")
+        if is_url_ref(self.to_uid) and (self.rel, self.from_label, self.to_label) not in URL_LINKS:
+            raise ValueError(f"link {self.rel} cannot target a url ref (see canonical.URL_LINKS)")
         if (self.rel, self.from_label, self.to_label) not in ALLOWED_LINKS:
             raise ValueError(
                 f"link {self.rel} from {self.from_label} to {self.to_label} is not in the "

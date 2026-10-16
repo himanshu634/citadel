@@ -80,6 +80,19 @@ PRs, issues, tickets and chat threads share this shape; `kind` tells them apart.
 | `author_login` | str (optional) |  |
 | `labels` | list[str] |  |
 | `container` | str (optional) |  |
+| `key` | str (optional): the tracker's human id, e.g. `ENG-123` |  |
+| `status_category` | `backlog` / `todo` / `in_progress` / `done` / `canceled` (optional) |  |
+| `priority` | `urgent` / `high` / `medium` / `low` (optional) |  |
+| `due_date` | date, `2026-06-30` (optional) |  |
+| `assignees` | list[str] of logins (optional) |  |
+
+`state` keeps the tracker's own word ("In Review"); `status_category` is the same status in
+one shared vocabulary. A work item with a `status_category` other than `done` / `canceled` is an
+open ticket: normalize keeps it even when it is older than `window.since`.
+
+`assignees` tells "not tracked" from "nobody": leave it out (null) when the source has no
+assignees, use `[]` when the item is unassigned. Entries are logins, never emails, and go
+through `people.aliases` like every other login.
 
 ```json
 {"author_login": "alice", "body": "We decided to replace server-side sessions with short-lived JWTs because the session table was the main source of DB load. Refresh tokens stay server-side. Closes #11.", "closed_at": "2026-02-06T12:00:00Z", "container": "synthetic/app", "created_at": "2026-02-03T12:00:00Z", "kind": "pull_request", "merged_at": "2026-02-06T12:00:00Z", "number": 1, "state": "merged", "title": "feat(auth): switch sessions to JWT", "uid": "synthetic:pr:1", "url": "https://example.com/synthetic/app/pull/1"}
@@ -181,7 +194,7 @@ Typed edges between records that already exist. Allowed combinations are listed 
 
 | field | type | required |
 |---|---|---|
-| `rel` | `CLOSES` / `MENTIONS` / `PART_OF` / `MEMBER_OF` | yes |
+| `rel` | `CLOSES` / `MENTIONS` / `PART_OF` / `MEMBER_OF` / `BLOCKS` | yes |
 | `from_uid` | str | yes |
 | `from_label` | `Person` / `Team` / `System` / `Change` / `WorkItem` / `Document` | yes |
 | `to_uid` | str | yes |
@@ -198,6 +211,7 @@ Typed edges between records that already exist. Allowed combinations are listed 
 
 | rel | from | to |
 |---|---|---|
+| BLOCKS | WorkItem | WorkItem |
 | CLOSES | WorkItem | WorkItem |
 | MEMBER_OF | Person | Team |
 | MENTIONS | Document | System |
@@ -205,6 +219,13 @@ Typed edges between records that already exist. Allowed combinations are listed 
 | MENTIONS | WorkItem | System |
 | MENTIONS | WorkItem | WorkItem |
 | PART_OF | Change | WorkItem |
+
+`BLOCKS` runs from the blocking item to the blocked one.
+
+A `MENTIONS` link from a WorkItem to a WorkItem may name its target by URL instead of by uid:
+`"to_uid": "url:https://github.com/acme/app/pull/12"`. The loader matches it to the work item
+whose `url` is that address, so a ticket can point at a PR the source has no uid for. This is the
+only link where a `url:` target is accepted, and a `url:` ref is never a `from_uid`.
 
 Relationship types and labels cannot be Cypher parameters, so each combination has its own
 load query (`queries/load/link_*.cypher`). A link whose end node is not in the graph is
