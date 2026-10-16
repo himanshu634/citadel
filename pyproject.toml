@@ -16,8 +16,9 @@ agents = { workspace = true }
 brain = { workspace = true }
 
 [tool.pytest.ini_options]
-testpaths = ["apps/brain/tests"]
-pythonpath = ["apps/brain"]  # the evals package (apps/brain/evals) sits next to brain
+testpaths = ["apps/brain/tests", "apps/agents/tests"]
+pythonpath = ["apps/brain"]  # brain's API tests import `tests.api.conftest` by name
+addopts = ["-p", "brain.testing"]  # shared FalkorDB fixtures, one per session for every package
 
 [tool.ruff]
 line-length = 100

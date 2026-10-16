@@ -28,7 +28,7 @@ def no_graph(monkeypatch):
     """Unit tests must not need FalkorDB: every company reads as never built, and no slug has
     graphs left behind."""
     monkeypatch.setattr("brain.api.companies.status_of", lambda slug: ("empty", None))
-    monkeypatch.setattr("brain.db.company_graphs", lambda slug: [])
+    monkeypatch.setattr("agents.checkpoint.company_graphs", lambda slug: [])
 
 
 @pytest.fixture

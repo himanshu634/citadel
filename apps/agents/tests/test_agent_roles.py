@@ -9,16 +9,16 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
-from agent_fakes import fake_brain
+from agents import acl
+from agents.roles import ROLES, Ctx
+from agents.runner import grounding, missing_tools, run_job
+from agents.sim import scenarios
+from agents.testing import fake_brain
+from agents.work.memory_store import MemoryStore
+from agents.work.submits import SUBMITS, SubmitQa
 from anthropic.types.beta import BetaToolUseBlock, BetaUsage
-from brain import acl
-from brain.agents.roles import ROLES, Ctx
-from brain.agents.runner import grounding, missing_tools, run_job
 from brain.config import get_settings
-from brain.sim import scenarios
-from brain.work.memory_store import MemoryStore
-from brain.work.submits import SUBMITS, SubmitQa
-from conftest import needs_graph
+from brain.testing import needs_graph
 
 
 @pytest.fixture(autouse=True)

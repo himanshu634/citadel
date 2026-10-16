@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 import pytest
+from agents import checkpoint
 from brain import config, db, loader
 from brain.api import create_app
 from brain.api.companies import status_of
@@ -143,7 +144,7 @@ def leave_build_history(runner) -> None:
 
 
 def leave_graphs(monkeypatch, *names: str) -> None:
-    monkeypatch.setattr(db, "company_graphs", lambda slug: list(names))
+    monkeypatch.setattr(checkpoint, "company_graphs", lambda slug: list(names))
 
 
 @pytest.mark.parametrize(
@@ -180,7 +181,7 @@ def test_slug_check_with_the_graph_down_uses_the_files(client, api_root, monkeyp
     def down(slug):
         raise error("unreachable")
 
-    monkeypatch.setattr(db, "company_graphs", down)
+    monkeypatch.setattr(checkpoint, "company_graphs", down)
     assert client.post("/api/companies/validate", json=VALID_DRAFT).json()["slug_taken"] is False
     assert client.post("/api/companies", json=VALID_DRAFT).status_code == 201
 

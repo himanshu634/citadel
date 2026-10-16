@@ -5,11 +5,11 @@ from __future__ import annotations
 import threading
 
 import pytest
-from brain import acl
-from brain.work import store as work_store
-from brain.work.memory_store import MemoryStore
-from brain.work.model import Task
-from brain.work.moves import LEASE_S, MOVES
+from agents import acl
+from agents.work import store as work_store
+from agents.work.memory_store import MemoryStore
+from agents.work.model import Task
+from agents.work.moves import LEASE_S, MOVES
 
 NOW = 1_000_000
 

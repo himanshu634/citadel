@@ -6,8 +6,8 @@ ANTHROPIC_API_KEY=... make test ARGS="apps/brain/tests/test_agent_live.py"
 from __future__ import annotations
 
 import pytest
+from agents.ask import ask
 from brain import db
-from brain.agents.ask import ask
 from brain.config import get_settings
 
 

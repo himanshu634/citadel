@@ -5,11 +5,11 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from agents import ask as agent
+from agents.testing import TOOLSET, FakeClient, reply, submit, tool_use
 from brain import db
-from brain.agents import ask as agent
 from brain.config import get_settings
 from langchain_falkordb.checkpoint import FalkorDBSaver
-from tests.test_agent import TOOLSET, FakeClient, reply, submit, tool_use
 
 try:
     db.ping()

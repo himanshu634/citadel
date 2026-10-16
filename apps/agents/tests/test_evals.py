@@ -1,4 +1,4 @@
-"""The eval harness (apps/brain/evals) with a scripted client: no API, no database."""
+"""The eval harness (agents/evals) with a scripted client: no API, no database."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import json
 from dataclasses import dataclass
 
 import pytest
+from agents.evals import cases, run
+from agents.evals.cases import Case, Expect, Gold, GoldResolver
+from agents.evals.graders import grade
+from agents.testing import FakeClient, reply, submit, tool_use
+from agents.traces import step_summary
 from brain import tools
-from brain.agents.traces import step_summary
-from evals import cases, run
-from evals.cases import Case, Expect, Gold, GoldResolver
-from evals.graders import grade
 from pydantic import BaseModel
-from test_agent import FakeClient, reply, submit, tool_use
 
 # --- the case file ----------------------------------------------------------------------------
 

@@ -8,7 +8,6 @@ from pathlib import Path
 from brain import canonical as c
 from brain import db, loader, schema, tools
 from brain.adapters.canonical_jsonl import CanonicalJsonlAdapter
-from brain.agents.toolset import Toolset
 from conftest import SYNTHETIC, needs_graph, synthetic_company
 
 TICKETS = SYNTHETIC / "tickets"
@@ -112,14 +111,6 @@ def test_waiting_on_alice(ticket_graph):
 def test_waiting_on_ignores_own_tickets(ticket_graph):
     """carol's IDN-2 is blocked by others, and blocks nothing: nobody waits on her."""
     assert tools.waiting_on(ticket_graph, "carol") == []
-
-
-@needs_graph
-def test_ticket_rows_are_citable(ticket_graph):
-    outcome = Toolset(tools.TOOLS, tools.call).call(ticket_graph, "blocked_on", {"login": "carol"})
-    assert not outcome.is_error
-    assert outcome.seen["synthetic:ticket:PAY-3"]["title"] == "Usage-based add-ons"
-    assert "synthetic:pr:9" in outcome.seen
 
 
 @needs_graph

@@ -1,4 +1,4 @@
-"""Online traces (brain/agents/traces.py) and the thumbs-down drafts (evals/drafts.py), with a
+"""Online traces (agents/traces.py) and the thumbs-down drafts (agents/evals/drafts.py), with a
 scripted Claude: no API calls, no database."""
 
 from __future__ import annotations
@@ -8,13 +8,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import yaml
-from brain import cli, config, registry
-from brain.agents import ask as agent
-from brain.agents.traces import Feedback, Trace, TraceStore, new_trace, summarize, window
-from conftest import synthetic_company
-from evals import cases, drafts
+from agents import ask as agent
+from agents import cli
+from agents.evals import cases, drafts
+from agents.testing import TOOLSET, FakeClient, reply, settings, submit, text, tool_use  # noqa: F401
+from agents.traces import Feedback, Trace, TraceStore, new_trace, summarize, window
+from brain import config, registry
+from brain.testing import synthetic_company
 from langgraph.checkpoint.memory import InMemorySaver
-from tests.test_agent import TOOLSET, FakeClient, reply, settings, submit, text, tool_use  # noqa: F401
 from typer.testing import CliRunner
 
 NOW = datetime(2026, 10, 16, 12, tzinfo=UTC)
@@ -154,8 +155,8 @@ def test_an_empty_window_has_no_rates():
 
 
 def test_cli_ask_keeps_a_trace_and_offline_does_not(root, monkeypatch):
-    monkeypatch.setattr("brain.db.checkpointer", lambda slug: InMemorySaver())
-    monkeypatch.setattr("brain.llm.client", lambda: FakeClient(reply(submit("t1", "None.", []))))
+    monkeypatch.setattr("agents.checkpoint.checkpointer", lambda slug: InMemorySaver())
+    monkeypatch.setattr("agents.llm.client", lambda: FakeClient(reply(submit("t1", "None.", []))))
     answer = cli._run_ask("synthetic", "Who knows Auth?", None)
     offline = FakeClient(reply(submit("t1", "Scripted.", [])))
     cli._run_ask("synthetic", "Which systems?", answer.thread_id, offline)

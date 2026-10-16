@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import threading
 
-from brain.agents import ask as agent
+from agents import ask as agent
+from agents.testing import TOOLSET, FakeClient, reply, settings, submit, tool_use  # noqa: F401
 from langgraph.checkpoint.memory import InMemorySaver
-from tests.test_agent import TOOLSET, FakeClient, reply, settings, submit, tool_use  # noqa: F401
 
 
 def events(client, question="Why JWT?", thread_id=None, **kw):

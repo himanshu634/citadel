@@ -3,105 +3,25 @@
 from __future__ import annotations
 
 import json
-from contextlib import nullcontext
-from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
-from anthropic.types.beta import BetaTextBlock, BetaToolUseBlock, BetaUsage
-from brain.agents import ask as agent
-from brain.agents import loop
-from brain.agents.toolset import Toolset
+from agents import ask as agent
+from agents import loop
+from agents.testing import (  # noqa: F401  (settings: autouse fixture)
+    TOOLSET,
+    FakeClient,
+    FakeTool,
+    reply,
+    settings,
+    submit,
+    text,
+    tool_use,
+)
+from agents.toolset import Toolset
 from brain.config import get_settings
 from langgraph.checkpoint.memory import InMemorySaver
-from pydantic import BaseModel, Field
-
-
-@pytest.fixture(autouse=True)
-def settings(monkeypatch):
-    """Pin the Claude settings so a local .env can't change what the tests expect."""
-    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-haiku-5-5")
-    monkeypatch.setenv("ANTHROPIC_EFFORT", "medium")
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
-
-
-# --- fakes ------------------------------------------------------------------------------------
-
-
-class SearchParams(BaseModel):
-    text: str = Field(description="what to look for")
-    limit: int = 10
-
-
-class Row(BaseModel):
-    uid: str
-    title: str
-    url: str | None = None
-    author_uid: str | None = None
-
-
-@dataclass
-class FakeTool:
-    name: str
-    description: str
-    params: type[BaseModel]
-
-
-ROWS = [
-    Row(uid="pr:1", title="Switch sessions to JWT", url="https://x/pr/1", author_uid="person:a"),
-    Row(uid="issue:11", title="Session table load"),
-]
-
-
-def run(slug: str, name: str, **params) -> list[BaseModel]:
-    assert slug == "synthetic"
-    if params["text"] == "boom":
-        raise RuntimeError("query failed")
-    return ROWS[: params["limit"]]
-
-
-TOOLSET = Toolset(
-    tools={"related_work_items": FakeTool("related_work_items", "Find work items.", SearchParams)},
-    run=run,
-)
-
-
-def tool_use(id_: str, name: str, inp: dict) -> BetaToolUseBlock:
-    return BetaToolUseBlock(type="tool_use", id=id_, name=name, input=inp)
-
-
-def text(t: str) -> BetaTextBlock:
-    return BetaTextBlock(type="text", text=t)
-
-
-def reply(*blocks, stop="tool_use", details=None):
-    return SimpleNamespace(
-        content=list(blocks),
-        stop_reason=stop,
-        stop_details=details,
-        model="claude-haiku-5-5",
-        usage=BetaUsage(input_tokens=100, output_tokens=10, cache_read_input_tokens=80),
-    )
-
-
-class FakeClient:
-    """Plays back scripted replies and records every request."""
-
-    def __init__(self, *replies):
-        self.replies = list(replies)
-        self.requests: list[dict] = []
-        self.beta = SimpleNamespace(messages=SimpleNamespace(stream=self._stream))
-
-    def _stream(self, **kwargs):
-        self.requests.append(json.loads(json.dumps(kwargs)))  # snapshot, like the wire
-        msg = self.replies.pop(0)
-        return nullcontext(SimpleNamespace(get_final_message=lambda: msg))
-
-
-def submit(id_: str, answer: str, sources: list[str], path: list[str] | None = None):
-    return tool_use(id_, loop.SUBMIT, {"answer": answer, "sources": sources, "path": path or []})
+from pydantic import BaseModel
 
 
 def ask(client, **kw):
@@ -264,7 +184,7 @@ def test_replayable_drops_declined_model_internals_before_a_fallback(types, kept
 
 
 def test_real_tool_registry_becomes_sorted_tool_definitions():
-    from brain.agents.toolset import graph_toolset
+    from agents.toolset import graph_toolset
 
     defs = graph_toolset().definitions()
     names = [d["name"] for d in defs]
@@ -273,7 +193,7 @@ def test_real_tool_registry_becomes_sorted_tool_definitions():
 
 
 def test_rows_keyed_by_person_uid_are_citable_with_a_title():
-    from brain.agents.toolset import _collect_nodes
+    from agents.toolset import _collect_nodes
 
     seen: dict = {}
     _collect_nodes(
@@ -318,7 +238,7 @@ def test_step_limit_closes_open_tool_calls_so_the_thread_stays_valid(monkeypatch
 
 
 def test_router_sends_questions_to_the_brain_loop():
-    from brain.agents import graph
+    from agents import graph
 
     assert graph.router({}) == {"route": "brain"}
     client = FakeClient(reply(submit("t1", "Nothing found.", [])))
@@ -326,7 +246,7 @@ def test_router_sends_questions_to_the_brain_loop():
 
 
 def test_build_route_runs_the_placeholders_without_calling_claude(monkeypatch):
-    from brain.agents import graph
+    from agents import graph
 
     monkeypatch.setattr(graph, "router", lambda state: {"route": "build"})
     client = FakeClient()
@@ -335,7 +255,7 @@ def test_build_route_runs_the_placeholders_without_calling_claude(monkeypatch):
 
 
 def test_offline_client_runs_a_scripted_turn_through_the_real_loop():
-    from brain.agents.offline import OfflineClient
+    from agents.offline import OfflineClient
 
     class SystemsParams(BaseModel):
         limit: int = 100

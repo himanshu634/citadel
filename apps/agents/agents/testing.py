@@ -1,13 +1,118 @@
-"""A small fake brain for agent tests: canned rows for the graph tools the roles read.
+"""Test doubles for the agents, shared by the agents tests and the API tests.
 
-Shaped like the synthetic company (tests/test_graph.py has the real thing): four systems, a fix
-PR in Auth and in Web app (the regressions QA looks for), Billing and Web app coupled.
+- A scripted Claude (`FakeClient` plays back `reply(...)`s) and a one-tool `TOOLSET`, for the
+  brain loop without network or database. `settings` pins the Claude settings; import it into a
+  test module to make it autouse there.
+- A small fake brain (`fake_brain`): canned rows for the graph tools the roles read. Shaped like
+  the synthetic company (brain's tests/test_graph.py has the real thing): four systems, a fix PR
+  in Auth and in Web app (the regressions QA looks for), Billing and Web app coupled.
 """
 
 from __future__ import annotations
 
+import json
 import re
+from contextlib import nullcontext
+from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
+
+import pytest
+from anthropic.types.beta import BetaTextBlock, BetaToolUseBlock, BetaUsage
+from brain.config import get_settings
+from pydantic import BaseModel, Field
+
+from agents import loop
+from agents.toolset import Toolset
+
+# --- a scripted Claude ------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def settings(monkeypatch):
+    """Pin the Claude settings so a local .env can't change what the tests expect."""
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-haiku-5-5")
+    monkeypatch.setenv("ANTHROPIC_EFFORT", "medium")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+class SearchParams(BaseModel):
+    text: str = Field(description="what to look for")
+    limit: int = 10
+
+
+class Row(BaseModel):
+    uid: str
+    title: str
+    url: str | None = None
+    author_uid: str | None = None
+
+
+@dataclass
+class FakeTool:
+    name: str
+    description: str
+    params: type[BaseModel]
+
+
+ROWS = [
+    Row(uid="pr:1", title="Switch sessions to JWT", url="https://x/pr/1", author_uid="person:a"),
+    Row(uid="issue:11", title="Session table load"),
+]
+
+
+def run(slug: str, name: str, **params) -> list[BaseModel]:
+    assert slug == "synthetic"
+    if params["text"] == "boom":
+        raise RuntimeError("query failed")
+    return ROWS[: params["limit"]]
+
+
+TOOLSET = Toolset(
+    tools={"related_work_items": FakeTool("related_work_items", "Find work items.", SearchParams)},
+    run=run,
+)
+
+
+def tool_use(id_: str, name: str, inp: dict) -> BetaToolUseBlock:
+    return BetaToolUseBlock(type="tool_use", id=id_, name=name, input=inp)
+
+
+def text(t: str) -> BetaTextBlock:
+    return BetaTextBlock(type="text", text=t)
+
+
+def reply(*blocks, stop="tool_use", details=None):
+    return SimpleNamespace(
+        content=list(blocks),
+        stop_reason=stop,
+        stop_details=details,
+        model="claude-haiku-5-5",
+        usage=BetaUsage(input_tokens=100, output_tokens=10, cache_read_input_tokens=80),
+    )
+
+
+class FakeClient:
+    """Plays back scripted replies and records every request."""
+
+    def __init__(self, *replies):
+        self.replies = list(replies)
+        self.requests: list[dict] = []
+        self.beta = SimpleNamespace(messages=SimpleNamespace(stream=self._stream))
+
+    def _stream(self, **kwargs):
+        self.requests.append(json.loads(json.dumps(kwargs)))  # snapshot, like the wire
+        msg = self.replies.pop(0)
+        return nullcontext(SimpleNamespace(get_final_message=lambda: msg))
+
+
+def submit(id_: str, answer: str, sources: list[str], path: list[str] | None = None):
+    return tool_use(id_, loop.SUBMIT, {"answer": answer, "sources": sources, "path": path or []})
+
+
+# --- a fake brain -----------------------------------------------------------------------------
 
 SYSTEMS = [
     {

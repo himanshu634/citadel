@@ -1,8 +1,8 @@
-"""What each tool call draws on the Ask page: brain.agents.walk (pure, no graph)."""
+"""What each tool call draws on the Ask page: agents.walk (pure, no graph)."""
 
 from __future__ import annotations
 
-from brain.agents import walk
+from agents import walk
 
 
 def rels(rs):
