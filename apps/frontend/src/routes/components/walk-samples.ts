@@ -1,4 +1,5 @@
 // Example walks for the gallery: the synthetic company's "Who does Alice work with?" (real rows).
+import type { Turn } from '$lib/ask.svelte';
 import type { AskAnswer, WalkNode, WalkStep } from '$lib/types';
 
 const person = (login: string): WalkNode => ({ uid: `person:${login}`, label: 'Person', title: login, url: null });
@@ -139,3 +140,71 @@ export const withMcp: AskAnswer = {
 
 export const stopped: AskAnswer = { ...answer, text: null, sources: [], stop: 'stopped' };
 export const refused: AskAnswer = { ...answer, text: null, sources: [], stop: 'refusal' };
+
+// --- Ask lanes (direction J + L) -------------------------------------------------------------
+
+const billing: WalkNode = { uid: 'system:Billing', label: 'System', title: 'Billing', url: null };
+
+/** One `work_history` call: the PRs touching a system. */
+const history = (n: number, system: WalkNode, prs: WalkNode[], over: Partial<WalkStep> = {}): WalkStep => ({
+	id: `h${n}`,
+	n,
+	tool: 'work_history',
+	input: { system: system.title },
+	status: 'done',
+	ms: 8 + n,
+	count: prs.length,
+	error: null,
+	rows: prs.map((p) => ({ uid: p.uid, title: p.title, system_uid: system.uid })),
+	nodes: [system, ...prs],
+	rels: prs.map((p) => ({ from: p.uid, to: system.uid, type: 'TOUCHES', inferred: false })),
+	...over
+});
+
+/**
+ * A settled answer with every kind of row: three `work_history` calls that fold into one, a call
+ * that found nothing, a call that failed, and the answer check.
+ */
+export const mixed: WalkStep[] = [
+	history(1, auth, [pr10, pr1]),
+	history(2, web, [pr(7, 'fix(web): keep the session on reload')]),
+	history(3, billing, [pr(4, 'feat(billing): retry failed invoices')]),
+	{ id: 'm4', n: 4, tool: 'path_between', input: { from_uid: 'person:alice', to_uid: 'person:bob', max_len: 2 }, status: 'done', ms: 41, count: 0, error: null, rows: [], nodes: [], rels: [] },
+	{ id: 'm5', n: 5, tool: 'get_entity', input: { uid: 'person:zed' }, status: 'done', ms: 2, count: 0, error: 'not found: person:zed', rows: [], nodes: [], rels: [] },
+	check
+];
+
+/** A follow-up to `done`: it starts from Auth and PR #10, which the first answer already found. */
+export const followUp: WalkStep[] = [
+	history(1, auth, [pr10, pr(12, 'fix(auth): refresh tokens before they expire')]),
+	history(2, web, [pr(7, 'fix(web): keep the session on reload')], { status: 'running', ms: null, count: null, rows: [], nodes: [], rels: [] })
+];
+
+const turn = (over: Partial<Turn>): Turn => ({
+	question: '',
+	model: null,
+	calls: [],
+	steps: [],
+	answer: null,
+	error: null,
+	status: 'done',
+	rating: null,
+	note: null,
+	rated: 'idle',
+	...over
+});
+
+/** Q1 running: the second call is out. */
+export const laneRunning: Turn = turn({ question: 'Who does Alice work with?', steps: running, status: 'running' });
+
+/** Q1 done and rated, with its answer. */
+export const laneDone: Turn = turn({
+	question: 'Who does Alice work with?',
+	steps: done,
+	answer: { ...answer, trace_id: 'gallery' },
+	rating: 'up',
+	rated: 'saved'
+});
+
+/** Q2 running: the follow-up, with Q1 as context. */
+export const laneFollowUp: Turn = turn({ question: 'And what did Carol change in Auth?', steps: followUp, status: 'running' });

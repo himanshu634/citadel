@@ -5,6 +5,7 @@
 		AnswerRating,
 		ActivityBars,
 		AddCompanyDialog,
+		AskLane,
 		Avatar,
 		Badge,
 		Banner,
@@ -30,7 +31,9 @@
 		NodeInspector,
 		Select,
 		SourceCard,
+		Splitter,
 		Stat,
+		StepRows,
 		Stepper,
 		Tabs,
 		TagInput,
@@ -38,6 +41,7 @@
 		Tooltip,
 		TurnTimeline,
 		WalkAnswer,
+		WalkLedger,
 		WalkSteps,
 		WorkItemRow
 	} from '$lib';
@@ -48,7 +52,8 @@
 	import { syntheticGraph } from './graph-samples';
 	import * as walks from './walk-samples';
 	import * as chatSamples from './chat-samples';
-	import { highlightFor } from '$lib/walk';
+	import { carryOver, highlightFor } from '$lib/walk';
+	import { WALK_LIMITS, clampSize } from '$lib/splitter';
 	import {
 		NODE_LABELS,
 		type CitedAnswer as Answer,
@@ -69,6 +74,25 @@
 	const walkActive = $derived(walkHover ?? 1);
 	const walkLit = $derived(highlightFor(walks.answer.sources[walkActive - 1], walks.done));
 	const walkCites = new Map(walks.answer.sources.map((s, i) => [s.uid, [i + 1]]));
+	let ledgerOpen = $state<string | null>('s3');
+	const carried = carryOver(walks.done, walks.followUp);
+
+	// A splitter between two boxes: the same columns as the Ask page's lanes.
+	let splitBox = $state<HTMLElement>();
+	let splitWidth = $state(0);
+	let splitRight = $state(0);
+	let splitSize = $state(WALK_LIMITS.reset);
+	let splitFolded = $state(false);
+	const measureSplit = () => {
+		if (splitBox) splitRight = splitBox.getBoundingClientRect().right;
+	};
+	$effect(() => {
+		void splitWidth;
+		measureSplit();
+	});
+	const splitPane = $derived(
+		splitFolded ? 'var(--walk-strip)' : `${Math.round(clampSize(splitSize, splitWidth) * splitWidth)}px`
+	);
 
 	// Example content for the gallery, taken from apps/brain/examples/synthetic_company.
 	const featuredAnswer: Answer = {
@@ -400,6 +424,8 @@
 		neighbour_count: neighbourhood(syntheticGraph, 'person:alice').uids.size - 1
 	};
 </script>
+
+<svelte:window onresize={measureSplit} />
 
 <svelte:head><title>Components | Citadel</title></svelte:head>
 
@@ -811,13 +837,134 @@
 		</div>
 	</Card>
 
+	<Card title="Walk ledger (Ask)">
+		<p class="note">
+			One row per graph step in plain words, a mark for how it ended, rows and time. Once the answer
+			is in, repeated calls of one tool fold into one row; a call that found nothing or failed keeps
+			its own row and says so. The last row is the answer check.
+		</p>
+		<div class="walks">
+			<figure>
+				<WalkLedger steps={walks.running} />
+				<figcaption>Running: step 1 done, step 2 reading rows</figcaption>
+			</figure>
+			<figure>
+				<WalkLedger steps={walks.mixed} settled />
+				<figcaption>Settled: three calls folded into one row, one empty call, one failed call, the check</figcaption>
+			</figure>
+			<figure>
+				<WalkLedger
+					steps={walks.done}
+					settled
+					open={ledgerOpen}
+					ontoggle={(key) => (ledgerOpen = ledgerOpen === key ? null : key)}
+					cites={walkCites}
+					active={walkActive}
+				/>
+				<figcaption>A row open: its call and rows; rows a citation used carry its number (click a row)</figcaption>
+			</figure>
+			<figure>
+				<WalkLedger steps={walks.rough} settled />
+				<figcaption>The answer check sent back with a reason</figcaption>
+			</figure>
+			<figure>
+				<StepRows step={walks.done[2]} cites={walkCites} active={walkActive} />
+				<figcaption>Step rows: paths read as chains of nodes and relationships</figcaption>
+			</figure>
+			<figure>
+				<StepRows step={walks.mixed[3]} />
+				<figcaption>Step rows: a call that found nothing</figcaption>
+			</figure>
+		</div>
+	</Card>
+
+	<Card title="Graph walk with earlier context (Ask)">
+		<p class="note">
+			A follow-up starts from what the conversation already knows. Nodes and links the earlier
+			questions found that touch this answer are drawn dashed and faint until a step reaches them.
+			New links draw on from their ends, and nodes glide with their links when a step lands.
+		</p>
+		<div class="walks">
+			<figure>
+				<GraphWalk steps={walks.followUp} />
+				<figcaption>Q2 without context</figcaption>
+			</figure>
+			<figure>
+				<GraphWalk steps={walks.followUp} {carried} />
+				<figcaption>Q2 with Q1 as context: {carried.nodes.length} earlier nodes, dashed</figcaption>
+			</figure>
+		</div>
+	</Card>
+
+	<Card title="Splitter">
+		<p class="note">
+			Drag the line, or focus it and use the arrow keys (Shift for bigger steps), Home and End. Enter
+			folds the pane and opens it again; a double-click puts it back to 38%. Drag past the narrowest
+			width and the pane folds.
+		</p>
+		<div class="split-box" bind:this={splitBox} bind:clientWidth={splitWidth}>
+			<div class="split-pane">
+				<p>Conversation</p>
+				<p class="muted">Takes the rest</p>
+			</div>
+			<div class="split-pane right" style:width={splitPane}>
+				<p>Walk</p>
+				<p class="muted tabular">{splitFolded ? 'Folded' : `${Math.round(splitSize * 100)}%`}</p>
+			</div>
+			{#if splitWidth}
+				<div class="split-line" style:right={splitPane}>
+					<Splitter
+						bind:size={splitSize}
+						bind:folded={splitFolded}
+						container={splitWidth}
+						right={splitRight}
+						label="Resize the walk box"
+					/>
+				</div>
+			{/if}
+		</div>
+	</Card>
+
+	<Card title="Ask lane">
+		<p class="note">
+			One question and everything it led to: the strip across the top, the conversation on the left
+			and that question's own walk on the right. The walk draws when the lane is near the screen.
+		</p>
+		<div class="lanes">
+			<figure>
+				<div class="lane-frame">
+					<AskLane turn={walks.laneRunning} index={0} brain="Synthetic Co" walkWidth="26rem" />
+				</div>
+				<figcaption>Running: the ledger shows step 2 reading rows; no answer yet</figcaption>
+			</figure>
+			<figure>
+				<div class="lane-frame">
+					<AskLane turn={walks.laneDone} index={0} brain="Synthetic Co" walkWidth="26rem" />
+				</div>
+				<figcaption>Done: answer with citations, thumbs and Replay walk</figcaption>
+			</figure>
+			<figure>
+				<div class="lane-frame">
+					<AskLane turn={walks.laneFollowUp} index={1} earlier={walks.done} brain="Synthetic Co" walkWidth="26rem" />
+				</div>
+				<figcaption>A follow-up (Q2) running, with Q1 as dashed context in its walk</figcaption>
+			</figure>
+			<figure>
+				<div class="lane-frame">
+					<AskLane turn={walks.laneDone} index={0} brain="Synthetic Co" walkWidth="var(--walk-strip)" folded />
+				</div>
+				<figcaption>The walk column folded to its strip: a dot and the node count</figcaption>
+			</figure>
+		</div>
+	</Card>
+
 	<Card title="Chat list and answer timeline (Ask)">
 		<div class="walks">
 			<figure>
 				<ChatList
 					threads={chatSamples.chats}
 					current="c2"
-					hrefOf={(id) => `#${id}`}
+					hrefOf={(id) => `?chat=${id}`}
 					more
 					now={chatSamples.NOW}
 					ondelete={() => {}}
@@ -825,9 +972,9 @@
 				<figcaption>Answering, open, stopped, failed and older chats; more to read</figcaption>
 			</figure>
 			<figure>
-				<ChatList threads={[]} hrefOf={(id) => `#${id}`} />
-				<ChatList threads={[]} hrefOf={(id) => `#${id}`} loading />
-				<ChatList threads={chatSamples.chats.slice(1, 2)} hrefOf={(id) => `#${id}`} error="FalkorDB is not reachable" now={chatSamples.NOW} />
+				<ChatList threads={[]} hrefOf={(id) => `?chat=${id}`} />
+				<ChatList threads={[]} hrefOf={(id) => `?chat=${id}`} loading />
+				<ChatList threads={chatSamples.chats.slice(1, 2)} hrefOf={(id) => `?chat=${id}`} error="FalkorDB is not reachable" now={chatSamples.NOW} />
 				<figcaption>No chats yet; loading; a failed read</figcaption>
 			</figure>
 			<figure>
@@ -1106,6 +1253,54 @@
 		flex-direction: column;
 		gap: var(--space-3);
 		margin: 0;
+	}
+	.split-box {
+		position: relative;
+		display: flex;
+		height: 12rem;
+		border: var(--border-hair) solid var(--color-line);
+		border-radius: var(--radius-md);
+		overflow: hidden;
+	}
+	.split-pane {
+		flex: 1;
+		min-width: 0;
+		padding: var(--space-4);
+	}
+	.split-pane.right {
+		flex: none;
+		margin-left: var(--splitter-hit);
+		background: var(--color-surface-sunken);
+	}
+	.split-pane p {
+		margin: 0;
+	}
+	.split-pane .muted {
+		color: var(--color-text-muted);
+		font-size: var(--text-sm);
+	}
+	.split-line {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+	}
+	.lanes {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-6);
+	}
+	.lanes figure {
+		margin: 0;
+	}
+	.lanes figcaption {
+		margin-top: var(--space-2);
+		color: var(--color-text-muted);
+		font-size: var(--text-xs);
+	}
+	.lane-frame {
+		overflow-x: auto;
+		border: var(--border-hair) solid var(--color-line);
+		border-radius: var(--radius-md);
 	}
 	.note {
 		max-width: 70ch;

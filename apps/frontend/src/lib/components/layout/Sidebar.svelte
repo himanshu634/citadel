@@ -1,7 +1,8 @@
 <!--
 @component
 Primary navigation. The current page is the solid ultramarine block: the one loud element in
-the shell. Sections that are not built yet stay visible but inert, marked "Soon".
+the shell. Sections that are not built yet stay visible but inert, marked "Soon". `folded` shows
+the icons only (`--sidebar-folded` wide), each named by a tooltip and for screen readers.
 -->
 <script lang="ts">
 	import { resolve } from '$app/paths';
@@ -18,9 +19,10 @@ the shell. Sections that are not built yet stay visible but inert, marked "Soon"
 	} from '@lucide/svelte';
 	import type { Component } from 'svelte';
 	import { getCompanies } from '$lib/companies.svelte';
+	import Tooltip from '../ui/Tooltip.svelte';
 
-	type Props = { onnavigate?: () => void };
-	let { onnavigate }: Props = $props();
+	type Props = { onnavigate?: () => void; folded?: boolean };
+	let { onnavigate, folded = false }: Props = $props();
 
 	const companies = getCompanies();
 	const slug = $derived(companies.current);
@@ -61,23 +63,42 @@ the shell. Sections that are not built yet stay visible but inert, marked "Soon"
 	}
 </script>
 
-<nav class="sidebar" aria-label="Main">
-	<a class="brand" href={resolve('/')} onclick={onnavigate}>Citadel</a>
-	{#if slug !== null && company}
-		<div class="company">
-			<p class="company-name">{company.name}</p>
-			<p class="company-graph">brain_{company.slug}</p>
-		</div>
+<nav class={['sidebar', { folded }]} aria-label="Main">
+	{#if folded}
+		<a class="brand mark" href={resolve('/')} onclick={onnavigate} aria-label="Citadel">C</a>
+	{:else}
+		<a class="brand" href={resolve('/')} onclick={onnavigate}>Citadel</a>
+		{#if slug !== null && company}
+			<div class="company">
+				<p class="company-name">{company.name}</p>
+				<p class="company-graph">brain_{company.slug}</p>
+			</div>
+		{/if}
 	{/if}
 	{#each groups as group (group.heading)}
 		<div class="group">
-			<h2>{group.heading}</h2>
+			<h2 class={{ 'sr-only': folded }}>{group.heading}</h2>
 			<ul>
 				{#each group.items as item (item.label)}
 					{@const path = pathOf(item)}
 					{@const active = path !== undefined && trim(resolve(path as '/')) === trim(page.url.pathname)}
 					<li>
-						{#if path !== undefined}
+						{#if path !== undefined && folded}
+							<Tooltip text={item.label} side="right">
+								{#snippet trigger(props)}
+									<a
+										{...props}
+										href={resolve(path as '/')}
+										class={['item', { active }]}
+										aria-current={active ? 'page' : undefined}
+										aria-label={item.label}
+										onclick={onnavigate}
+									>
+										<item.icon aria-hidden="true" />
+									</a>
+								{/snippet}
+							</Tooltip>
+						{:else if path !== undefined}
 							<a
 								href={resolve(path as '/')}
 								class={['item', { active }]}
@@ -87,6 +108,14 @@ the shell. Sections that are not built yet stay visible but inert, marked "Soon"
 								<item.icon aria-hidden="true" />
 								{item.label}
 							</a>
+						{:else if folded}
+							<Tooltip text="{item.label}: soon" side="right">
+								{#snippet trigger(props)}
+									<span {...props} class="item soon" role="img" aria-label="{item.label}, soon">
+										<item.icon aria-hidden="true" />
+									</span>
+								{/snippet}
+							</Tooltip>
 						{:else}
 							<span class="item soon" aria-disabled="true">
 								<item.icon aria-hidden="true" />
@@ -110,6 +139,8 @@ the shell. Sections that are not built yet stay visible but inert, marked "Soon"
 		padding: var(--space-5) var(--space-3);
 		background: var(--color-surface);
 		border-right: var(--border-hair) solid var(--color-line);
+		/* Folded, the 40px items overflow the 56px slot's padding and border by 1px: no sideways bar. */
+		overflow-x: hidden;
 		overflow-y: auto;
 	}
 	.brand {
@@ -198,5 +229,26 @@ the shell. Sections that are not built yet stay visible but inert, marked "Soon"
 	.soon small {
 		margin-left: auto;
 		font-size: var(--text-xs);
+	}
+	/* Folded: icons only, one column of 40px squares. */
+	.folded {
+		align-items: center;
+		padding-inline: var(--space-2);
+	}
+	.folded .item {
+		justify-content: center;
+		width: var(--control-md);
+		padding: 0;
+	}
+	.folded .group + .group {
+		padding-top: var(--space-4);
+		border-top: var(--border-hair) solid var(--color-line);
+	}
+	.mark {
+		display: grid;
+		place-items: center;
+		width: var(--control-md);
+		height: var(--control-md);
+		padding: 0;
 	}
 </style>

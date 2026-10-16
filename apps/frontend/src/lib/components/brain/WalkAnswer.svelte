@@ -5,6 +5,7 @@ each saying which step of the walk found it. Hovering or focusing a chip or a so
 active citation (`onactive`), which lights its path in `GraphWalk`; a click keeps it lit until
 clicked again (`onpin`). With no answer it says why (refused, stopped, too many steps).
 Only a small set of Markdown is understood, and never as HTML (`answerBlocks` in walk.ts).
+Pass `reveal` for an answer that just arrived live: its blocks fade in one after another.
 -->
 <script lang="ts">
 	import type { AskAnswer } from '$lib/types';
@@ -18,15 +19,22 @@ Only a small set of Markdown is understood, and never as HTML (`answerBlocks` in
 		pinned?: number | null;
 		onactive?: (n: number | null) => void;
 		onpin?: (n: number) => void;
+		/** Fade the blocks in, staggered (an answer that just arrived). */
+		reveal?: boolean;
 	};
 
-	let { answer, active = null, pinned = null, onactive, onpin }: Props = $props();
+	let { answer, active = null, pinned = null, onactive, onpin, reveal = false }: Props = $props();
 	const id = $props.id();
+
+	/** Each block starts this much after the one before, up to REVEAL_MAX blocks in. */
+	const REVEAL_STAGGER_MS = 60;
+	const REVEAL_MAX = 10;
+	const delay = (i: number) => (reveal ? `${Math.min(i, REVEAL_MAX) * REVEAL_STAGGER_MS}ms` : undefined);
 
 	const blocks = $derived(answer.text ? answerBlocks(answer.text) : []);
 	const NO_ANSWER: Record<string, string> = {
 		refusal: 'Claude declined to answer this question.',
-		stopped: 'You stopped this answer. The steps it took are kept on the right.',
+		stopped: 'You stopped this answer. The steps it took are kept above.',
 		step_limit: 'It took too many steps without an answer. Try a narrower question.',
 		max_tokens: 'The answer ran too long and was cut off. Try a narrower question.'
 	};
@@ -59,25 +67,25 @@ Only a small set of Markdown is understood, and never as HTML (`answerBlocks` in
 	{/each}
 {/snippet}
 
-<div class="answer">
+<div class={['answer', { reveal }]}>
 	{#if answer.text}
 		<div class="text">
 			{#each blocks as block, i (i)}
 				{#if block.kind === 'p'}
-					<p>{@render runs(block.inlines)}</p>
+					<p class="block" style:animation-delay={delay(i)}>{@render runs(block.inlines)}</p>
 				{:else}
-					<svelte:element this={block.kind}>
+					<svelte:element this={block.kind} class="block" style:animation-delay={delay(i)}>
 						{#each block.items as item, j (j)}<li>{@render runs(item)}</li>{/each}
 					</svelte:element>
 				{/if}
 			{/each}
 		</div>
 	{:else}
-		<p class="why">{why}</p>
+		<p class="why block">{why}</p>
 	{/if}
 
 	{#if answer.sources.length}
-		<ol class="sources" aria-label="Sources">
+		<ol class="sources block" aria-label="Sources" style:animation-delay={delay(blocks.length)}>
 			{#each answer.sources as src, i (i)}
 				{@const n = i + 1}
 				<li
@@ -198,5 +206,19 @@ Only a small set of Markdown is understood, and never as HTML (`answerBlocks` in
 		display: block;
 		color: var(--color-text-muted);
 		font-size: var(--text-xs);
+	}
+	/* `backwards` keeps a block hidden during its delay. */
+	.reveal .block {
+		animation: reveal var(--duration-base) var(--ease-out) backwards;
+	}
+	@keyframes reveal {
+		from {
+			opacity: 0;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.reveal .block {
+			animation: none;
+		}
 	}
 </style>

@@ -109,12 +109,18 @@
 	--rail-badge-icon: 0.75rem; /* 12 */
 	--rail-badge-offset: 6px; /* how far the badge hangs past the tile corner */
 	--sidebar-width: 15rem;
+	--sidebar-folded: 3.5rem; /* 56: the sidebar folded to its icons */
+	--splitter-hit: 0.75rem; /* 12: the grab area of a pane splitter; the line inside is a hairline */
+	--splitter-grip-w: 6px;
+	--splitter-grip-h: 2.5rem;
+	--walk-strip: 3rem; /* 48: the Ask walk column folded */
 	--topbar-height: 3.5rem;
 	--content-max: 80rem;
 
 	/* --- Motion --------------------------------------------------------------------------- */
 	--duration-fast: 120ms;
 	--duration-base: 180ms;
+	--duration-slow: 320ms; /* a walk: a link drawing on, a node gliding to its new place (GraphWalk GLIDE_MS) */
 	--ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
 
 	color-scheme: light;

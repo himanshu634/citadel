@@ -338,41 +338,195 @@ export function shortUid(uid: string): string {
 
 const str = (v: unknown) => (typeof v === 'string' ? v : v === undefined || v === null ? '' : String(v));
 
-/** What the agent is doing in this step, in plain words (the thread's live line). */
-export function stepSentence(step: Pick<WalkStep, 'tool' | 'input'>): string {
-	const p = step.input ?? {};
-	switch (step.tool) {
-		case 'person_profile':
-			return `Looking up ${str(p.login)}'s profile`;
-		case 'experts_for_system':
-			return `Asking who knows ${str(p.system)} best`;
-		case 'path_between':
-			return `Finding how ${shortUid(str(p.from_uid))} and ${shortUid(str(p.to_uid))} connect`;
-		case 'work_history':
-			return `Reading recent work on ${str(p.system)}`;
-		case 'impact_of':
-			return `Checking what changes together with ${str(p.system)}`;
-		case 'related_work_items':
-			return `Searching PRs and issues for "${str(p.text)}"`;
-		case 'related_documents':
-			return `Searching docs for "${str(p.text)}"`;
-		case 'get_entity':
-			return `Opening ${shortUid(str(p.uid))}`;
-		case 'list_systems':
-			return 'Listing the systems';
-		case 'owners_vs_experts':
-			return 'Comparing declared owners with who does the work';
-		case 'recent_work_items':
-			return 'Reading the latest work';
-		case 'people_activity':
-			return 'Listing people and their activity';
-		case 'graph_stats':
-			return 'Counting what the graph holds';
-		case 'submit_answer':
-			return 'Checking the answer against what was found';
-		default:
-			return `Running ${step.tool}`;
+type Said = [now: string, done: string];
+/** Each tool's sentence while it runs and once it is done; `p` is the call's input. */
+const SAID: Record<string, (p: Record<string, unknown>) => Said> = {
+	person_profile: (p) => [`Looking up ${str(p.login)}'s profile`, `Looked up ${str(p.login)}'s profile`],
+	experts_for_system: (p) => [`Asking who knows ${str(p.system)} best`, `Asked who knows ${str(p.system)} best`],
+	path_between: (p) => {
+		const pair = `${shortUid(str(p.from_uid))} and ${shortUid(str(p.to_uid))}`;
+		return [`Finding how ${pair} connect`, `Found how ${pair} connect`];
+	},
+	work_history: (p) => [`Reading recent work on ${str(p.system)}`, `Read recent work on ${str(p.system)}`],
+	impact_of: (p) => [`Checking what changes together with ${str(p.system)}`, `Checked what changes together with ${str(p.system)}`],
+	related_work_items: (p) => [`Searching PRs and issues for "${str(p.text)}"`, `Searched PRs and issues for "${str(p.text)}"`],
+	related_documents: (p) => [`Searching docs for "${str(p.text)}"`, `Searched docs for "${str(p.text)}"`],
+	get_entity: (p) => [`Opening ${shortUid(str(p.uid))}`, `Opened ${shortUid(str(p.uid))}`],
+	list_systems: () => ['Listing the systems', 'Listed the systems'],
+	owners_vs_experts: () => ['Comparing declared owners with who does the work', 'Compared declared owners with who does the work'],
+	recent_work_items: () => ['Reading the latest work', 'Read the latest work'],
+	people_activity: () => ['Listing people and their activity', 'Listed people and their activity'],
+	graph_stats: () => ['Counting what the graph holds', 'Counted what the graph holds'],
+	submit_answer: () => ['Checking the answer against what was found', 'Checked the answer against what was found']
+};
+
+/** What the agent is doing in this step, in plain words; `done` says what it did. */
+export function stepSentence(step: Pick<WalkStep, 'tool' | 'input'>, done = false): string {
+	const said = SAID[step.tool]?.(step.input ?? {}) ?? [`Running ${step.tool}`, `Ran ${step.tool}`];
+	return said[done ? 1 : 0];
+}
+
+// --- the ledger: one row per step, repeated calls folded once the answer is in ------------
+
+/** How a step ended, as the ledger marks it. */
+export type StepState = 'running' | 'done' | 'empty' | 'failed' | 'not-run';
+
+export function stepState(step: WalkStep): StepState {
+	if (step.status === 'running') return 'running';
+	if (step.error?.startsWith('Not run')) return 'not-run';
+	if (step.error) return 'failed';
+	if (step.count === 0) return 'empty';
+	return 'done';
+}
+
+/** The input key that tells repeated calls of a tool apart, and what those values are called. */
+const REPEATS: Record<string, { key: string; many: string; verb: string }> = {
+	work_history: { key: 'system', many: 'systems', verb: 'Read recent work on' },
+	experts_for_system: { key: 'system', many: 'systems', verb: 'Asked who knows best on' },
+	impact_of: { key: 'system', many: 'systems', verb: 'Checked what changes together with' },
+	person_profile: { key: 'login', many: 'people', verb: 'Looked up the profiles of' },
+	get_entity: { key: 'uid', many: 'nodes', verb: 'Opened' },
+	related_work_items: { key: 'text', many: 'searches', verb: 'Searched PRs and issues' },
+	related_documents: { key: 'text', many: 'searches', verb: 'Searched docs' }
+};
+
+export interface LedgerItem {
+	/** One step, or a run of the same tool folded into one row (`steps.length > 1`). */
+	steps: WalkStep[];
+	sentence: string;
+	state: StepState;
+	/** Rows returned, all steps together. */
+	count: number | null;
+	ms: number | null;
+}
+
+function groupSentence(steps: WalkStep[]): string {
+	const tool = steps[0].tool;
+	const r = REPEATS[tool];
+	if (!r) return `${stepSentence(steps[0], true)}, and ${steps.length - 1} more like it`;
+	const names = steps.map((s) => {
+		const v = str(s.input?.[r.key]);
+		return r.key === 'uid' ? shortUid(v) : r.key === 'text' ? `"${v}"` : v;
+	});
+	if (r.key === 'text') return `${r.verb} ${steps.length} times: ${names.join(', ')}`;
+	return `${r.verb} ${steps.length} ${r.many}: ${names.join(', ')}`;
+}
+
+const sum = (xs: (number | null | undefined)[]) =>
+	xs.some((x) => typeof x === 'number') ? xs.reduce<number>((a, x) => a + (x ?? 0), 0) : null;
+
+/**
+ * The graph steps of one answer as ledger rows. While the answer runs every step is its own row;
+ * once it is in (`settled`), a run of two or more calls of the same tool that all returned rows
+ * folds into one ("Read recent work on 4 systems: Web app, Billing, Infra, Auth"). A step that
+ * found nothing or failed always keeps its own row, so it stays visible.
+ */
+export function ledgerItems(steps: WalkStep[], settled: boolean): LedgerItem[] {
+	const graph = steps.filter((s) => s.n !== null);
+	const single = (s: WalkStep): LedgerItem => ({
+		steps: [s],
+		sentence: stepSentence(s, s.status === 'done'),
+		state: stepState(s),
+		count: s.count ?? null,
+		ms: s.ms ?? null
+	});
+	if (!settled) return graph.map(single);
+	const out: LedgerItem[] = [];
+	let run: WalkStep[] = [];
+	const flush = () => {
+		if (run.length > 1)
+			out.push({ steps: run, sentence: groupSentence(run), state: 'done', count: sum(run.map((s) => s.count)), ms: sum(run.map((s) => s.ms)) });
+		else if (run.length === 1) out.push(single(run[0]));
+		run = [];
+	};
+	for (const s of graph) {
+		const foldable = stepState(s) === 'done';
+		if (foldable && run.length && run[0].tool === s.tool) run.push(s);
+		else {
+			flush();
+			if (foldable) run = [s];
+			else out.push(single(s));
+		}
 	}
+	flush();
+	return out;
+}
+
+/** The ledger's last row: how the newest answer check went (null before the first one). */
+export interface CheckLine {
+	state: 'running' | 'done' | 'failed' | 'not-run';
+	text: string;
+}
+
+/**
+ * The answer check row. The newest check speaks (an answer sent back is checked again); a pass
+ * after send-backs says how many there were.
+ */
+export function checkLine(steps: WalkStep[]): CheckLine | null {
+	const checks = steps.filter((s) => s.n === null);
+	const check = checks.at(-1);
+	if (!check) return null;
+	if (check.status === 'running') return { state: 'running', text: 'Checking the answer against what was found' };
+	if (check.error?.startsWith('Not run')) return { state: 'not-run', text: 'Answer check not run: the answer ended first' };
+	if (check.error) return { state: 'failed', text: `Answer sent back: ${check.error}` };
+	const back = checks.slice(0, -1).filter((s) => s.error && !s.error.startsWith('Not run')).length;
+	if (back === 0) return { state: 'done', text: 'Checked: every citation came from a step above' };
+	const times = back === 1 ? '1 send-back' : `${back} send-backs`;
+	return { state: 'done', text: `Checked after ${times}: every citation came from a step above` };
+}
+
+/**
+ * What a running answer is doing now, for a screen reader's live region: the newest running
+ * step's sentence, "Writing the answer" while only the answer check runs, or nothing.
+ */
+export function progressLine(steps: WalkStep[]): string {
+	const step = steps.filter((s) => s.n !== null && s.status === 'running').at(-1);
+	if (step) return stepSentence(step);
+	return steps.some((s) => s.n === null && s.status === 'running') ? 'Writing the answer' : '';
+}
+
+/** What one step added to the walk: its nodes and links, for lighting it while its row is hovered. */
+export function stepHighlight(step: Pick<WalkStep, 'nodes' | 'rels'>): Highlight {
+	return {
+		nodes: new Set((step.nodes ?? []).map((n) => n.uid)),
+		rels: new Set((step.rels ?? []).map(relKey))
+	};
+}
+
+/** Links an earlier question found from a node this answer also touched, at most this many nodes. */
+export const CARRY_MAX = 6;
+
+/**
+ * Context from earlier questions: nodes they found that are linked to a node this answer touched,
+ * and those links. They are drawn dashed and faint until a step of this answer touches them, so a
+ * follow-up visibly starts from what the conversation already knows.
+ */
+export function carryOver(earlier: WalkStep[], steps: WalkStep[], max = CARRY_MAX): { nodes: WalkNode[]; rels: WalkRel[] } {
+	const now = mergeWalk(steps);
+	if (now.nodes.length === 0) return { nodes: [], rels: [] };
+	const here = new Set(now.nodes.map((n) => n.uid));
+	const haveRel = new Set(now.rels.map((r) => r.key));
+	const before = mergeWalk(earlier);
+	const byUid = new Map(before.nodes.map((n) => [n.uid, n]));
+	const nodes = new Map<string, WalkNode>();
+	const rels: WalkRel[] = [];
+	for (const r of before.rels) {
+		if (haveRel.has(r.key)) continue;
+		const a = here.has(r.from);
+		const b = here.has(r.to);
+		if (a === b) continue; // both or neither end is in this answer
+		const other = a ? r.to : r.from;
+		const node = byUid.get(other);
+		if (!node) continue;
+		if (!nodes.has(other)) {
+			if (nodes.size >= max) continue;
+			const { step: _step, ...plain } = node;
+			nodes.set(other, plain);
+		}
+		const { step: _s, key: _k, ...rel } = r;
+		rels.push(rel);
+	}
+	return { nodes: [...nodes.values()], rels };
 }
 
 /** The call as code: experts_for_system(system: "Auth"); paths read alice → carol. */
@@ -463,7 +617,9 @@ export type Block =
 	| { kind: 'p'; inlines: Inline[] }
 	| { kind: 'ul' | 'ol'; items: Inline[][] };
 
-const INLINE = /\*\*(.+?)\*\*|`([^`]+)`|\[(\d+(?:\s*,\s*\d+)*)\]/g;
+/** A citation marker: [1] or [1, 2]; group 1 holds the numbers. */
+const CITE = String.raw`\[(\d+(?:\s*,\s*\d+)*)\]`;
+const INLINE = new RegExp(`${/\*\*(.+?)\*\*|`([^`]+)`/.source}|${CITE}`, 'g');
 
 export function inlines(text: string): Inline[] {
 	const out: Inline[] = [];
@@ -507,4 +663,9 @@ export function answerBlocks(text: string): Block[] {
 	}
 	flush();
 	return blocks;
+}
+
+/** The answer's text without its citation markers (and the space before each), for copying. */
+export function answerPlainText(text: string): string {
+	return text.replace(new RegExp(String.raw`\s*${CITE}`, 'g'), '');
 }

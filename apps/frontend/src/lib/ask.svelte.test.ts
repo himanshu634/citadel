@@ -121,12 +121,25 @@ describe('AskThread', () => {
 		const t = new AskThread('acme');
 		await t.ask('Who is Alice?');
 		vi.useFakeTimers();
-		t.replay();
+		t.replay(0);
 		expect(t.revealed).toBe(0);
 		vi.advanceTimersByTime(800);
 		expect(t.revealed).toBeNull(); // one graph step: done after the first tick
-		t.replay(true);
+		t.replay(0, true);
 		expect(t.revealed).toBeNull();
+	});
+
+	test('replaying an earlier turn makes it the selected one', async () => {
+		serve(run(), run());
+		const t = new AskThread('acme');
+		await t.ask('First?');
+		await t.ask('And then?');
+		expect(t.selected).toBe(1);
+		vi.useFakeTimers();
+		t.replay(0);
+		expect([t.selected, t.revealed]).toEqual([0, 0]);
+		t.select(1);
+		expect([t.selected, t.revealed]).toEqual([1, null]); // selecting another stops the replay
 	});
 
 	test('reset starts a new conversation', async () => {

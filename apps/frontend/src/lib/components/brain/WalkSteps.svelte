@@ -8,7 +8,8 @@ carry that citation's number, and the active citation's rows are tinted. Paths r
 <script lang="ts">
 	import { Check, ChevronRight, CircleAlert, LoaderCircle } from '@lucide/svelte';
 	import type { WalkStep } from '$lib/types';
-	import { rowViews, stepCall } from '$lib/walk';
+	import { stepCall } from '$lib/walk';
+	import StepRows from './StepRows.svelte';
 
 	type Props = {
 		steps: WalkStep[];
@@ -24,9 +25,6 @@ carry that citation's number, and the active citation's rows are tinted. Paths r
 	let { steps, open = null, ontoggle, cites = new Map(), active = null }: Props = $props();
 	const id = $props.id();
 
-	function citesOf(uids: string[]): number[] {
-		return [...new Set(uids.flatMap((u) => cites.get(u) ?? []))].sort((a, b) => a - b);
-	}
 	const notRun = (step: WalkStep) => step.error?.startsWith('Not run') ?? false;
 	function meta(step: WalkStep): string {
 		if (step.status === 'running') return 'running';
@@ -57,7 +55,6 @@ carry that citation's number, and the active citation's rows are tinted. Paths r
 			</li>
 		{:else}
 			{@const isOpen = open === step.id}
-			{@const rows = isOpen ? rowViews(step) : []}
 			<li class={['step', step.status, { failed, open: isOpen }]}>
 				<button
 					type="button"
@@ -81,33 +78,7 @@ carry that citation's number, and the active citation's rows are tinted. Paths r
 				{/if}
 				{#if isOpen}
 					<div id="{id}-{step.id}" class="rows">
-						{#if rows.length === 0}
-							<p class="none">No rows. The graph has nothing that matches this call.</p>
-						{:else}
-							<ul>
-								{#each rows as row, i (i)}
-									{@const used = citesOf(row.uids)}
-									<li class={{ hl: active !== null && used.includes(active) }}>
-										{#if row.chain}
-											<span class="chain">
-												{#each row.chain as link, j (j)}
-													<span class="hop">{link.title}</span>
-													{#if link.rel}<span class="rel">{link.forward ? '' : '← '}{link.rel}{link.forward ? ' →' : ''}</span>{/if}
-												{/each}
-											</span>
-										{:else}
-											<span class="text">{row.text}</span>
-										{/if}
-										{#each used as n (n)}<span class={['cite', { on: n === active }]}
-												><span class="sr-only">cited as </span>{n}</span
-											>{/each}
-									</li>
-								{/each}
-							</ul>
-							{#if (step.count ?? 0) > rows.length}
-								<p class="none">and {(step.count ?? 0) - rows.length} more rows the agent read</p>
-							{/if}
-						{/if}
+						<StepRows {step} {cites} {active} />
 					</div>
 				{/if}
 			</li>
@@ -236,66 +207,6 @@ carry that citation's number, and the active citation's rows are tinted. Paths r
 	}
 	.rows {
 		padding: 0 var(--space-2) 0 calc(var(--space-3) * 2 + 1.5rem);
-	}
-	.rows ul {
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
-		max-height: 14rem;
-		margin: 0;
-		padding: 0;
-		overflow-y: auto;
-		list-style: none;
-	}
-	.rows li {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		min-height: var(--control-sm);
-		padding: var(--space-1) var(--space-2);
-		border-radius: var(--radius-sm);
-		font-size: var(--text-sm);
-	}
-	.rows li.hl {
-		background: var(--color-accent-soft);
-	}
-	.chain,
-	.text {
-		display: flex;
-		flex: 1;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: var(--space-1) var(--space-2);
-		min-width: 0;
-		overflow-wrap: anywhere;
-	}
-	.rel {
-		color: var(--color-text-muted);
-		font-family: var(--font-mono);
-		font-size: var(--text-xs);
-	}
-	.cite {
-		flex: none;
-		min-width: 1.25rem;
-		padding: 0 var(--space-1);
-		border-radius: var(--radius-sm);
-		background: var(--color-accent-soft);
-		color: var(--color-accent);
-		font-family: var(--font-mono);
-		font-size: var(--text-xs);
-		text-align: center;
-	}
-	.cite:first-of-type {
-		margin-left: auto;
-	}
-	.cite.on {
-		background: var(--color-accent);
-		color: var(--color-on-accent);
-	}
-	.none {
-		padding: var(--space-1) var(--space-2);
-		color: var(--color-text-muted);
-		font-size: var(--text-sm);
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.head :global(.chev) {
