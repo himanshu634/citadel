@@ -2,7 +2,9 @@
 
 Why: every GitHub call in the adapter goes through `GithubClient.query`, so token handling and
 rate-limit waits live in one place. Each query asks for `rateLimit { remaining resetAt }`; when
-the budget runs low we sleep until the reset instead of failing halfway through a fetch.
+the budget runs low we sleep until the reset instead of failing halfway through a fetch. The
+API's onboarding check builds a client that makes one short attempt and never sleeps, so a
+request thread is never held for minutes.
 """
 
 from __future__ import annotations
@@ -21,20 +23,32 @@ from brain.config import get_settings
 API = "https://api.github.com/graphql"
 QUERIES_DIR = Path(__file__).parent / "queries"
 LOW_BUDGET = 100  # points left before we wait for the reset
+GH_TIMEOUT = 5  # seconds for `gh auth token`, a local read that should answer at once
 
 
 class GithubError(RuntimeError):
     pass
 
 
+class GithubRateLimited(GithubError):
+    """GitHub kept answering with a rate-limit error."""
+
+
+def gh_auth_token() -> subprocess.CompletedProcess[str] | None:
+    """`gh auth token`, or None when gh is missing, logged out or does not answer."""
+    try:
+        return subprocess.run(
+            ["gh", "auth", "token"], capture_output=True, text=True, check=True, timeout=GH_TIMEOUT
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+
+
 def token() -> str:
     """GITHUB_TOKEN from env/.env, else the GitHub CLI's token (`gh auth token`)."""
     if t := get_settings().github_token:
         return t
-    try:
-        out = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, check=True)
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        out = None
+    out = gh_auth_token()
     if out and out.stdout.strip():
         return out.stdout.strip()
     raise GithubError("no GitHub token: set GITHUB_TOKEN in .env or run `gh auth login`")
@@ -47,12 +61,34 @@ def graphql(name: str) -> str:
 
 
 class GithubClient:
-    def __init__(self, log=print) -> None:
+    """`attempts` and `wait_for_rate_limit` default to what a fetch needs (retry, then wait out
+    the budget); a quick check passes attempts=1, wait_for_rate_limit=False and a short timeout.
+    Close it (or use it in a `with`) when done."""
+
+    def __init__(
+        self,
+        log=print,
+        *,
+        timeout: float = 60,
+        attempts: int = 5,
+        wait_for_rate_limit: bool = True,
+    ) -> None:
         self._http = httpx.Client(
-            timeout=60,
+            timeout=timeout,
             headers={"Authorization": f"Bearer {token()}", "User-Agent": "company-brain"},
         )
         self._log = log
+        self._attempts = attempts
+        self._wait_for_rate_limit = wait_for_rate_limit
+
+    def close(self) -> None:
+        self._http.close()
+
+    def __enter__(self) -> GithubClient:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
     def query(self, name: str, variables: dict[str, Any], document: str | None = None) -> dict:
         """Run a named GraphQL query, retrying transient errors and waiting out rate limits.
@@ -60,11 +96,13 @@ class GithubClient:
         `document` overrides the file text (used by the blobs query, whose fields are generated).
         """
         body = {"query": document or graphql(name), "variables": variables}
-        for attempt in range(5):
+        rate_limited = False
+        for attempt in range(self._attempts):
             resp = self._http.post(API, json=body)
-            if resp.status_code in (502, 503, 504) or (
-                resp.status_code in (403, 429) and "rate limit" in resp.text.lower()
-            ):
+            rate_limited = resp.status_code in (403, 429) and "rate limit" in resp.text.lower()
+            if resp.status_code in (502, 503, 504) or rate_limited:
+                if attempt == self._attempts - 1:
+                    break  # no point waiting before giving up
                 wait = int(resp.headers.get("retry-after", 0)) or 2**attempt * 5
                 self._log(f"  github {resp.status_code}; retrying in {wait}s")
                 time.sleep(wait)
@@ -75,8 +113,11 @@ class GithubClient:
             if payload.get("errors"):
                 raise GithubError(f"GraphQL errors in {name}: {payload['errors'][:2]}")
             data = payload["data"]
-            self._respect_rate_limit(data.get("rateLimit"))
+            if self._wait_for_rate_limit:
+                self._respect_rate_limit(data.get("rateLimit"))
             return data
+        if rate_limited:
+            raise GithubRateLimited(f"GitHub rate limit reached for {name}")
         raise GithubError(f"GitHub API kept failing for {name}")
 
     def _respect_rate_limit(self, rl: dict[str, Any] | None) -> None:

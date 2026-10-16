@@ -5,8 +5,10 @@ from __future__ import annotations
 import subprocess
 from types import SimpleNamespace
 
+import httpx
 import pytest
-from brain.adapters.github.client import GithubError
+from brain.adapters.github import client as gh
+from brain.adapters.github.client import GithubError, GithubRateLimited
 from brain.api import checks
 
 
@@ -57,15 +59,43 @@ def test_token_source_none_when_gh_missing_or_logged_out(monkeypatch):
     assert checks.token_source() is None
 
 
+def test_token_source_gives_gh_five_seconds(monkeypatch):
+    monkeypatch.setattr(checks, "get_settings", lambda: SimpleNamespace(github_token=None))
+    seen: dict = {}
+
+    def hangs(*args, **kwargs):
+        seen.update(kwargs)
+        raise subprocess.TimeoutExpired("gh", kwargs.get("timeout"))
+
+    monkeypatch.setattr(subprocess, "run", hangs)
+    assert checks.token_source() is None and seen["timeout"] == 5
+
+
+def test_check_client_makes_one_short_attempt(monkeypatch):
+    monkeypatch.setattr(gh, "token", lambda: "t0k")
+    with checks.github_client() as c:
+        assert c._http.timeout.read <= 10 and c._attempts == 1
+        assert c._wait_for_rate_limit is False
+
+
 class FakeClient:
     def __init__(self, result=None, error=None):
-        self.result, self.error, self.calls = result, error, []
+        self.result, self.error, self.calls, self.closed = result, error, [], False
 
     def query(self, name, variables, document=None):
         self.calls.append((name, variables))
         if self.error:
             raise self.error
         return self.result
+
+    def close(self):
+        self.closed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
 
 
 def use(monkeypatch, fake):
@@ -78,6 +108,7 @@ def test_repo_public(client, monkeypatch):
     r = client.get("/api/checks/github/acme/widgets")
     assert r.json() == {"exists": True, "private": False}
     assert fake.calls == [("repo_meta", {"owner": "acme", "name": "widgets"})]
+    assert fake.closed
 
 
 def test_repo_private(client, monkeypatch):
@@ -92,23 +123,39 @@ def test_repo_null_is_not_found(client, monkeypatch):
 
 def test_repo_graphql_not_found_error_is_not_found(client, monkeypatch):
     err = GithubError("GraphQL errors in repo_meta: [{'type': 'NOT_FOUND'}]")
-    use(monkeypatch, FakeClient(error=err))
+    fake = use(monkeypatch, FakeClient(error=err))
     assert client.get("/api/checks/github/acme/nope").json() == {"exists": False, "private": None}
+    assert fake.closed
 
 
 def test_repo_other_github_error_is_502(client, monkeypatch):
-    use(monkeypatch, FakeClient(error=GithubError("GitHub API 401: Bad credentials")))
+    fake = use(monkeypatch, FakeClient(error=GithubError("GitHub API 401: Bad credentials")))
     r = client.get("/api/checks/github/acme/widgets")
     assert r.status_code == 502 and "GitHub" in r.json()["detail"]
+    assert fake.closed
 
 
-def test_repo_without_token_is_503(client, monkeypatch):
+def test_repo_unreachable_is_502(client, monkeypatch):
+    fake = use(monkeypatch, FakeClient(error=httpx.ConnectTimeout("slow")))
+    r = client.get("/api/checks/github/acme/widgets")
+    assert r.status_code == 502 and r.json() == {"detail": "GitHub is not reachable"}
+    assert fake.closed
+
+
+def test_repo_rate_limited_is_429(client, monkeypatch):
+    fake = use(monkeypatch, FakeClient(error=GithubRateLimited("rate limit")))
+    r = client.get("/api/checks/github/acme/widgets")
+    assert r.status_code == 429 and "rate limit" in r.json()["detail"]
+    assert fake.closed
+
+
+def test_repo_without_token_is_424(client, monkeypatch):
     def no_token():
         raise GithubError("no GitHub token: set GITHUB_TOKEN in .env or run `gh auth login`")
 
     monkeypatch.setattr(checks, "github_client", no_token)
     r = client.get("/api/checks/github/acme/widgets")
-    assert r.status_code == 503
+    assert r.status_code == 424
     assert r.json() == {"detail": "No GitHub token: set GITHUB_TOKEN in .env or run gh auth login"}
 
 
