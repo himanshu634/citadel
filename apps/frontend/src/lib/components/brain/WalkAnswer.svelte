@@ -34,7 +34,7 @@ Pass `reveal` for an answer that just arrived live: its blocks fade in one after
 	const blocks = $derived(answer.text ? answerBlocks(answer.text) : []);
 	const NO_ANSWER: Record<string, string> = {
 		refusal: 'Claude declined to answer this question.',
-		stopped: 'You stopped this answer. The steps it took are kept on the right.',
+		stopped: 'You stopped this answer. The steps it took are kept above.',
 		step_limit: 'It took too many steps without an answer. Try a narrower question.',
 		max_tokens: 'The answer ran too long and was cut off. Try a narrower question.'
 	};

@@ -36,16 +36,33 @@ Layout and rules live in `src/lib/walk.ts`.
 
 	let { steps, highlight = null, fresh = null, cited = new Set(), carried }: Props = $props();
 
-	/** Above this many nodes, only the nodes that matter keep their names; the rest are dots. */
+	/**
+	 * Above this many nodes of its own, only the nodes that matter keep their names; the rest are
+	 * dots. Carried nodes keep their names only while the whole walk is this small.
+	 */
 	const CROWDED = 12;
 
 	const own = $derived(mergeWalk(steps));
-	const ghosts = $derived(new Set((carried?.nodes ?? []).filter((n) => !own.nodes.some((o) => o.uid === n.uid)).map((n) => n.uid)));
+	// The parent rebuilds `carried` whenever the thread grows (each new question). Keep the last one
+	// while its content is the same, so a drawn walk is not laid out again and does not drift.
+	const NONE: { nodes: WalkNode[]; rels: WalkRel[] } = { nodes: [], rels: [] };
+	let kept = NONE;
+	let keptKey = JSON.stringify(NONE);
+	const context = $derived.by(() => {
+		const next = carried ?? NONE;
+		const key = JSON.stringify(next);
+		if (key !== keptKey) {
+			kept = next;
+			keptKey = key;
+		}
+		return kept;
+	});
+	const ghosts = $derived(new Set(context.nodes.filter((n) => !own.nodes.some((o) => o.uid === n.uid)).map((n) => n.uid)));
 	const walk = $derived.by(() => {
-		if (!carried || ghosts.size === 0) return own;
-		const extraNodes = carried.nodes.filter((n) => ghosts.has(n.uid)).map((n) => ({ ...n, step: 0 }));
+		if (ghosts.size === 0) return own;
+		const extraNodes = context.nodes.filter((n) => ghosts.has(n.uid)).map((n) => ({ ...n, step: 0 }));
 		const have = new Set(own.rels.map((r) => r.key));
-		const extraRels = carried.rels
+		const extraRels = context.rels
 			.map((r) => ({ ...r, step: 0, key: relKey(r) }))
 			.filter((r) => !have.has(r.key) && (ghosts.has(r.from) || ghosts.has(r.to)));
 		return { ...own, nodes: [...own.nodes, ...extraNodes], rels: [...own.rels, ...extraRels] };
@@ -64,7 +81,7 @@ Layout and rules live in `src/lib/walk.ts`.
 		return next;
 	});
 
-	/** How long drawn nodes take to glide to a new layout: --duration-slow. */
+	/** How long drawn nodes take to glide to a new layout. Matches --duration-slow (320ms): keep them in step. */
 	const GLIDE_MS = 320;
 	// Nodes and links read the same glided positions, so a link never jumps while its nodes move.
 	let shown = $state.raw(new Map<string, Point>());
@@ -94,7 +111,8 @@ Layout and rules live in `src/lib/walk.ts`.
 	});
 	const at = (uid: string) => shown.get(uid) ?? positions.get(uid);
 	const types = $derived([...new Set(walk.nodes.map((n) => nodeType(n.label)))] as NodeType[]);
-	const crowded = $derived(walk.nodes.length > CROWDED);
+	// Context from earlier questions never crowds this answer's own nodes into dots.
+	const crowded = $derived(own.nodes.length > CROWDED);
 
 	const pct = (p: Point | undefined, axis: 'x' | 'y') =>
 		p ? `${(p[axis] / (axis === 'x' ? STAGE.width : STAGE.height)) * 100}%` : '50%';
@@ -106,6 +124,7 @@ Layout and rules live in `src/lib/walk.ts`.
 		return walk.rels.length <= 10 || (step === fresh && freshRels <= 6);
 	}
 	function named(uid: string, step: number, lit = true): boolean {
+		if (ghosts.has(uid)) return walk.nodes.length <= CROWDED;
 		if (!crowded || uid === walk.focus) return true;
 		if (lit && highlight) return highlight.nodes.has(uid);
 		return step === fresh || cited.has(uid);

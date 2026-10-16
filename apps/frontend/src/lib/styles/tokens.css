@@ -120,7 +120,7 @@
 	/* --- Motion --------------------------------------------------------------------------- */
 	--duration-fast: 120ms;
 	--duration-base: 180ms;
-	--duration-slow: 320ms; /* a link drawing on in a walk, the scroll to a new question */
+	--duration-slow: 320ms; /* a walk: a link drawing on, a node gliding to its new place (GraphWalk GLIDE_MS) */
 	--ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
 
 	color-scheme: light;

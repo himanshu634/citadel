@@ -6,9 +6,11 @@ as a message, the brain's ledger of steps, the answer or why there is none, and 
 thumbs and Replay walk) and that question's own walk on the right, sticky while the lane scrolls
 by. Use it once per turn of an `AskThread`; the page owns the columns (`walkWidth`), the splitter
 and the scrolling. Hovering a citation or a ledger row lights what backs it in the walk (a
-citation wins). The walk is drawn only while the lane is near the screen (`root` is the scroll
-container); off screen a box of the same size keeps its place. Folded, the walk cell shows a dot
-and the node count instead. Below 1100px the walk goes under the conversation.
+citation wins). The walk is first drawn when the lane comes near the screen (`root` is the scroll
+container) and then stays drawn, so it never lays out or animates again; until then a box of the
+same size keeps its place. Folded, the walk cell shows a dot and the node count, and a drawn walk
+is only hidden, so it opens where it was. While the answer runs, a hidden live region tells
+screen readers the step under way. Below 1100px the walk goes under the conversation.
 -->
 <script lang="ts">
 	import { Copy, LoaderCircle, RotateCcw, Waypoints } from '@lucide/svelte';
@@ -16,7 +18,7 @@ and the node count instead. Below 1100px the walk goes under the conversation.
 	import type { Attachment } from 'svelte/attachments';
 	import type { Turn } from '$lib/ask.svelte';
 	import type { Rating, WalkStep } from '$lib/types';
-	import { answerPlainText, carryOver, highlightFor, mergeWalk, stepHighlight } from '$lib/walk';
+	import { answerPlainText, carryOver, highlightFor, mergeWalk, progressLine, stepHighlight } from '$lib/walk';
 	import Banner from '../ui/Banner.svelte';
 	import Button from '../ui/Button.svelte';
 	import AnswerRating from './AnswerRating.svelte';
@@ -70,8 +72,10 @@ and the node count instead. Below 1100px the walk goes under the conversation.
 	let active = $state<number | null>(null);
 	let pinned = $state<number | null>(null);
 	let open = $state<string | null>(null);
-	let hovered = $state<WalkStep[] | null>(null);
-	let onscreen = $state(false);
+	/** The ledger row under the pointer, and whether the answer was running when it was hovered. */
+	let hovered = $state<{ steps: WalkStep[]; running: boolean } | null>(null);
+	/** The walk has been near the screen once: from then on it stays drawn. */
+	let drawn = $state(false);
 	let copied = $state<'idle' | 'copied' | 'failed'>('idle');
 	// An answer that arrives while the lane watches fades in; one that was already there does not.
 	const live = untrack(() => turn.status === 'running');
@@ -93,12 +97,20 @@ and the node count instead. Below 1100px the walk goes under the conversation.
 	);
 
 	const lit = $derived(active ?? pinned);
+	// When the answer lands, rows fold into groups under a still pointer (no mouseleave): a hover
+	// from before that no longer counts.
+	const hoveredSteps = $derived(hovered?.running === running ? hovered.steps : null);
 	const highlight = $derived.by(() => {
 		const src = lit === null ? undefined : turn.answer?.sources[lit - 1];
 		if (src) return highlightFor(src, turn.steps);
-		if (!hovered) return null;
-		return stepHighlight({ nodes: hovered.flatMap((s) => s.nodes ?? []), rels: hovered.flatMap((s) => s.rels ?? []) });
+		if (!hoveredSteps) return null;
+		return stepHighlight({
+			nodes: hoveredSteps.flatMap((s) => s.nodes ?? []),
+			rels: hoveredSteps.flatMap((s) => s.rels ?? [])
+		});
 	});
+	/** For screen readers, what the running answer is doing now. */
+	const progress = $derived(running ? progressLine(turn.steps) : '');
 	const cites = $derived.by(() => {
 		const map = new Map<string, number[]>();
 		turn.answer?.sources.forEach((s, i) => map.set(s.uid, [...(map.get(s.uid) ?? []), i + 1]));
@@ -128,13 +140,17 @@ and the node count instead. Below 1100px the walk goes under the conversation.
 	}
 	$effect(() => () => clearTimeout(copyTimer));
 
-	/** Draw the walk only while the lane is within 200px of the scroll container's view. */
+	/** Draw the walk the first time the lane is within 200px of the scroll container's view. */
 	function nearScreen(within: HTMLElement | null): Attachment<HTMLElement> {
 		return (el) => {
-			const io = new IntersectionObserver(([entry]) => (onscreen = entry.isIntersecting), {
-				root: within,
-				rootMargin: '200px'
-			});
+			const io = new IntersectionObserver(
+				([entry]) => {
+					if (!entry.isIntersecting) return;
+					drawn = true;
+					io.disconnect();
+				},
+				{ root: within, rootMargin: '200px' }
+			);
 			io.observe(el);
 			return () => io.disconnect();
 		};
@@ -165,13 +181,15 @@ and the node count instead. Below 1100px the walk goes under the conversation.
 			<span class="status tabular" aria-live="polite">
 				{#if running}<LoaderCircle class="spin" aria-hidden="true" />working{:else}{plural(graphSteps, 'step')}{/if}
 			</span>
+			<!-- Always there, so the first step is announced too; empty unless the answer runs. -->
+			<span class="sr-only" role="status" aria-live="polite">{progress}</span>
 		</div>
 		<WalkLedger
 			steps={shown}
 			settled={!running}
 			{open}
 			ontoggle={(key) => (open = open === key ? null : key)}
-			onhover={(steps) => (hovered = steps)}
+			onhover={(steps) => (hovered = steps && { steps, running })}
 			{cites}
 			active={lit}
 		/>
@@ -219,19 +237,23 @@ and the node count instead. Below 1100px the walk goes under the conversation.
 				<span class="count tabular" aria-hidden="true">{nodes}</span>
 				<span class="sr-only">Q{n} walk: {plural(nodes, 'node')}, {meta}</span>
 			</p>
-		{:else}
-			<section class="card" aria-labelledby="{id}-walk">
-				<h3 id="{id}-walk" class="card-head">
-					<span>Q{n} walk</span>
-					<span class="meta tabular">{plural(nodes, 'node')}</span>
-				</h3>
-				{#if onscreen}
-					<GraphWalk steps={shown} {highlight} {fresh} {cited} {carried} />
-				{:else}
-					<div class="placeholder" aria-hidden="true"></div>
-				{/if}
-			</section>
 		{/if}
+		<!-- Folded, the card is hidden, not removed: the drawn walk keeps its layout and its
+		     finished animations (display: none would replay them on unfold). -->
+		<section class={['card', { away: folded }]} aria-labelledby="{id}-walk">
+			<h3 id="{id}-walk" class="card-head">
+				<span>Q{n} walk</span>
+				<span class="meta tabular">{plural(nodes, 'node')}</span>
+			</h3>
+			{#if drawn}
+				<GraphWalk steps={shown} {highlight} {fresh} {cited} {carried} />
+			{:else}
+				<div class="placeholder" aria-hidden="true">
+					<div class="placeholder-canvas"></div>
+					{#if nodes}<div class="placeholder-caption"></div>{/if}
+				</div>
+			{/if}
+		</section>
 	</div>
 </article>
 
@@ -373,9 +395,24 @@ and the node count instead. Below 1100px the walk goes under the conversation.
 		font-weight: var(--weight-semibold);
 		font-variation-settings: 'wdth' var(--width-label);
 	}
+	.card.away {
+		visibility: hidden;
+		height: 0;
+		padding: 0;
+		overflow: hidden;
+	}
+	/* GraphWalk's box: its canvas, then (once there are nodes) one caption line. */
 	.placeholder {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+	.placeholder-canvas {
 		aspect-ratio: 640 / 420;
 		width: 100%;
+	}
+	.placeholder-caption {
+		height: calc(var(--text-xs) * var(--leading-ui));
 	}
 	.folded .walk {
 		padding-inline: 0;

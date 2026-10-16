@@ -3,7 +3,8 @@
 The dashboard frame: company rail and sidebar on the left, top bar, scrolling content. The top
 bar's fold button (or the [ key) folds the sidebar to its icons; the choice is kept in this
 browser (`citadel-sidebar`). Below 900px the rail and sidebar become one drawer, side by side,
-opened from the top bar, and the sidebar is never folded there. Provides the tooltip context for
+opened from the top bar, and the sidebar is never folded there (the kept choice comes back
+above 900px; `[` does nothing below it). Provides the tooltip context for
 everything inside.
 -->
 <script lang="ts">
@@ -12,6 +13,7 @@ everything inside.
 	import type { Snippet } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { MediaQuery } from 'svelte/reactivity';
 	import { AddCompany, setAddCompany } from '$lib/addCompany.svelte';
 	import { getCompanies } from '$lib/companies.svelte';
 	import AddCompanyDialog from '../brain/AddCompanyDialog.svelte';
@@ -44,11 +46,14 @@ everything inside.
 			// not remembered; it still folds for this visit
 		}
 	}
+	// The drawer (900px and below, the same query as the CSS) is never folded; the choice is kept.
+	const narrow = new MediaQuery('(max-width: 900px)');
+	const sideFolded = $derived(folded && !narrow.current);
 	const typing = (t: EventTarget | null) =>
 		t instanceof HTMLElement && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
 	function onkeydown(e: KeyboardEvent) {
 		if (e.key === 'Escape' && navOpen) close();
-		if (e.key === '[' && !e.metaKey && !e.ctrlKey && !e.altKey && !typing(e.target)) fold();
+		if (e.key === '[' && !narrow.current && !e.metaKey && !e.ctrlKey && !e.altKey && !typing(e.target)) fold();
 	}
 	// One add-a-company dialog for the app: the rail's + and "Add another" both open it.
 	const adding = new AddCompany();
@@ -64,7 +69,7 @@ everything inside.
 <svelte:window {onkeydown} />
 
 <Tooltip.Provider delayDuration={300}>
-	<div class={['shell', { folded }]}>
+	<div class={['shell', { folded: sideFolded }]}>
 		<div id="app-sidebar" class={['side', { open: navOpen }]}>
 			<CompanyRail
 				companies={companies.list}
@@ -76,7 +81,7 @@ everything inside.
 					adding.show();
 				}}
 			/>
-			<div class="sidebar-slot"><Sidebar onnavigate={close} {folded} /></div>
+			<div class="sidebar-slot"><Sidebar onnavigate={close} folded={sideFolded} /></div>
 		</div>
 		{#if navOpen}
 			<button class="scrim" type="button" aria-label="Close navigation" onclick={close}></button>

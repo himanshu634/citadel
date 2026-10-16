@@ -3,13 +3,14 @@
 The line between two side-by-side panes that resizes the one after it (a WAI-ARIA window
 splitter). Drag it, or focus it and use the arrow keys (Shift for bigger steps), Home and End;
 Enter folds the pane and opens it again; a double-click puts it back to its default width. Dragging
-well past the narrowest width folds the pane. A hairline at rest; on hover, focus or drag it
+well past the narrowest width folds the pane and keeps the width it had before the drag, so it
+opens again at that width. A hairline at rest; on hover, focus or drag it
 thickens to accent and shows its grip. The parent places it (absolutely, full height) and keeps
 `size` (a fraction of `container`) and `folded`; `onsettle` fires once a drag or key press is done,
 for saving. Rules in `src/lib/splitter.ts`.
 -->
 <script lang="ts">
-	import { WALK_LIMITS, dragTo, keyMove, type SplitLimits } from '$lib/splitter';
+	import { WALK_LIMITS, clampSize, dragTo, keyMove, type SplitLimits } from '$lib/splitter';
 
 	type Props = {
 		/** The controlled pane's share of the container, 0 to 1. */
@@ -39,17 +40,21 @@ for saving. Rules in `src/lib/splitter.ts`.
 	}: Props = $props();
 
 	let dragging = $state(false);
+	/** The size when the drag began: a fold by drag keeps it. */
+	let before = 0;
 	const percent = $derived(folded ? 0 : Math.round(size * 100));
+	const widest = $derived(Math.round(clampSize(1, container, limits) * 100));
 
 	function down(e: PointerEvent) {
 		if (e.button !== 0) return;
 		e.preventDefault();
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		before = size;
 		dragging = true;
 	}
 	function move(e: PointerEvent) {
 		if (!dragging) return;
-		const next = dragTo(right - e.clientX, container, limits);
+		const next = dragTo(right - e.clientX, container, before, limits);
 		size = next.size;
 		folded = next.folded;
 	}
@@ -84,7 +89,7 @@ for saving. Rules in `src/lib/splitter.ts`.
 	aria-controls={controls}
 	aria-valuenow={percent}
 	aria-valuemin={0}
-	aria-valuemax={Math.round(limits.max * 100)}
+	aria-valuemax={widest}
 	aria-valuetext={folded ? 'Folded' : `${percent}% wide`}
 	onpointerdown={down}
 	onpointermove={move}

@@ -139,6 +139,8 @@ the icons only (`--sidebar-folded` wide), each named by a tooltip and for screen
 		padding: var(--space-5) var(--space-3);
 		background: var(--color-surface);
 		border-right: var(--border-hair) solid var(--color-line);
+		/* Folded, the 40px items overflow the 56px slot's padding and border by 1px: no sideways bar. */
+		overflow-x: hidden;
 		overflow-y: auto;
 	}
 	.brand {

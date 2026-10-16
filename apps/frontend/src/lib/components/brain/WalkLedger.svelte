@@ -6,13 +6,14 @@ nothing, failed, not run), the rows it returned and how long it took. A step tha
 failed says so under its row and is never folded away. Once the answer is in (`settled`), repeated
 calls of one tool fold into one row ("Read recent work on 4 systems: …"). Open a row to see the
 call and its rows (`StepRows`). Hovering or focusing a row reports its steps (`onhover`) so the
-walk beside it can light what they added. The last row is the answer check. Rules in
-`ledgerItems` (src/lib/walk.ts).
+walk beside it can light what they added; leaving the list clears it. The last row is the newest
+answer check; a pass after the answer was sent back says how many times. Rules in `ledgerItems`
+and `checkLine` (src/lib/walk.ts).
 -->
 <script lang="ts">
 	import { Check, ChevronRight, CircleAlert, CircleDashed, LoaderCircle, Minus } from '@lucide/svelte';
 	import type { WalkStep } from '$lib/types';
-	import { ledgerItems, stepCall, type LedgerItem } from '$lib/walk';
+	import { checkLine, ledgerItems, stepCall, type LedgerItem } from '$lib/walk';
 	import StepRows from './StepRows.svelte';
 
 	type Props = {
@@ -34,7 +35,6 @@ walk beside it can light what they added. The last row is the answer check. Rule
 	const id = $props.id();
 
 	const items = $derived(ledgerItems(steps, settled));
-	const check = $derived(steps.find((s) => s.n === null) ?? null);
 	const keyOf = (item: LedgerItem) => item.steps[0].id;
 
 	function meta(item: LedgerItem): string {
@@ -44,13 +44,7 @@ walk beside it can light what they added. The last row is the answer check. Rule
 		if (item.count === null) return '';
 		return item.count === 1 ? '1 row' : `${item.count} rows`;
 	}
-	const checkState = $derived.by(() => {
-		if (!check) return null;
-		if (check.status === 'running') return { state: 'running', text: 'Checking the answer against what was found' } as const;
-		if (check.error?.startsWith('Not run')) return { state: 'not-run', text: 'Answer check not run: the answer ended first' } as const;
-		if (check.error) return { state: 'failed', text: `Answer sent back: ${check.error}` } as const;
-		return { state: 'done', text: 'Checked: every citation came from a step above' } as const;
-	});
+	const checkState = $derived(checkLine(steps));
 </script>
 
 {#snippet mark(state: LedgerItem['state'])}
@@ -63,7 +57,8 @@ walk beside it can light what they added. The last row is the answer check. Rule
 	</span>
 {/snippet}
 
-<ol class="ledger" aria-label="What the brain did">
+<!-- A row can fold away under a still pointer (no mouseleave), so leaving the list clears too. -->
+<ol class="ledger" aria-label="What the brain did" onpointerleave={() => onhover?.(null)}>
 	{#each items as item (keyOf(item))}
 		{@const key = keyOf(item)}
 		{@const isOpen = open === key}

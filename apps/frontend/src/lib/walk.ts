@@ -444,6 +444,39 @@ export function ledgerItems(steps: WalkStep[], settled: boolean): LedgerItem[] {
 	return out;
 }
 
+/** The ledger's last row: how the newest answer check went (null before the first one). */
+export interface CheckLine {
+	state: 'running' | 'done' | 'failed' | 'not-run';
+	text: string;
+}
+
+/**
+ * The answer check row. The newest check speaks (an answer sent back is checked again); a pass
+ * after send-backs says how many there were.
+ */
+export function checkLine(steps: WalkStep[]): CheckLine | null {
+	const checks = steps.filter((s) => s.n === null);
+	const check = checks.at(-1);
+	if (!check) return null;
+	if (check.status === 'running') return { state: 'running', text: 'Checking the answer against what was found' };
+	if (check.error?.startsWith('Not run')) return { state: 'not-run', text: 'Answer check not run: the answer ended first' };
+	if (check.error) return { state: 'failed', text: `Answer sent back: ${check.error}` };
+	const back = checks.slice(0, -1).filter((s) => s.error && !s.error.startsWith('Not run')).length;
+	if (back === 0) return { state: 'done', text: 'Checked: every citation came from a step above' };
+	const times = back === 1 ? '1 send-back' : `${back} send-backs`;
+	return { state: 'done', text: `Checked after ${times}: every citation came from a step above` };
+}
+
+/**
+ * What a running answer is doing now, for a screen reader's live region: the newest running
+ * step's sentence, "Writing the answer" while only the answer check runs, or nothing.
+ */
+export function progressLine(steps: WalkStep[]): string {
+	const step = steps.filter((s) => s.n !== null && s.status === 'running').at(-1);
+	if (step) return stepSentence(step);
+	return steps.some((s) => s.n === null && s.status === 'running') ? 'Writing the answer' : '';
+}
+
 /** What one step added to the walk: its nodes and links, for lighting it while its row is hovered. */
 export function stepHighlight(step: Pick<WalkStep, 'nodes' | 'rels'>): Highlight {
 	return {

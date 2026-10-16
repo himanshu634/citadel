@@ -6,11 +6,13 @@ import {
 	answerBlocks,
 	answerPlainText,
 	carryOver,
+	checkLine,
 	highlightFor,
 	ledgerItems,
 	layoutWalk,
 	mergeWalk,
 	nodeType,
+	progressLine,
 	relKey,
 	rowViews,
 	shortUid,
@@ -511,5 +513,56 @@ describe('carryOver', () => {
 		const carried = carryOver(earlier, now, 1);
 		expect(carried.nodes.map((n) => n.uid)).toEqual(['person:alice']);
 		expect(carried.rels).toHaveLength(2);
+	});
+});
+
+describe('checkLine', () => {
+	const sentBack = (id: string, error = 'cited a uid no step returned'): WalkStep => ({ ...check, id, error });
+	const passed = (id: string): WalkStep => ({ ...check, id });
+
+	test('no check yet, no line', () => {
+		expect(checkLine([history(1, 'Auth')])).toBeNull();
+	});
+
+	test('one check that passed', () => {
+		expect(checkLine([history(1, 'Auth'), check])).toEqual({
+			state: 'done',
+			text: 'Checked: every citation came from a step above'
+		});
+	});
+
+	test('the newest check speaks: a pass after a send-back says so', () => {
+		expect(checkLine([history(1, 'Auth'), sentBack('c1'), passed('c2')])).toEqual({
+			state: 'done',
+			text: 'Checked after 1 send-back: every citation came from a step above'
+		});
+		expect(checkLine([sentBack('c1'), history(1, 'Auth'), sentBack('c2'), passed('c3')])?.text).toBe(
+			'Checked after 2 send-backs: every citation came from a step above'
+		);
+	});
+
+	test('while the next check runs, the old send-back is not shown', () => {
+		expect(checkLine([sentBack('c1'), { ...check, id: 'c2', status: 'running' }])).toEqual({
+			state: 'running',
+			text: 'Checking the answer against what was found'
+		});
+	});
+
+	test('the newest check sent back, or never ran', () => {
+		expect(checkLine([passed('c1'), sentBack('c2', 'no sources')])).toEqual({
+			state: 'failed',
+			text: 'Answer sent back: no sources'
+		});
+		expect(checkLine([sentBack('c1'), { ...check, id: 'c2', error: 'Not run: step limit' }])?.state).toBe('not-run');
+	});
+});
+
+describe('progressLine', () => {
+	test('the newest running step, then the answer being written, then nothing', () => {
+		expect(progressLine([history(1, 'Auth'), history(2, 'Billing', { status: 'running' })])).toBe(
+			stepSentence(history(2, 'Billing'))
+		);
+		expect(progressLine([history(1, 'Auth'), { ...check, status: 'running' }])).toBe('Writing the answer');
+		expect(progressLine([history(1, 'Auth'), check])).toBe('');
 	});
 });

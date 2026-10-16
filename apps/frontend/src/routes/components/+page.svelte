@@ -49,7 +49,7 @@
 	import { syntheticGraph } from './graph-samples';
 	import * as walks from './walk-samples';
 	import { carryOver, highlightFor } from '$lib/walk';
-	import { WALK_LIMITS } from '$lib/splitter';
+	import { WALK_LIMITS, clampSize } from '$lib/splitter';
 	import {
 		NODE_LABELS,
 		type CitedAnswer as Answer,
@@ -86,7 +86,7 @@
 		measureSplit();
 	});
 	const splitPane = $derived(
-		splitFolded ? 'var(--walk-strip)' : `${Math.round(Math.min(splitSize, WALK_LIMITS.max) * splitWidth)}px`
+		splitFolded ? 'var(--walk-strip)' : `${Math.round(clampSize(splitSize, splitWidth) * splitWidth)}px`
 	);
 
 	// Example content for the gallery, taken from apps/backend/examples/synthetic_company.

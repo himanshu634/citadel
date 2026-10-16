@@ -17,25 +17,34 @@ export interface SplitLimits {
 	reset: number;
 	/** Dragging this many px narrower than `min` folds the pane. */
 	foldSlack: number;
+	/** The other pane (the chat) keeps at least this many px; it lowers `max` on a narrow page. */
+	chatMin: number;
 }
 
-export const WALK_LIMITS: SplitLimits = { min: 320, max: 0.65, reset: 0.38, foldSlack: 80 };
+export const WALK_LIMITS: SplitLimits = { min: 320, max: 0.65, reset: 0.38, foldSlack: 80, chatMin: 420 };
 
 export interface Split {
 	size: number;
 	folded: boolean;
 }
 
-/** The fraction closest to `size` that fits `container` px (min wins over max on a narrow window). */
+/**
+ * The fraction closest to `size` that fits `container` px. The widest share is `max`, lowered so
+ * the other pane keeps `chatMin` px; the pane's own minimum wins over both on a narrow window.
+ */
 export function clampSize(size: number, container: number, limits: SplitLimits = WALK_LIMITS): number {
 	if (!(container > 0)) return limits.reset;
 	const lo = Math.min(limits.min / container, limits.max);
-	return Math.min(limits.max, Math.max(lo, Number.isFinite(size) ? size : limits.reset));
+	const hi = Math.max(lo, Math.min(limits.max, (container - limits.chatMin) / container));
+	return Math.min(hi, Math.max(lo, Number.isFinite(size) ? size : limits.reset));
 }
 
-/** The pane is `width` px wide after a drag: folded when dragged well past its minimum. */
-export function dragTo(width: number, container: number, limits: SplitLimits = WALK_LIMITS): Split {
-	if (width < limits.min - limits.foldSlack) return { size: limits.reset, folded: true };
+/**
+ * The pane is `width` px wide after a drag: folded when dragged well past its minimum. A fold
+ * keeps `keep` (the size before the drag), so opening it again brings that width back.
+ */
+export function dragTo(width: number, container: number, keep: number, limits: SplitLimits = WALK_LIMITS): Split {
+	if (width < limits.min - limits.foldSlack) return { size: keep, folded: true };
 	return { size: clampSize(width / container, container, limits), folded: false };
 }
 
@@ -56,7 +65,7 @@ export function keyMove(
 		case 'Home':
 			return { size: clampSize(0, container, limits), folded: false };
 		case 'End':
-			return { size: limits.max, folded: false };
+			return { size: clampSize(1, container, limits), folded: false };
 		case 'Enter':
 			return { size: split.size, folded: !split.folded };
 		default:
