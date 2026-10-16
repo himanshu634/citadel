@@ -169,15 +169,24 @@ def test_episode_becomes_log_entry(store, name):
         "input": "keeper.decide gap:1",
         "summary": "Claimed the owner of Billing.",
         "tools_called": ["experts_for_system"],
-        "actions": ["claim:1"],
+        "actions": ["claim:1", "claim_written"],
         "stop": None,
     }
     [row] = store.write(name, "citadel_pm", params)
-    [entry] = store.read("ledger/read_log", {"limit": 10})
+    [entry] = store.read("ledger/read_log", {"limit": 10, "gap": "gap:1"})
     assert entry["uid"] == row["episode"]
     assert (entry["action"], entry["actor"], entry["why"], entry["evidence"]) == (
-        "episode", "agent:keeper", "Claimed the owner of Billing.", ["claim:1"])  # fmt: skip
-    assert entry["at"] == "2026-10-17T08:00:00Z"
+        "episode", "agent:keeper", "keeper.decide gap:1: Claimed the owner of Billing.",
+        ["claim:1"])  # fmt: skip
+    assert (entry["gap"], entry["claim"], entry["at"]) == ("gap:1", None, "2026-10-17T08:00:00Z")
+
+
+def test_episode_of_a_claim_job(store):
+    params = {"agent": "agent:pm", "now": T1, "input": "pm.follow_up claim:7", "summary": "Done."}
+    store.write("work/write_episode", "citadel_pm", {**params, "actions": []})
+    [entry] = store.read("ledger/read_log", {"limit": 10, "claim": "claim:7"})
+    assert (entry["gap"], entry["claim"], entry["why"], entry["evidence"]) == (
+        None, "claim:7", "pm.follow_up claim:7: Done.", [])  # fmt: skip
 
 
 def test_acl_refused(store):
@@ -222,20 +231,21 @@ def write_claim(store, kind="owner", status="accepted", *, subject="system:billi
 
 
 def test_consult_round_trip(store):
-    post = {"gap": "gap:1", "role": "pm", "now": T1}
-    assert store.write("ledger/post_consult", KEEPER, post) == [
-        {"uid": "consult:gap:1:pm", "created": True}]  # fmt: skip
+    [g] = open_gap(store, "who owns billing", "t1")
+    gap, uid = g["uid"], f"consult:{g['uid']}:pm:0"
+    post = {"gap": gap, "role": "pm", "attempt": 0, "now": T1}
+    assert store.write("ledger/post_consult", KEEPER, post) == [{"uid": uid, "created": True}]
     assert store.write("ledger/post_consult", KEEPER, {**post, "now": T2}) == [
-        {"uid": "consult:gap:1:pm", "created": False}]  # fmt: skip
+        {"uid": uid, "created": False}]  # fmt: skip
     store.write("ledger/post_consult", KEEPER, {**post, "role": "qa"})
 
     [queued] = store.read("ledger/queue_consult", {"role": "pm"})
     assert (queued["uid"], queued["gap"], queued["status"], queued["can_ground"]) == (
-        "consult:gap:1:pm", "gap:1", "open", None)  # fmt: skip
-    assert queued["created_at"] == T1  # the second post changed nothing
+        uid, gap, "open", None)  # fmt: skip
+    assert (queued["created_at"], queued["attempt"]) == (T1, 0)  # the second post changed nothing
 
     answer = {
-        "consult": "consult:gap:1:pm",
+        "consult": uid,
         "can_ground": True,
         "kind": "owner",
         "subject": "system:billing",
@@ -245,21 +255,41 @@ def test_consult_round_trip(store):
         "now": T2,
     }
     assert store.write("ledger/answer_consult", "citadel_pm", answer) == [
-        {"uid": "consult:gap:1:pm", "status": "answered"}]  # fmt: skip
+        {"uid": uid, "status": "answered"}]  # fmt: skip
     assert store.read("ledger/queue_consult", {"role": "pm"}) == []
     assert store.write("ledger/answer_consult", "citadel_pm", answer) == []  # answered once
 
-    pm, qa = store.read("ledger/consults_for_gap", {"gap": "gap:1"})
+    pm, qa = store.read("ledger/consults_for_gap", {"gap": gap})
     assert (pm["role"], pm["status"], pm["can_ground"], pm["cites"], pm["value"]) == (
         "pm", "answered", True, ["pr:1"], "person:alice")  # fmt: skip
     assert (qa["role"], qa["status"], qa["cites"]) == ("qa", "open", [])
 
 
 def test_queue_consult_oldest_first(store):
-    store.write("ledger/post_consult", KEEPER, {"gap": "gap:2", "role": "qa", "now": T2})
-    store.write("ledger/post_consult", KEEPER, {"gap": "gap:1", "role": "qa", "now": T1})
+    post = {"role": "qa", "attempt": 0}
+    store.write("ledger/post_consult", KEEPER, {**post, "gap": "gap:2", "now": T2})
+    store.write("ledger/post_consult", KEEPER, {**post, "gap": "gap:1", "now": T1})
     rows = store.read("ledger/queue_consult", {"role": "qa"})
-    assert [r["uid"] for r in rows] == ["consult:gap:1:qa", "consult:gap:2:qa"]
+    assert [r["uid"] for r in rows] == ["consult:gap:1:qa:0", "consult:gap:2:qa:0"]
+
+
+def test_consults_per_attempt(store):
+    """A gap reopened after a rejected claim (attempts + 1) gets fresh consults."""
+    [g] = open_gap(store, "who owns billing", "t1")
+    gap = g["uid"]
+    store.write("ledger/post_consult", KEEPER, {"gap": gap, "role": "pm", "attempt": 0, "now": T1})
+    answer = {"consult": f"consult:{gap}:pm:0", "can_ground": False, "now": T1}
+    store.write("ledger/answer_consult", "citadel_pm", answer)
+    set_status(store, gap, ["open"], "in_review")
+    set_status(store, gap, ["in_review"], "open", reason="rejected", attempts_inc=1)
+
+    assert store.read("ledger/consults_for_gap", {"gap": gap}) == []  # attempt 0 is history
+    post = {"gap": gap, "role": "pm", "attempt": 1, "now": T2}
+    assert store.write("ledger/post_consult", KEEPER, post) == [
+        {"uid": f"consult:{gap}:pm:1", "created": True}]  # fmt: skip
+    [c] = store.read("ledger/consults_for_gap", {"gap": gap})
+    assert (c["uid"], c["attempt"], c["status"]) == (f"consult:{gap}:pm:1", 1, "open")
+    assert [r["uid"] for r in store.read("ledger/queue_consult", {"role": "pm"})] == [c["uid"]]
 
 
 def test_write_and_read_claims(store):
@@ -328,8 +358,45 @@ def test_epoch_now_is_stored_as_iso(store):
     gap = get_gap(store, g["uid"])
     assert (gap["created_at"], gap["updated_at"]) == (at, "2026-10-17T08:01:00Z")
 
-    store.write("ledger/post_consult", KEEPER, {"gap": g["uid"], "role": "qa", "now": epoch})
-    answer = {"consult": f"consult:{g['uid']}:qa", "can_ground": False, "now": epoch}
+    post = {"gap": g["uid"], "role": "qa", "attempt": 0, "now": epoch}
+    store.write("ledger/post_consult", KEEPER, post)
+    answer = {"consult": f"consult:{g['uid']}:qa:0", "can_ground": False, "now": epoch}
     store.write("ledger/answer_consult", "citadel_qa", answer)
     [c] = store.read("ledger/consults_for_gap", {"gap": g["uid"]})
     assert (c["created_at"], c["answered_at"]) == (at, at)
+
+
+def test_write_claim_defaults_its_timestamps_to_now(store):
+    fields = {"uid": "claim:t", "kind": "fact", "subject": "system:auth", "statement": "x"}
+    store.write("ledger/write_claim", KEEPER, {**fields, "author": "keeper", "now": T2})
+    [got] = store.read("ledger/get_claim", {"uid": "claim:t"})
+    assert (got["created_at"], got["updated_at"], got["status"]) == (T2, T2, "pending_approval")
+
+
+def test_bad_writes_are_refused_before_anything_is_stored(store):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        open_gap(store, "who owns billing", "t1", kind="bogus")
+    assert store.read("ledger/gaps", {"statuses": ["open"], "limit": 10}) == []
+
+    [g] = open_gap(store, "who owns billing", "t1")
+    with pytest.raises(ValueError):
+        set_status(store, g["uid"], ["open"], "closed")
+    assert get_gap(store, g["uid"])["status"] == "open"
+
+    with pytest.raises(ValidationError):  # no statement
+        store.write("ledger/write_claim", KEEPER, {
+            "uid": "claim:bad", "kind": "owner", "subject": "system:billing",
+            "author": "keeper", "now": T1})  # fmt: skip
+    with pytest.raises(ValidationError):
+        store.write("ledger/write_claim", KEEPER, {
+            "uid": "claim:bad", "kind": "rumour", "subject": "system:billing",
+            "statement": "x", "author": "keeper", "now": T1})  # fmt: skip
+    assert store.read("ledger/get_claim", {"uid": "claim:bad"}) == []
+
+    c = write_claim(store, status="pending_approval")
+    move = {"uid": c.uid, "from": ["pending_approval"], "to": "approved", "now": T2}
+    with pytest.raises(ValueError):
+        store.write("ledger/set_claim_status", KEEPER, move)
+    assert store.read("ledger/get_claim", {"uid": c.uid})[0]["status"] == "pending_approval"

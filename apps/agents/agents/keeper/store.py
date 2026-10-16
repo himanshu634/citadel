@@ -23,9 +23,10 @@ the runner's `work/write_episode` / `memory/write_episode` into a LogEntry with 
 from __future__ import annotations
 
 import copy
+import re
 import threading
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, get_args
 
 from brain import db, queries
 from pydantic import BaseModel
@@ -37,9 +38,11 @@ from agents.keeper.model import (
     LIVE_GAP,
     NOTICING_KINDS,
     Claim,
+    ClaimStatus,
     Consult,
     FollowUp,
     Gap,
+    GapStatus,
     LogEntry,
     Review,
     consult_uid,
@@ -96,11 +99,6 @@ OPTIONAL: dict[str, dict[str, Any]] = {
         "value": None,
         "cites": [],
     },
-    "ledger/write_claim": {
-        k: f.get_default(call_default_factory=True)
-        for k, f in Claim.model_fields.items()
-        if not f.is_required()
-    },
     "ledger/set_claim_status": {"by": None, "why": None, "valid_to": None},
     "ledger/open_followup": {"body": "", "by": "pm"},
     "ledger/followups": {"status": None},
@@ -126,6 +124,40 @@ RECORDS: dict[str, type[BaseModel]] = {
 }
 
 
+_UID = re.compile(r"[a-z_]+:\S+")  # a uid, e.g. claim:1a2b3c4d5e6f (not an action name)
+
+_STATUS: dict[str, tuple[str, ...]] = {
+    "ledger/set_gap_status": get_args(GapStatus),
+    "ledger/set_claim_status": get_args(ClaimStatus),
+}
+
+
+def _validate(name: str, p: dict[str, Any]) -> None:
+    """Refuse a bad write before anything is stored (a ValueError; pydantic's ValidationError is
+    one): an unknown status, or a gap or claim its model rejects. A claim's timestamps default
+    to `now`, and the claim is written as its model dumps it."""
+    if name in _STATUS and p.get("to") not in _STATUS[name]:
+        raise ValueError(f"{name}: unknown status {p.get('to')!r}")
+    if name == "ledger/open_gap":
+        trace = p.get("trace_id")
+        Gap(
+            uid=p.get("uid"),
+            kind=p.get("kind"),
+            text=p.get("text"),
+            norm=p.get("norm"),
+            subject=p.get("subject"),
+            about=p.get("about"),
+            trace_ids=[] if trace is None else [trace],
+            created_at=p.get("now"),
+            updated_at=p.get("now"),
+        )
+    if name == "ledger/write_claim":
+        for key in ("created_at", "updated_at"):
+            if p.get(key) is None:
+                p[key] = p.get("now")
+        p.update(Claim(**{k: p[k] for k in Claim.model_fields if k in p}).model_dump())
+
+
 class _LedgerStore:
     """The part both stores share: names, permissions, optional params and episodes."""
 
@@ -148,7 +180,9 @@ class _LedgerStore:
         acl.check(db_user, self.slug, self.graph, "W")
         if name in EPISODES:
             return self._episode(params)
-        return self._write(name, self._params(name, params))
+        p = self._params(name, params)
+        _validate(name, p)
+        return self._write(name, p)
 
     def _params(self, name: str, params: Mapping[str, Any]) -> dict[str, Any]:
         """Fill the optional params; store every timestamp as ISO text (job writes pass
@@ -161,18 +195,23 @@ class _LedgerStore:
         return p
 
     def _episode(self, p: Mapping[str, Any]) -> list[Row]:
-        """A runner Episode as a log line: the agent did `input`; why = its summary; evidence =
-        the actions it wrote. `now` is the runner's epoch int, stored as ISO like every `at`."""
+        """A runner Episode as a log line. The runner's `input` is "<role>.<job> <subject uid>":
+        a gap: or claim: subject fills `gap` / `claim`, so the gap's or claim's log shows the
+        run; why = "<input>: <summary>"; evidence = the uids among the actions it wrote. `now`
+        is the runner's epoch int, stored as ISO like every `at`."""
         at = iso(p["now"])
+        job = p.get("input") or ""
+        subject = job.split()[-1] if job.split() else ""
+        summary = p.get("summary")
         entry = {
             "uid": log_uid(at),
             "at": at,
             "actor": p["agent"],
             "action": "episode",
-            "why": p.get("summary"),
-            "gap": None,
-            "claim": None,
-            "evidence": list(p.get("actions") or []),
+            "why": f"{job}: {summary}" if job and summary else (summary or job or None),
+            "gap": subject if subject.startswith("gap:") else None,
+            "claim": subject if subject.startswith("claim:") else None,
+            "evidence": [a for a in p.get("actions") or [] if _UID.fullmatch(str(a))],
         }
         [row] = self._write("ledger/log", entry)
         return [{"episode": row["uid"]}]
@@ -377,10 +416,12 @@ class MemoryKeeperStore(_LedgerStore):
     # --- consults -----------------------------------------------------------------------------
 
     def _w_post_consult(self, p: Mapping[str, Any]) -> list[Row]:
-        uid = consult_uid(p["gap"], p["role"])
+        uid = consult_uid(p["gap"], p["role"], p["attempt"])
         created = uid not in self.consults
         if created:
-            self.consults[uid] = Consult(uid=uid, gap=p["gap"], role=p["role"], created_at=p["now"])
+            self.consults[uid] = Consult(
+                uid=uid, gap=p["gap"], role=p["role"], attempt=p["attempt"], created_at=p["now"]
+            )
         return [{"uid": uid, "created": created}]
 
     def _r_queue_consult(self, p: Mapping[str, Any]) -> list[Row]:
@@ -405,8 +446,12 @@ class MemoryKeeperStore(_LedgerStore):
         return [{"uid": c.uid, "status": "answered"}]
 
     def _r_consults_for_gap(self, p: Mapping[str, Any]) -> list[Row]:
+        gap = self.gaps.get(p["gap"])
+        if gap is None:
+            return []
         rows = sorted(
-            (c for c in self.consults.values() if c.gap == p["gap"]), key=lambda c: c.role
+            (c for c in self.consults.values() if c.gap == gap.uid and c.attempt == gap.attempts),
+            key=lambda c: c.role,
         )
         return [c.model_dump() for c in rows]
 

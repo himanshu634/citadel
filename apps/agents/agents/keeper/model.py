@@ -77,9 +77,10 @@ class Review(BaseModel):
 class Consult(BaseModel):
     """One role's answer to one gap: a draft claim citing uids it saw, or can_ground False."""
 
-    uid: str  # consult:<gap>:<role>, one per role per gap
+    uid: str  # consult:<gap>:<role>:<attempt>, one per role per attempt at the gap
     gap: str
     role: Literal["pm", "qa"]
+    attempt: int = 0  # the gap's `attempts` when it was posted; a reopened gap asks again
     status: Literal["open", "answered"] = "open"
     can_ground: bool | None = None  # None until answered
     kind: ClaimKind | None = None
@@ -156,9 +157,9 @@ def claim_uid() -> str:
     return f"claim:{_hex(12)}"
 
 
-def consult_uid(gap: str, role: str) -> str:
+def consult_uid(gap: str, role: str, attempt: int) -> str:
     """Mirrored in apps/brain/queries/ledger/post_consult.cypher."""
-    return f"consult:{gap}:{role}"
+    return f"consult:{gap}:{role}:{attempt}"
 
 
 def followup_uid(claim: str) -> str:
