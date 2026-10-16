@@ -10,7 +10,7 @@ API_PORT ?= 8000
 BRAIN := uv run brain
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask chat reset brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
+.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask chat reset linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
@@ -78,6 +78,9 @@ tools: ## List the named query tools and their parameters
 
 reset: ## Delete graphs brain_/agent_$(SLUG) and its build history; needs CONFIRM=1
 	$(BRAIN) reset $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)
+
+linear-seed: ## Fill the Linear workspace of $(SLUG) with the synthetic tickets (CONFIRM=1)
+	$(BRAIN) linear-seed $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)
 
 brain: ## Run any brain command: make brain ARGS="query falkordb graph_stats"
 	$(BRAIN) $(ARGS)
