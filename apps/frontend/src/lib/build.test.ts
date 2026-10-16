@@ -69,6 +69,56 @@ describe('buildTable', () => {
 		expect(withFetch.rows[0].fetch).toEqual({ status: 'done', count: 5 });
 	});
 
+	test('a source without a fetch event but with a later stage is skipped (partial refetch)', () => {
+		const t = buildTable(
+			[
+				ev('fetch', 'done', 'github:a/b', 7),
+				ev('records', 'done', 'github:a/b', 7),
+				ev('records', 'running', 'local_docs:docs')
+			],
+			['prepare', 'fetch', 'records', 'normalize', 'load']
+		);
+		expect(t.rows[0].fetch).toEqual({ status: 'done', count: 7 });
+		expect(t.rows[1].fetch).toEqual({ status: 'skipped' });
+		// Still waiting when the source has not reached any later stage.
+		const early = buildTable([ev('fetch', 'running', 'github:a/b'), ev('fetch', 'done', 'github:c/d')]);
+		expect(early.rows.map((r) => r.fetch.status)).toEqual(['running', 'done']);
+	});
+
+	test('a source-less failure closes the table and stops the running cells of its stage', () => {
+		const t = buildTable([
+			ev('records', 'done', 'github:a/b', 3),
+			ev('normalize', 'running', 'github:a/b'),
+			ev('records', 'done', 'local_docs:docs', 1),
+			ev('normalize', 'failed', null, undefined, 'boom')
+		]);
+		expect(t.closing).toEqual({ stage: 'normalize', status: 'failed', message: 'boom' });
+		expect(t.rows[0].normalize).toEqual({ status: 'failed' });
+		expect(t.rows[1].normalize).toEqual({ status: 'failed' });
+		expect(t.rows[0].records).toEqual({ status: 'done', count: 3 });
+		expect(t.rows[1].load.status).toBe('waiting');
+	});
+
+	test('a stop between sources closes without a message and keeps finished cells', () => {
+		const t = buildTable([
+			ev('fetch', 'done', 'github:a/b', 2),
+			ev('fetch', 'running', 'github:c/d'),
+			ev('fetch', 'stopped')
+		]);
+		expect(t.closing).toEqual({ stage: 'fetch', status: 'stopped' });
+		expect(t.rows[0].fetch).toEqual({ status: 'done', count: 2 });
+		expect(t.rows[1].fetch).toEqual({ status: 'stopped' });
+	});
+
+	test('a failure before any source event shows in closing; prepare failures stay in prepare', () => {
+		const t = buildTable([ev('prepare', 'done'), ev('records', 'failed', null, undefined, 'x')]);
+		expect(t.closing).toEqual({ stage: 'records', status: 'failed', message: 'x' });
+		expect(t.rows).toEqual([]);
+		const p = buildTable([ev('prepare', 'failed', null, undefined, 'no db')]);
+		expect(p.prepare).toEqual({ status: 'failed', message: 'no db' });
+		expect(p.closing).toBeUndefined();
+	});
+
 	test('a source-less table has its source rows only from events', () => {
 		expect(buildTable([], ['prepare', 'fetch', 'records', 'normalize', 'load']).rows).toEqual([]);
 	});

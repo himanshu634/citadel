@@ -26,6 +26,11 @@ export interface BuildTable {
 	prepare: Cell;
 	/** Only a rebuild resets the graph first. */
 	reset?: Cell;
+	/**
+	 * How the build ended when the failure or stop belongs to no source: the backend closes a job
+	 * that failed or stopped between sources with a source-less event on a source stage.
+	 */
+	closing?: { stage: BuildStage; status: BuildStatus; message?: string };
 	rows: SourceRow[];
 }
 
@@ -45,10 +50,18 @@ function cellOf(event: BuildEvent): Cell {
  * no reset cell, and when the plan has no `fetch` (a rebuild that downloads nothing) the fetch
  * cells nothing reported are `skipped` without a message, because nothing will ever run there. An
  * event always wins over the plan. Without `stages`, nothing is assumed beyond the events.
+ *
+ * A source whose fetch cell nothing reported but which has a later-stage event is `skipped` too:
+ * a partial refetch fetches only the changed sources, the others go straight to records.
+ *
+ * A source-less `failed`/`stopped` event on a source stage (the job ended between sources) becomes
+ * `closing`, and the cells of that stage still `waiting` or `running` take its status, so no cell
+ * keeps running after the build ended.
  */
 export function buildTable(events: BuildEvent[], stages?: BuildStage[]): BuildTable {
 	const company = new Map<'prepare' | 'reset', Cell>();
 	const bySource = new Map<string, Partial<Record<SourceStage, Cell>>>();
+	let closing: BuildTable['closing'];
 
 	for (const event of events) {
 		if (event.stage === 'prepare' || event.stage === 'reset') {
@@ -57,23 +70,41 @@ export function buildTable(events: BuildEvent[], stages?: BuildStage[]): BuildTa
 			const cells = bySource.get(event.source) ?? {};
 			cells[event.stage as SourceStage] = cellOf(event);
 			bySource.set(event.source, cells);
+		} else if (
+			event.source == null &&
+			(SOURCE_STAGES as readonly string[]).includes(event.stage) &&
+			(event.status === 'failed' || event.status === 'stopped')
+		) {
+			closing = { stage: event.stage, status: event.status };
+			if (event.message != null) closing.message = event.message;
 		}
 	}
 
-	const fetchUnplanned: Cell | undefined =
-		stages && !stages.includes('fetch') ? { status: 'skipped' } : undefined;
+	const fetchUnplanned = Boolean(stages && !stages.includes('fetch'));
 	const waiting = (): Cell => ({ status: 'waiting' });
 
 	const table: BuildTable = {
 		prepare: company.get('prepare') ?? waiting(),
-		rows: [...bySource].map(([source, cells]) => ({
-			source,
-			fetch: cells.fetch ?? (fetchUnplanned ? { ...fetchUnplanned } : waiting()),
-			records: cells.records ?? waiting(),
-			normalize: cells.normalize ?? waiting(),
-			load: cells.load ?? waiting()
-		}))
+		rows: [...bySource].map(([source, cells]) => {
+			const reachedIngest = Boolean(cells.records || cells.normalize || cells.load);
+			const unfetched: Cell = fetchUnplanned || reachedIngest ? { status: 'skipped' } : waiting();
+			return {
+				source,
+				fetch: cells.fetch ?? unfetched,
+				records: cells.records ?? waiting(),
+				normalize: cells.normalize ?? waiting(),
+				load: cells.load ?? waiting()
+			};
+		})
 	};
+	if (closing) {
+		table.closing = closing;
+		const { stage, status } = closing;
+		for (const row of table.rows) {
+			const cell = row[stage as SourceStage];
+			if (cell.status === 'waiting' || cell.status === 'running') cell.status = status;
+		}
+	}
 	const reset = company.get('reset') ?? (stages?.includes('reset') ? waiting() : undefined);
 	if (reset) table.reset = reset;
 	return table;
