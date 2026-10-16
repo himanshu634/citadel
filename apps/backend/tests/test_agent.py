@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 from anthropic.types.beta import BetaTextBlock, BetaToolUseBlock, BetaUsage
 from brain.agents import ask as agent
+from brain.agents import loop
 from brain.agents.toolset import Toolset
 from brain.config import get_settings
 from langgraph.checkpoint.memory import InMemorySaver
@@ -100,7 +101,7 @@ class FakeClient:
 
 
 def submit(id_: str, answer: str, sources: list[str], path: list[str] | None = None):
-    return tool_use(id_, agent.SUBMIT, {"answer": answer, "sources": sources, "path": path or []})
+    return tool_use(id_, loop.SUBMIT, {"answer": answer, "sources": sources, "path": path or []})
 
 
 def ask(client, **kw):
@@ -157,9 +158,9 @@ def test_request_shape_uses_settings_fallbacks_and_a_stable_prefix():
     assert req["cache_control"] == {"type": "ephemeral"}
     assert "tool_choice" not in req  # forced tool choice is rejected by current models
     assert "thinking" not in req
-    assert [t["name"] for t in req["tools"]] == ["related_work_items", agent.SUBMIT]
+    assert [t["name"] for t in req["tools"]] == ["related_work_items", loop.SUBMIT]
     assert req["tools"][0]["input_schema"]["required"] == ["text"]
-    assert req["system"] == [{"type": "text", "text": agent.SYSTEM_PROMPT}]
+    assert req["system"] == [{"type": "text", "text": loop.SYSTEM_PROMPT}]
     assert req["messages"][0]["content"][0]["text"].startswith("Company: Synthetic Co (synthetic)")
 
 
@@ -200,7 +201,7 @@ def test_plain_text_reply_gets_one_nudge():
     )
     a = ask(client)
     nudge = client.requests[1]["messages"][-1]
-    assert nudge["role"] == "user" and agent.SUBMIT in nudge["content"][0]["text"]
+    assert nudge["role"] == "user" and loop.SUBMIT in nudge["content"][0]["text"]
     assert a.text == "For load."
 
 
@@ -260,7 +261,7 @@ def test_thread_follow_up_appends_to_the_same_conversation():
 )
 def test_replayable_drops_declined_model_internals_before_a_fallback(types, kept):
     blocks = [SimpleNamespace(model_dump=lambda t=t, **_: {"type": t}) for t in types]
-    assert [b["type"] for b in agent.replayable(blocks)] == kept
+    assert [b["type"] for b in loop.replayable(blocks)] == kept
 
 
 def test_real_tool_registry_becomes_sorted_tool_definitions():
@@ -296,10 +297,10 @@ def test_out_of_range_citation_marker_is_rejected():
 
 
 def test_step_limit_closes_open_tool_calls_so_the_thread_stays_valid(monkeypatch):
-    monkeypatch.setattr(agent, "RECURSION_LIMIT", 3)  # call, tools, call -> stops after a call
+    monkeypatch.setattr(agent, "RECURSION_LIMIT", 4)  # router, call, tools, call -> stops
     saver = InMemorySaver()
-    loop = [reply(tool_use(f"t{i}", "related_work_items", {"text": "jwt"})) for i in range(2)]
-    client = FakeClient(*loop, reply(submit("t9", "Load [1].", ["pr:1"])))
+    turns = [reply(tool_use(f"t{i}", "related_work_items", {"text": "jwt"})) for i in range(2)]
+    client = FakeClient(*turns, reply(submit("t9", "Load [1].", ["pr:1"])))
     first = ask(client, checkpointer=saver)
     assert first.text is None and first.stop == "step_limit"
 
@@ -310,8 +311,50 @@ def test_step_limit_closes_open_tool_calls_so_the_thread_stays_valid(monkeypatch
     )  # fmt: skip
     assert second.text == "Load [1]."
     history = client.requests[-1]["messages"]
-    calls = [b["id"] for m in history for b in m["content"] if b["type"] == "tool_use"]
-    answered = [
-        b["tool_use_id"] for m in history for b in m["content"] if b["type"] == "tool_result"
-    ]
+    blocks = [b for m in history for b in m["content"]]
+    calls = [b["id"] for b in blocks if b["type"] == "tool_use"]
+    answered = [b["tool_use_id"] for b in blocks if b["type"] == "tool_result"]
     assert calls and calls == answered  # every tool call has its result, in order
+    assert any("step limit" in str(b.get("content")) for b in blocks)  # the closing path ran
+
+
+def test_router_sends_questions_to_the_brain_loop():
+    from brain.agents import graph
+
+    assert graph.router({}) == {"route": "brain"}
+    client = FakeClient(reply(submit("t1", "Nothing found.", [])))
+    assert ask(client).text == "Nothing found." and len(client.requests) == 1
+
+
+def test_build_route_runs_the_placeholders_without_calling_claude(monkeypatch):
+    from brain.agents import graph
+
+    monkeypatch.setattr(graph, "router", lambda state: {"route": "build"})
+    client = FakeClient()
+    a = ask(client)
+    assert client.requests == [] and a.text is None and a.stop == "no_answer"
+
+
+def test_offline_client_runs_a_scripted_turn_through_the_real_loop():
+    from brain.agents.offline import OfflineClient
+
+    class SystemsParams(BaseModel):
+        limit: int = 100
+
+    class SystemRow(BaseModel):
+        system: str
+        system_uid: str
+
+    toolset = Toolset(
+        tools={"list_systems": FakeTool("list_systems", "List systems.", SystemsParams)},
+        run=lambda slug, name, **p: [SystemRow(system="Auth", system_uid="system:Auth")],
+    )
+    saver = InMemorySaver()
+    first = agent.ask("synthetic", "?", client=OfflineClient(), toolset=toolset, checkpointer=saver)
+    assert first.text == "The graph has 1 systems: Auth [1]."
+    assert [s.uid for s in first.sources] == ["system:Auth"] and first.sources[0].title == "Auth"
+    again = agent.ask(
+        "synthetic", "?", first.thread_id, client=OfflineClient(), toolset=toolset,
+        checkpointer=saver,
+    )  # fmt: skip
+    assert again.thread_messages == 2 * first.thread_messages == 10

@@ -9,7 +9,7 @@ SLUG ?= falkordb
 BRAIN := uv run brain
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask reset brain test lint fmt check clean synthetic fe-install fe-dev fe-check fe-build
+.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask chat reset brain test lint fmt check clean synthetic fe-install fe-dev fe-check fe-build
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
@@ -60,6 +60,9 @@ stats: ## Node and relationship counts for brain_$(SLUG)
 
 ask: ## Ask brain_$(SLUG) a question: make ask SLUG=synthetic Q="who knows Auth?" (THREAD=id follows up)
 	$(BRAIN) ask $(SLUG) "$(Q)" $(if $(THREAD),--thread $(THREAD))
+
+chat: ## Chat with brain_$(SLUG) (OFFLINE=1: one scripted turn, no API key; THREAD=id resumes)
+	$(BRAIN) chat $(SLUG) $(if $(filter 1 yes,$(OFFLINE)),--offline) $(if $(THREAD),--thread $(THREAD))
 
 synthetic: ## Regenerate the synthetic company JSONL and load it into brain_synthetic
 	uv run python apps/backend/examples/synthetic_company/generate.py

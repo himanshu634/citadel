@@ -25,6 +25,7 @@ make stats                     # node/relationship counts
 make tools                     # list the named query tools and their params
 make query TOOL=impact_of P="system=CI"   # run one (SLUG=..., JSON=1 for raw rows)
 make ask SLUG=synthetic Q="who knows Auth?"   # Claude answers from the graph (THREAD=<id> follows up)
+make chat SLUG=synthetic OFFLINE=1   # one scripted turn, no API key: router + tools + checkpointer
 make reset SLUG=x CONFIRM=1    # delete a company graph
 make brain ARGS="..."          # any `brain` CLI command
 
@@ -91,7 +92,9 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
 
 ### Agents (`brain/agents`)
 
-`brain ask` runs a LangGraph loop (`agents/ask.py`): `call_claude` streams one Messages API call
+`brain ask` / `brain chat` run the agent graph (`agents/graph.py`): a `router` hands each turn to
+the brain loop; `builder` -> `critic` are placeholders for writing Decision nodes (the router does
+not use them yet). The brain loop (`agents/loop.py`): `call_claude` streams one Messages API call
 (anthropic SDK via `llm.client()`, server-side `fallbacks: "default"` on) and `run_tools` runs the
 requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-written Cypher). Rules:
 - State is append-only and in Anthropic block format; assistant content is replayed exactly as
@@ -102,6 +105,7 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
 - Keep `agents/system_prompt.md` and the tool list static (no dates, sorted tools) so the prompt
   prefix stays cacheable. Threads are checkpointed in graph `agent_<slug>` (`db.checkpointer`).
 - Tests use a scripted fake client (`tests/test_agent.py`); nothing in `make test` calls the API.
+  `agents/offline.py` is the same idea for `brain chat --offline`.
 
 ### Named Cypher queries
 
