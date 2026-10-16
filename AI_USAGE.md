@@ -4,5 +4,7 @@ An AI coding assistant (Claude Code) was used to build this project. Parts it he
 
 - Project skeleton: uv workspace, Docker Compose, config models, CLI.
 - FalkorDB connection layer and schema (index) setup, checked against the running engine.
+- Frontend: design directions, the design system (tokens, components, `design-system.md`) and the
+  dashboard layout in `apps/frontend`.
 
 _Edit this file: add what you wrote yourself, what you reviewed, and what you changed._

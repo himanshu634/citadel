@@ -1,0 +1,180 @@
+/*
+ * Citadel design tokens, "Wide type, calm body".
+ * Rules for using them live in apps/frontend/design-system.md. Components read tokens only;
+ * no component may hold a literal colour, size or radius.
+ *
+ * Theme: light by default, dark from the OS, and an explicit choice on <html data-theme>.
+ * Every token is first defined on bare :root; the dark blocks only redefine.
+ */
+
+:root {
+	/* --- Colour: surfaces and text ------------------------------------------------------- */
+	--color-ground: #e4e2dc; /* page behind panels: stone */
+	--color-surface: #f6f4ef; /* panels, cards, inputs */
+	--color-surface-raised: #ffffff; /* menus, dialogs, tooltips */
+	--color-surface-sunken: #ecebe6; /* wells: code, the ask field at rest */
+	--color-text: #1a1a1c; /* ink */
+	--color-text-muted: #57575c; /* secondary text; >= 4.5:1 on surface */
+	--color-text-faint: #77777d; /* placeholders, disabled; only for non-essential text */
+	--color-line: #d5d2ca; /* hairlines between items */
+	--color-line-strong: #b5b2aa; /* control borders */
+
+	/* --- Colour: action ------------------------------------------------------------------ */
+	--color-accent: #3b3bd9; /* ultramarine: primary action, active nav, links, focus */
+	--color-accent-hover: #2f2fbf;
+	--color-accent-soft: #dcdcfb; /* selected rows, citation chips */
+	--color-on-accent: #ffffff;
+	--color-focus: #3b3bd9;
+
+	/* --- Colour: status (never used as the accent) --------------------------------------- */
+	--color-success: #1f7a4a;
+	--color-success-soft: #d6efe0;
+	--color-warning: #9a5b00;
+	--color-warning-soft: #f7e6c8;
+	--color-danger: #b3261e;
+	--color-danger-soft: #f8dcd9;
+
+	/* --- Colour: graph node types (one per label in the brain schema) -------------------- */
+	--node-person: #8a3fa8;
+	--node-team: #a87a00;
+	--node-system: #1f7a5a;
+	--node-work-item: #c43d2f;
+	--node-change: #2a6fb3;
+	--node-document: #6f6f75;
+	--graph-edge: #a9a6a0;
+
+	/* --- Type ----------------------------------------------------------------------------- */
+	--font-sans: 'Archivo Variable', 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+	--text-xs: 0.75rem; /* 12  meta, chips */
+	--text-sm: 0.8125rem; /* 13  secondary rows */
+	--text-md: 0.875rem; /* 14  UI default */
+	--text-lg: 1rem; /* 16  answers, body copy */
+	--text-xl: 1.25rem; /* 20  section titles */
+	--text-2xl: 1.5rem; /* 24  page titles */
+	--text-3xl: 2rem; /* 32  stat values, brand moments */
+
+	--leading-tight: 1.2;
+	--leading-ui: 1.45;
+	--leading-body: 1.6;
+
+	/* Width is the signature: headings and labels go wide, body stays normal. */
+	--width-body: 100;
+	--width-label: 112;
+	--width-heading: 118;
+	--width-brand: 125;
+
+	--weight-regular: 400;
+	--weight-medium: 500;
+	--weight-semibold: 600;
+	--weight-bold: 700;
+	--weight-black: 900;
+
+	/* --- Space (4px grid) ----------------------------------------------------------------- */
+	--space-1: 0.25rem;
+	--space-2: 0.5rem;
+	--space-3: 0.75rem;
+	--space-4: 1rem;
+	--space-5: 1.25rem;
+	--space-6: 1.5rem;
+	--space-8: 2rem;
+	--space-10: 2.5rem;
+	--space-12: 3rem;
+
+	/* --- Shape ---------------------------------------------------------------------------- */
+	--radius-none: 0; /* the solid accent block: active nav, selected tab */
+	--radius-sm: 4px; /* chips, citations, small badges */
+	--radius-md: 8px; /* buttons, inputs, cards, menus */
+	--radius-full: 999px; /* avatars, node pills */
+
+	--border-hair: 1px;
+	--border-focus: 2px;
+
+	/* Only floating layers cast a shadow. Panels never do. */
+	--shadow-overlay: 0 12px 32px rgb(26 26 28 / 0.16), 0 2px 6px rgb(26 26 28 / 0.08);
+	--color-scrim: rgb(26 26 28 / 0.4);
+
+	/* --- Size ----------------------------------------------------------------------------- */
+	--control-sm: 2rem; /* 32 */
+	--control-md: 2.5rem; /* 40 */
+	--control-lg: 3rem; /* 48 */
+	--sidebar-width: 15rem;
+	--topbar-height: 3.5rem;
+	--content-max: 80rem;
+
+	/* --- Motion --------------------------------------------------------------------------- */
+	--duration-fast: 120ms;
+	--duration-base: 180ms;
+	--ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+	color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme='light']) {
+		--color-ground: #141416;
+		--color-surface: #1e1e22;
+		--color-surface-raised: #26262b;
+		--color-surface-sunken: #18181b;
+		--color-text: #efede7;
+		--color-text-muted: #a2a2a8;
+		--color-text-faint: #7c7c83;
+		--color-line: #303036;
+		--color-line-strong: #46464e;
+		--color-accent: #8f8fff;
+		--color-accent-hover: #a6a6ff;
+		--color-accent-soft: #2c2c55;
+		--color-on-accent: #10103a;
+		--color-focus: #a6a6ff;
+		--color-success: #5fd38d;
+		--color-success-soft: #173a26;
+		--color-warning: #f2b84b;
+		--color-warning-soft: #3d2e10;
+		--color-danger: #ff8a80;
+		--color-danger-soft: #45201d;
+		--node-person: #d08ae8;
+		--node-team: #f2c230;
+		--node-system: #5fcf9f;
+		--node-work-item: #ff7b6b;
+		--node-change: #6fb0ff;
+		--node-document: #a2a2a8;
+		--graph-edge: #55555d;
+		--shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.3);
+		--color-scrim: rgb(0 0 0 / 0.6);
+		color-scheme: dark;
+	}
+}
+
+:root[data-theme='dark'] {
+	--color-ground: #141416;
+	--color-surface: #1e1e22;
+	--color-surface-raised: #26262b;
+	--color-surface-sunken: #18181b;
+	--color-text: #efede7;
+	--color-text-muted: #a2a2a8;
+	--color-text-faint: #7c7c83;
+	--color-line: #303036;
+	--color-line-strong: #46464e;
+	--color-accent: #8f8fff;
+	--color-accent-hover: #a6a6ff;
+	--color-accent-soft: #2c2c55;
+	--color-on-accent: #10103a;
+	--color-focus: #a6a6ff;
+	--color-success: #5fd38d;
+	--color-success-soft: #173a26;
+	--color-warning: #f2b84b;
+	--color-warning-soft: #3d2e10;
+	--color-danger: #ff8a80;
+	--color-danger-soft: #45201d;
+	--node-person: #d08ae8;
+	--node-team: #f2c230;
+	--node-system: #5fcf9f;
+	--node-work-item: #ff7b6b;
+	--node-change: #6fb0ff;
+	--node-document: #a2a2a8;
+	--graph-edge: #55555d;
+	--shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.3);
+	--color-scrim: rgb(0 0 0 / 0.6);
+	color-scheme: dark;
+}

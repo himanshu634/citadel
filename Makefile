@@ -9,7 +9,7 @@ SLUG ?= falkordb
 BRAIN := uv run brain
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats reset brain test lint fmt check clean synthetic
+.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats reset brain test lint fmt check clean synthetic fe-install fe-dev fe-check fe-build
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
@@ -68,6 +68,22 @@ reset: ## Delete graph brain_$(SLUG); needs CONFIRM=1
 
 brain: ## Run any brain command: make brain ARGS="query falkordb graph_stats"
 	$(BRAIN) $(ARGS)
+
+# --- Frontend (apps/frontend, pnpm) ------------------------------------------------------------
+
+FE := pnpm --dir apps/frontend
+
+fe-install: ## Install frontend deps
+	$(FE) install
+
+fe-dev: ## Frontend dev server on http://localhost:5173
+	$(FE) dev --port 5173
+
+fe-check: ## Type-check the frontend (svelte-check)
+	$(FE) check
+
+fe-build: ## Static frontend build into apps/frontend/build
+	$(FE) build
 
 # --- Quality ----------------------------------------------------------------------------------
 
