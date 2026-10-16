@@ -36,22 +36,51 @@ RUNNING_SNAPSHOT = {
 }
 
 
-class FakeSteps:
-    """Records calls; each step emits running/done. `gate` (when given) blocks `prepare`
-    after its first event until the test sets it; `fail_on` makes that step raise."""
+SRC = "github:acme/widgets"
 
-    def __init__(self, gate: threading.Event | None = None, fail_on: str | None = None):
+# The events each fake step emits, in the order the real pipeline emits them.
+STEP_EVENTS = {
+    "prepare": [("prepare", "running", None), ("prepare", "done", None)],
+    "fetch": [("fetch", "running", SRC), ("fetch", "done", SRC)],
+    "ingest": [
+        ("records", "running", SRC),
+        ("records", "done", SRC),
+        ("normalize", "done", SRC),
+        ("load", "running", SRC),
+        ("load", "done", SRC),
+    ],
+}
+
+
+class FakeSteps:
+    """Records calls and emits the real pipeline's events. `gate` (when given) blocks `prepare`
+    after `gate_at` of its events until the test sets it. `fail_on` makes that step raise after
+    `fail_after` of its events (default: before its last one)."""
+
+    def __init__(
+        self,
+        gate: threading.Event | None = None,
+        gate_at: int = 1,
+        fail_on: str | None = None,
+        fail_after: int | None = None,
+    ):
         self.gate = gate
+        self.gate_at = gate_at
         self.fail_on = fail_on
+        self.fail_after = fail_after
         self.calls: list[str] = []
 
-    def _step(self, name, slug, on_event, stage="prepare", source=None):
-        on_event(BuildEvent(slug, stage, "running", source))
-        if name == "prepare" and self.gate is not None:
+    def _step(self, name, slug, on_event):
+        events = STEP_EVENTS[name]
+        fail_at = len(events) - 1 if self.fail_after is None else self.fail_after
+        for i, (stage, status, source) in enumerate(events):
+            if name == self.fail_on and i == fail_at:
+                raise RuntimeError("boom")
+            if name == "prepare" and self.gate is not None and i == self.gate_at:
+                assert self.gate.wait(5), "test never opened the gate"
+            on_event(BuildEvent(slug, stage, status, source))
+        if name == "prepare" and self.gate is not None and self.gate_at == len(events):
             assert self.gate.wait(5), "test never opened the gate"
-        if name == self.fail_on:
-            raise RuntimeError("boom")
-        on_event(BuildEvent(slug, stage, "done", source))
 
     def reset(self, slug):
         self.calls.append("reset")
@@ -64,15 +93,20 @@ class FakeSteps:
 
     def fetch(self, slug, keys, on_event):
         self.calls.append(f"fetch({sorted(keys) if keys is not None else None})")
-        self._step("fetch", slug, on_event, "fetch", "github:acme/widgets")
+        self._step("fetch", slug, on_event)
 
     def ingest(self, slug, full, on_event):
         self.calls.append(f"ingest(full={full})")
-        self._step("ingest", slug, on_event, "load", "github:acme/widgets")
+        self._step("ingest", slug, on_event)
         report = IngestReport()
         report.load = LoadReport()
         report.load.written["load/person"] = 3
         return report
+
+
+def pairs(snap: BuildSnapshot, n: int) -> list[tuple]:
+    """The last n events as (stage, status, source)."""
+    return [(e.stage, e.status, e.source) for e in snap.events[-n:]]
 
 
 def wait_done(runner: JobRunner, slug: str, timeout: float = 5) -> BuildSnapshot:
@@ -195,8 +229,35 @@ def test_stop(runner, gate):
     gate.set()
     snap = wait_done(runner, "a")
     assert snap.state == "stopped"
-    assert (snap.events[-1].stage, snap.events[-1].status) == ("prepare", "stopped")
+    last = snap.events[-1]
+    assert last.status == "stopped"
+    finished = {(e.stage, e.source) for e in snap.events if e.status == "done"}
+    assert (last.stage, last.source) not in finished  # never on a stage that finished
     assert runner.steps.calls in ([], ["prepare"])  # nothing after the stop
+
+
+def test_stop_before_the_worker_starts(runner):
+    with runner._lock:  # the worker cannot begin until both calls are done
+        assert runner.start("a").state == "running"
+        assert runner.stop("a") is True
+    snap = wait_done(runner, "a")
+    assert snap.state == "stopped"
+    assert pairs(snap, 2) == [("prepare", "waiting", None), ("prepare", "stopped", None)]
+    assert runner.steps.calls == []
+
+
+def test_stop_after_a_finished_stage_lands_on_the_next(tmp_path, gate):
+    r = JobRunner(steps=FakeSteps(gate=gate, gate_at=2), jobs_dir=tmp_path)
+    r.start("a")
+    deadline = time.monotonic() + 5
+    while pairs(r.current("a"), 1) != [("prepare", "done", None)]:
+        assert time.monotonic() < deadline, r.current("a")
+        time.sleep(0.01)
+    r.stop("a")
+    gate.set()
+    snap = wait_done(r, "a")
+    assert pairs(snap, 2) == [("prepare", "done", None), ("fetch", "stopped", None)]
+    assert r.steps.calls == ["prepare"]
 
 
 def test_stop_queued_job_never_runs(runner, gate):
@@ -220,8 +281,57 @@ def test_failed_step_records_error(runner_failing):
     runner_failing.start("a")
     snap = wait_done(runner_failing, "a")
     assert snap.state == "failed" and "boom" in snap.error
-    last = snap.events[-1]
-    assert (last.stage, last.status, last.source) == ("load", "failed", "github:acme/widgets")
+    assert pairs(snap, 2) == [("load", "running", SRC), ("load", "failed", SRC)]
+    assert snap.events[-1].message == "boom"
+
+
+def test_failure_before_a_step_emits_lands_on_its_first_stage(tmp_path):
+    r = JobRunner(steps=FakeSteps(fail_on="ingest", fail_after=0), jobs_dir=tmp_path)
+    r.start("a")
+    snap = wait_done(r, "a")
+    assert snap.state == "failed"
+    assert pairs(snap, 2) == [("fetch", "done", SRC), ("records", "failed", None)]
+
+
+def test_failure_between_ingest_stages_lands_on_the_next(tmp_path):
+    # e.g. loader.get_cursor or normalize raising after `records done`
+    r = JobRunner(steps=FakeSteps(fail_on="ingest", fail_after=2), jobs_dir=tmp_path)
+    r.start("a")
+    snap = wait_done(r, "a")
+    assert pairs(snap, 2) == [("records", "done", SRC), ("normalize", "failed", SRC)]
+
+
+def test_failure_before_prepare_emits(tmp_path):
+    r = JobRunner(steps=FakeSteps(fail_on="prepare", fail_after=0), jobs_dir=tmp_path)
+    r.start("a")
+    snap = wait_done(r, "a")
+    assert pairs(snap, 2) == [("prepare", "waiting", None), ("prepare", "failed", None)]
+
+
+def test_invalid_arguments_do_not_leak_a_slot(tmp_path, gate):
+    r = JobRunner(max_parallel=1, steps=FakeSteps(gate=gate), jobs_dir=tmp_path)
+    for _ in range(2):
+        with pytest.raises(ValueError):
+            r.start("a", kind="Build")
+        with pytest.raises(TypeError):
+            r.start("a", refetch=5)
+    assert r.current("a") is None
+    assert r.start("a").state == "running"
+
+
+def test_thread_start_failure_releases_slot_and_fails_job(tmp_path, gate, monkeypatch):
+    r = JobRunner(max_parallel=1, steps=FakeSteps(gate=gate), jobs_dir=tmp_path)
+
+    def no_threads(self):
+        raise RuntimeError("can't start new thread")
+
+    with monkeypatch.context() as m:
+        m.setattr(threading.Thread, "start", no_threads)
+        with pytest.raises(RuntimeError):
+            r.start("a")
+    snap = r.current("a")
+    assert snap.state == "failed" and "can't start new thread" in snap.error
+    assert r.start("a").state == "running"  # not JobRunning, and the slot is free
 
 
 def test_failed_reset_is_reported_on_reset(tmp_path):
@@ -290,6 +400,14 @@ def test_restart_marks_running_as_stopped(tmp_path):
     assert json.loads((tmp_path / "a.json").read_text())["state"] == "stopped"
     r.start("a")  # does not raise
     assert wait_done(r, "a").state == "done"
+
+
+def test_restart_after_a_finished_stage_marks_the_next_stopped(tmp_path):
+    snap = {**RUNNING_SNAPSHOT, "events": [{"slug": "a", "stage": "prepare", "status": "done"}]}
+    (tmp_path / "a.json").write_text(json.dumps(snap))
+    r = JobRunner(jobs_dir=tmp_path, steps=FakeSteps())
+    r.recover()
+    assert pairs(r.current("a"), 1) == [("fetch", "stopped", None)]
 
 
 @pytest.mark.anyio
