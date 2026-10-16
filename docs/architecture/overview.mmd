@@ -1,8 +1,8 @@
 graph TB
   subgraph PEOPLE["People"]
     direction LR
-    LEAD["CEO · Tech lead<br/>asks questions,<br/>approves new facts"]
     EXT["Any AI agent<br/>Claude, IDE, Slack bot"]
+    LEAD["CEO · Tech lead<br/>asks questions,<br/>approves new facts"]
   end
 
   SRC["Company sources<br/>GitHub · Linear · Docs · Slack · Jira"]
@@ -48,8 +48,10 @@ graph TB
   classDef agent fill:#f0fdf4,stroke:#15803d,stroke-width:1px
   classDef person fill:#faf5ff,stroke:#7e22ce,stroke-width:1px
   classDef source fill:#f8fafc,stroke:#94a3b8
+  classDef planned stroke-dasharray: 6 4
   class BRAIN,TOOLS brain
   class CUR curator
   class PM,DES,QA,DEV,OPS,REV,BOARD agent
   class LEAD,EXT person
   class SRC source
+  class CUR,DES planned

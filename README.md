@@ -79,8 +79,10 @@ The plan for the curator, based on how Graphiti, Mem0, Wikidata and others keep 
 5. **Prove the fix.** The original question is asked again and becomes an eval case, so the
    brain cannot quietly forget it.
 
-The `.excalidraw` files next to each SVG in [docs/architecture/](docs/architecture/) open at
-[excalidraw.com](https://excalidraw.com) (File → Open) for editing; the `.mmd` files are the source.
+The diagrams are Excalidraw scenes: open the `.excalidraw` files in
+[docs/architecture/](docs/architecture/) at [excalidraw.com](https://excalidraw.com) (File → Open)
+to edit them, then export SVG over the old one. The `.mmd` files are the Mermaid sources the
+scenes were first generated from.
 
 ## Quick start
 

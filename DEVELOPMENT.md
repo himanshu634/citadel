@@ -131,7 +131,7 @@ make sim SLUG=synthetic SCENARIO=sprint OFFLINE=1     # a full sprint with scrip
 
 ```bash
 make test         # pytest; graph tests need `make up`, otherwise they are skipped
-make test ARGS="apps/backend/tests/test_normalize.py"         # one file (add -k name for one test)
+make test ARGS="-k normalize"   # only the tests whose name matches
 make lint         # ruff check + format check
 make fmt          # ruff format + autofix
 make fe-check     # svelte-check
