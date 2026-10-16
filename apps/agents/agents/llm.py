@@ -8,6 +8,7 @@ key from Settings is passed on explicitly; when it is unset the SDK resolves cre
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import cache
 from typing import Any
 
@@ -19,6 +20,33 @@ from agents.mcp import McpTokenMissing
 # Server-side fallback: when a safety classifier declines a request, the API re-runs it on the
 # model Anthropic recommends for that refusal category, inside the same call.
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+
+
+@dataclass(frozen=True)
+class Model:
+    """A Claude model the Ask page offers. `price` is the input price in USD per million tokens
+    (output is 5x on all four), so the page can say how much more a model costs than Haiku."""
+
+    id: str
+    name: str
+    blurb: str
+    price: float
+    slow: bool = False  # a turn can take minutes: the page says so before you pick it
+
+
+# The only models a question may name (the Ask API rejects anything else). Cheapest first.
+MODELS: tuple[Model, ...] = (
+    Model("claude-haiku-5-5", "Haiku 5.5", "Fastest. Lookups and short walks.", 0.10),
+    Model("claude-sonnet-5-5", "Sonnet 5.5", "Balanced. Longer walks across teams.", 2.00),
+    Model("claude-opus-5-5", "Opus 5.5", "Most careful over many hops.", 4.00),
+    Model("claude-fable-5-1", "Fable 5.1", "Most capable. Can take minutes.", 10.00, slow=True),
+)
+MODEL_IDS = frozenset(m.id for m in MODELS)
+
+
+def default_model() -> str:
+    """The model a question runs on when it names none: ANTHROPIC_MODEL (Haiku 5.5 unless set)."""
+    return get_settings().anthropic_model
 
 
 def fallback_params(model: str) -> dict[str, Any]:

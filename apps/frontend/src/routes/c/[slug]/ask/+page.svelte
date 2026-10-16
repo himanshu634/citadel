@@ -9,10 +9,12 @@ rates it (`AnswerRating`), saved on the answer's trace on the server. `?q=` (fro
 field) asks once on arrival and is then removed from the address, so a reload does not ask again.
 Every chat is kept on the server: the left column lists them (`ChatList`), `?thread=<id>` opens
 one (a reload or a shared link reopens it), and each turn shows how it answered (`TurnTimeline`:
-Claude's responses and every tool call, MCP calls included).
+Claude's responses and every tool call, MCP calls included). A chip under the question field picks
+the Claude model for the next question (`ModelPicker`, direction P; Haiku 5.5 by default, kept in
+this browser); each answer says which model wrote it, and a follow-up on another model says so.
 -->
 <script lang="ts">
-	import { LoaderCircle, RotateCcw, SquarePen } from '@lucide/svelte';
+	import { ArrowLeftRight, LoaderCircle, RotateCcw, SquarePen } from '@lucide/svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
@@ -23,6 +25,7 @@ Claude's responses and every tool call, MCP calls included).
 		ChatList,
 		GraphWalk,
 		Input,
+		ModelPicker,
 		TurnTimeline,
 		WalkAnswer,
 		WalkSteps
@@ -30,6 +33,7 @@ Claude's responses and every tool call, MCP calls included).
 	import { AskThread } from '$lib/ask.svelte';
 	import { Chats } from '$lib/chats.svelte';
 	import { getCompanies } from '$lib/companies.svelte';
+	import { ModelChoice } from '$lib/models.svelte';
 	import { askFieldOf } from '$lib/topbar';
 	import { highlightFor, mergeWalk, stepSentence } from '$lib/walk';
 
@@ -58,6 +62,17 @@ Claude's responses and every tool call, MCP calls included).
 	$effect(() => {
 		void chats.refresh();
 	});
+
+	// The same list for every company; the pick is kept in this browser.
+	const models = new ModelChoice();
+	$effect(() => {
+		void models.load();
+	});
+
+	/** The model that wrote a turn: the answer's (it may differ after a fallback), else the one asked for. */
+	function modelOf(t: (typeof thread.turns)[number]): string | null {
+		return t.answer?.model ?? t.calls.at(-1)?.model ?? t.model;
+	}
 
 	const wanted = $derived(page.url.searchParams.get('thread'));
 	// The address names the open chat: reopen it when it changes (a link, back, a reload); a bare
@@ -144,7 +159,7 @@ Claude's responses and every tool call, MCP calls included).
 		}
 		active = pinned = null;
 		open = null;
-		void thread.ask(text);
+		void thread.ask(text, models.selected);
 		question = '';
 	}
 
@@ -219,8 +234,16 @@ Claude's responses and every tool call, MCP calls included).
 
 		{#each thread.turns as t, i (i)}
 			{@const selected = i === thread.selected}
+			{@const was = i > 0 ? modelOf(thread.turns[i - 1]) : null}
+			{@const wrote = modelOf(t)}
 			<article class={['turn', { selected }]} aria-current={selected && thread.turns.length > 1 ? 'true' : undefined}>
 				<h2 class="question">{t.question}</h2>
+				{#if was && wrote && was !== wrote}
+					<p class="meta switched">
+						<ArrowLeftRight aria-hidden="true" />Switched from {models.nameOf(was)} to {models.nameOf(wrote)}. The
+						first answer on a new model is a little slower.
+					</p>
+				{/if}
 				<TurnTimeline calls={t.calls} steps={t.steps} running={t.status === 'running'} />
 				{#if t.status === 'running'}
 					{@const now = live(t)}
@@ -243,6 +266,9 @@ Claude's responses and every tool call, MCP calls included).
 							pinned = pinned === n ? null : n;
 						}}
 					/>
+					{#if t.answer.model}
+						<p class="meta">Answered by <span class="stamp">{models.nameOf(t.answer.model)}</span></p>
+					{/if}
 					{#if t.answer.trace_id && t.answer.stop !== 'stopped'}
 						<AnswerRating
 							rating={t.rating}
@@ -270,20 +296,29 @@ Claude's responses and every tool call, MCP calls included).
 				ask(question);
 			}}
 		>
-			<div class="field">
-				<Input
-					label="Your question"
-					hideLabel
-					placeholder={field.disabled ? field.placeholder : thread.turns.length ? 'Ask a follow-up' : field.placeholder}
-					disabled={field.disabled}
-					bind:value={question}
-				/>
+			<Input
+				label="Your question"
+				hideLabel
+				placeholder={field.disabled ? field.placeholder : thread.turns.length ? 'Ask a follow-up' : field.placeholder}
+				disabled={field.disabled}
+				bind:value={question}
+			/>
+			<div class="controls">
+				{#if models.models.length}
+					<ModelPicker
+						models={models.models}
+						selected={models.selected}
+						defaultId={models.defaultId}
+						disabled={thread.running}
+						onpick={(id) => models.pick(id)}
+					/>
+				{/if}
+				{#if thread.running}
+					<Button onclick={() => thread.stop()}>Stop</Button>
+				{:else}
+					<Button type="submit" variant="primary" disabled={field.disabled || !question.trim()}>Ask</Button>
+				{/if}
 			</div>
-			{#if thread.running}
-				<Button onclick={() => thread.stop()}>Stop</Button>
-			{:else}
-				<Button type="submit" variant="primary" disabled={field.disabled || !question.trim()}>Ask</Button>
-			{/if}
 		</form>
 	</section>
 
@@ -425,14 +460,38 @@ Claude's responses and every tool call, MCP calls included).
 		position: sticky;
 		bottom: 0;
 		display: flex;
+		flex-direction: column;
 		gap: var(--space-2);
 		margin-top: auto;
 		padding-block: var(--space-3) var(--space-4);
 		background: var(--color-ground);
 	}
-	.field {
-		flex: 1;
-		min-width: 0;
+	.controls {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+	.controls :global(.btn) {
+		margin-left: auto;
+	}
+	.switched {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--space-2);
+	}
+	.switched :global(svg) {
+		width: 0.875rem;
+		height: 0.875rem;
+		flex: none;
+		margin-top: 3px;
+	}
+	.stamp {
+		padding: 0 var(--space-1);
+		border-radius: var(--radius-sm);
+		background: var(--color-surface-sunken);
+		color: var(--color-text);
+		font-family: var(--font-mono);
+		font-size: var(--text-xs);
 	}
 	.stage {
 		position: sticky;

@@ -56,6 +56,17 @@ describe('AskThread', () => {
 		expect(t.selected).toBe(1);
 	});
 
+	test('a picked model goes with that question only, and the turn keeps it', async () => {
+		const fetchMock = serve(run(), run());
+		const t = new AskThread('acme');
+		await t.ask('First?', 'claude-opus-5-5');
+		await t.ask('And then?');
+		const bodies = fetchMock.mock.calls.map((c) => JSON.parse((c as unknown as [string, RequestInit])[1].body as string));
+		expect(bodies[0]).toEqual({ question: 'First?', model: 'claude-opus-5-5' });
+		expect(bodies[1]).toEqual({ question: 'And then?', thread_id: 't1' });
+		expect(t.turns.map((x) => x.model)).toEqual(['claude-opus-5-5', null]);
+	});
+
 	test('an error event and a cut stream both end the turn as failed, with a sentence', async () => {
 		serve(sse([['start', { thread_id: 'x' }], ['error', { detail: 'No Anthropic credentials.' }]]), sse([['start', { thread_id: 'x' }]]));
 		const t = new AskThread('acme');

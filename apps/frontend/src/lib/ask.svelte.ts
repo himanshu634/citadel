@@ -28,6 +28,8 @@ export const REPLAY_STEP_MS = 700;
 
 export interface Turn {
 	question: string;
+	/** The model id this question asked for (null: the server's default). Answers name the one that served. */
+	model: string | null;
 	/** Claude's responses in order, each with the tools it asked for. */
 	calls: AskLlmEvent[];
 	/** The graph steps and answer checks (the walk). MCP and server calls stay on `calls`. */
@@ -77,6 +79,7 @@ export function turnFromChat(t: ChatTurn): Turn {
 			}));
 	const turn: Turn = {
 		question: t.question,
+		model: t.answer?.model ?? t.calls.at(-1)?.model ?? null,
 		calls: t.calls.map((c) => ({ ...c, calls: asked(c.seq) })),
 		steps: walk.map((s) => ({
 			id: s.id,
@@ -133,13 +136,17 @@ export class AskThread {
 		return this.turns.some((t) => t.status === 'running');
 	}
 
-	/** Ask a question; a follow-up when the thread already has turns. */
-	async ask(question: string): Promise<void> {
+	/**
+	 * Ask a question; a follow-up when the thread already has turns. `model` picks the Claude model
+	 * for this question only (GET /api/models); null or omitted runs on the server's default.
+	 */
+	async ask(question: string, model: string | null = null): Promise<void> {
 		const text = question.trim();
 		if (!text || this.running) return;
 		this.#stopReplay();
 		this.turns.push({
 			question: text,
+			model,
 			calls: [],
 			steps: [],
 			answer: null,
@@ -154,7 +161,11 @@ export class AskThread {
 		this.selected = index;
 		const abort = new AbortController();
 		this.#abort = abort;
-		const body = this.threadId ? { question: text, thread_id: this.threadId } : { question: text };
+		const body = {
+			question: text,
+			...(this.threadId ? { thread_id: this.threadId } : {}),
+			...(model ? { model } : {})
+		};
 		try {
 			await postEvents(
 				`/companies/${encodeURIComponent(this.slug)}/ask`,

@@ -10,8 +10,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from agents import llm
 from brain.tools import PersonActivity, RecentWorkItem, Stat, SystemSummary
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.config_diff import ConfigDiff
 from backend.jobs import BuildSnapshot, BuildSummary
@@ -122,6 +123,30 @@ class ConfigChange(ConfigDiff):
 class AskIn(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     thread_id: str | None = Field(None, pattern=r"^[A-Za-z0-9_-]{1,64}$")  # a follow-up
+    model: str | None = None  # one of GET /api/models; None: the default (ANTHROPIC_MODEL)
+
+    @field_validator("model")
+    @classmethod
+    def _known_model(cls, v: str | None) -> str | None:
+        if v is not None and v not in llm.MODEL_IDS:
+            raise ValueError(f"unknown model; pick one of {', '.join(m.id for m in llm.MODELS)}")
+        return v
+
+
+class ModelOut(BaseModel):
+    """A model the Ask page offers (`agents.llm.MODELS`). `cost` is its price per token as a
+    multiple of the cheapest model's, rounded: 1, 20, 40, 100."""
+
+    id: str
+    name: str
+    blurb: str
+    cost: int
+    slow: bool
+
+
+class ModelsOut(BaseModel):
+    models: list[ModelOut]
+    default: str  # the id a question runs on when it names none
 
 
 class WalkNode(BaseModel):

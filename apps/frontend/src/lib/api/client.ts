@@ -16,6 +16,7 @@ import type {
 	GithubTokenCheck,
 	Entity,
 	GraphView,
+	ModelsOut,
 	OnboardRequest,
 	OnboardResult,
 	Overview,
@@ -66,6 +67,8 @@ const company = (slug: string) => `/companies/${encodeURIComponent(slug)}`;
 
 export const api = {
 	companies: () => request<Company[]>('GET', '/companies'),
+	/** The Claude models an Ask question may run on, and the default. */
+	models: () => request<ModelsOut>('GET', '/models'),
 	/** A thumbs on one Ask answer (its `trace_id`); `rating` null takes it back. 404: no such answer. */
 	feedback: (slug: string, traceId: string, rating: Rating | null, note?: string) =>
 		request<Feedback>('POST', `${company(slug)}/traces/${encodeURIComponent(traceId)}/feedback`, {

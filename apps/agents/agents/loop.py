@@ -89,6 +89,7 @@ class AgentState(TypedDict, total=False):
     stop: str | None  # last stop_reason, or "no_answer"
     stop_details: dict[str, Any] | None
     model: str | None  # the model that served the last call (differs after a fallback)
+    ask_model: str | None  # the model this turn asked for (Ask page); None: ANTHROPIC_MODEL
     nudges: int
     route: str | None  # set by the router: which part of the graph handles this turn
     trace: Annotated[list[dict[str, Any]], operator.add]  # one entry per tool call (run_tools)
@@ -121,10 +122,13 @@ def add_brain_loop(
 
     def call_claude(state: AgentState) -> dict[str, Any]:
         started = time.perf_counter()
-        fallback = llm.fallback_params(s.anthropic_model)
+        # A thread may change model between turns: earlier thinking blocks stay in the history
+        # unchanged (append-only); a model that cannot read another's blocks drops them itself.
+        model = state.get("ask_model") or s.anthropic_model
+        fallback = llm.fallback_params(model)
         extra = mcp_.request_params(mcp, state["messages"], fallback.pop("betas", []))
         with client.beta.messages.stream(
-            model=s.anthropic_model,
+            model=model,
             max_tokens=s.anthropic_max_tokens,
             system=[{"type": "text", "text": system_prompt}],
             tools=tool_defs,
