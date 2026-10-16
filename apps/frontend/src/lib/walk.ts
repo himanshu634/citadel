@@ -267,10 +267,24 @@ interface PathRow {
 	rels?: { type: string; from: string; to: string }[];
 }
 
+/** The node a call was about, when it names one: get_entity's uid, a profile's person, a system. */
+export function subjectOf(step: Pick<WalkStep, 'tool' | 'input'>): string | null {
+	const p = step.input ?? {};
+	if (step.tool === 'get_entity' && typeof p.uid === 'string') return p.uid;
+	if (step.tool === 'person_profile' && typeof p.login === 'string') return `person:${p.login.toLowerCase()}`;
+	if (['experts_for_system', 'work_history', 'impact_of'].includes(step.tool) && typeof p.system === 'string')
+		return `system:${p.system}`;
+	return null;
+}
+
+/** More links than this from "about it" steps is a hub: they would light everything. */
+const SUBJECT_LINKS_MAX = 10;
+
 /**
  * The part of the walk that backs a cited node: in the step that first returned it, the paths
- * (from path_between) that run through it, else its own links in that step. Never the whole merged
- * graph: a team or system is linked to almost everything, and lighting everything shows nothing.
+ * (from path_between) that run through it, else its own links in that step; plus its links from
+ * steps that were about it (opening a PR adds who wrote it), unless that makes it a hub. Never
+ * the whole merged graph: a team or system is linked to almost everything.
  */
 export function highlightFor(source: Pick<AskSource, 'uid' | 'step'>, steps: WalkStep[]): Highlight {
 	const { uid } = source;
@@ -280,6 +294,14 @@ export function highlightFor(source: Pick<AskSource, 'uid' | 'step'>, steps: Wal
 		steps.find((s) => s.n !== null && s.n === source.step) ??
 		steps.find((s) => s.n !== null && (s.nodes ?? []).some((n) => n.uid === uid));
 	if (!step) return { nodes, rels };
+	const touching = (s: WalkStep) => (s.rels ?? []).filter((r) => r.from === uid || r.to === uid);
+	const light = (rs: WalkRel[]) => {
+		for (const r of rs) {
+			rels.add(relKey(r));
+			nodes.add(r.from);
+			nodes.add(r.to);
+		}
+	};
 	if (step.tool === 'path_between') {
 		const through = ((step.rows ?? []) as PathRow[]).filter((r) => r.nodes?.some((n) => n.uid === uid));
 		for (const row of through) {
@@ -288,12 +310,9 @@ export function highlightFor(source: Pick<AskSource, 'uid' | 'step'>, steps: Wal
 		}
 		if (through.length) return { nodes, rels };
 	}
-	for (const r of step.rels ?? []) {
-		if (r.from !== uid && r.to !== uid) continue;
-		rels.add(relKey(r));
-		nodes.add(r.from);
-		nodes.add(r.to);
-	}
+	light(touching(step));
+	const about = steps.filter((s) => s !== step && s.n !== null && subjectOf(s) === uid).flatMap(touching);
+	if (about.length <= SUBJECT_LINKS_MAX) light(about);
 	return { nodes, rels };
 }
 

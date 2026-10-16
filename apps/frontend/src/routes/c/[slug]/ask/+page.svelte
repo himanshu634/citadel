@@ -8,7 +8,7 @@ part of the walk that backs it; Replay shows a finished walk again. `?q=` (from 
 field) asks once on arrival and is then removed from the address, so a reload does not ask again.
 -->
 <script lang="ts">
-	import { RotateCcw, SquarePen } from '@lucide/svelte';
+	import { LoaderCircle, RotateCcw, SquarePen } from '@lucide/svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
@@ -139,7 +139,7 @@ field) asks once on arrival and is then removed from the address, so a reload do
 				{#if t.status === 'running'}
 					{@const now = live(t)}
 					<div class="live" role="status">
-						<p class="live-title"><span class="pulse" aria-hidden="true"></span>Walking the graph</p>
+						<p class="live-title"><LoaderCircle class="spin" aria-hidden="true" />Walking the graph</p>
 						<p>{now.line}</p>
 						{#if now.meta}<p class="meta">{now.meta}</p>{/if}
 					</div>
@@ -298,13 +298,10 @@ field) asks once on arrival and is then removed from the address, so a reload do
 		font-size: var(--text-md);
 		font-weight: var(--weight-semibold);
 	}
-	.pulse {
-		width: 0.5rem;
-		height: 0.5rem;
-		border-radius: var(--radius-full);
-		background: var(--color-accent);
-		box-shadow: 0 0 0 4px var(--color-accent-soft);
-		animation: pulse 1.2s ease-in-out infinite;
+	.live-title :global(svg) {
+		width: 1rem;
+		height: 1rem;
+		color: var(--color-accent);
 	}
 	.meta {
 		color: var(--color-text-muted);
@@ -343,16 +340,6 @@ field) asks once on arrival and is then removed from the address, so a reload do
 		min-width: 0;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-	}
-	@keyframes pulse {
-		50% {
-			box-shadow: 0 0 0 1px var(--color-accent-soft);
-		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.pulse {
-			animation: none;
-		}
 	}
 	@media (max-width: 1100px) {
 		.ask {

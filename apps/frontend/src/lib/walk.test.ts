@@ -149,6 +149,35 @@ describe('highlightFor', () => {
 		expect(h.rels.size).toBe(1);
 	});
 
+	test('a later step about the cited node adds its links: found in step 1, author from step 3', () => {
+		const opened: WalkStep = {
+			id: 't5',
+			n: 3,
+			tool: 'get_entity',
+			input: { uid: pr10.uid },
+			status: 'done',
+			nodes: [pr10, person('carol'), auth],
+			rels: [
+				{ from: 'person:carol', to: pr10.uid, type: 'AUTHORED', inferred: false },
+				{ from: pr10.uid, to: 'system:Auth', type: 'TOUCHES', inferred: false }
+			]
+		};
+		const found: WalkStep = {
+			...profile,
+			nodes: [...profile.nodes!, pr10],
+			rels: [...profile.rels!, { from: 'person:alice', to: pr10.uid, type: 'REVIEWED', inferred: false }]
+		};
+		const h = highlightFor({ uid: pr10.uid, step: 1 }, [found, opened]);
+		expect(h.rels).toEqual(
+			new Set([
+				relKey({ from: 'person:alice', to: pr10.uid, type: 'REVIEWED' }),
+				relKey({ from: 'person:carol', to: pr10.uid, type: 'AUTHORED' }),
+				relKey({ from: pr10.uid, to: 'system:Auth', type: 'TOUCHES' })
+			])
+		);
+		expect(h.nodes.has('person:carol')).toBe(true);
+	});
+
 	test('a uid no step returned lights only itself', () => {
 		const h = highlightFor({ uid: 'person:zed', step: null }, steps);
 		expect([...h.nodes]).toEqual(['person:zed']);
