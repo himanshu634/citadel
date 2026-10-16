@@ -208,3 +208,15 @@ def test_drafts_print_as_valid_yaml_by_default(root, capsys):
     [case] = [cases.Case.model_validate(c) for c in raw]
     assert case.id == "fb-t1" and "Thumbs down" in case.why
     assert not (root / "none.yaml").exists()
+
+
+def test_a_multiline_tool_error_cannot_break_the_case_file(root):
+    store = TraceStore("synthetic")
+    error = "x failed: ValidationError: 1 error\nsystem\n  Field required: [type=missing]"
+    store.add(trace(1, tool_errors=[error], text="Line one.\n\n- item: [1]"))
+    store.rate("t1", "down", "wrong\nall: wrong")
+    path = root / "cases.yaml"
+    assert drafts.main(["--slug", "synthetic", "--write", "--cases", str(path)]) == 0
+    [case] = cases.load("synthetic", path)
+    assert case.why == "wrong\nall: wrong"  # kept whole: it is a YAML string, not a comment
+    assert not list(root.glob(".*.tmp"))

@@ -17,6 +17,7 @@ Without --write the drafts are printed. --write appends the new ones to evals/ca
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -73,7 +74,7 @@ def draft(bad: Trace, traces: list[Trace]) -> tuple[dict, list[str]]:
 def render(drafts: list[tuple[dict, list[str]]]) -> str:
     """YAML for the case file: per draft a comment block, then the case as a one-item list."""
     return "\n".join(
-        "\n".join(f"# {c}" for c in comments)
+        "\n".join(f"# {' '.join(c.split())}" for c in comments)  # one line each, whatever it holds
         + "\n"
         + yaml.safe_dump([case], sort_keys=False, allow_unicode=True, width=100)
         for case, comments in drafts
@@ -109,8 +110,16 @@ def main(argv: list[str] | None = None) -> int:
     old = path.read_text() if path.exists() else ""
     head = "" if HEADER in old else HEADER + "\n\n"
     sep = "" if not old or old.endswith("\n\n") else ("\n" if old.endswith("\n") else "\n\n")
-    path.write_text(old + sep + head + text)
-    cases_mod.load(args.slug, path)  # the file must still load: fail loudly here, not in an eval
+    # Check the whole new file before it replaces the old one: a broken case file stops every
+    # eval of this company.
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(old + sep + head + text)
+    try:
+        cases_mod.load(args.slug, tmp)
+    except Exception:
+        tmp.unlink()
+        raise
+    os.replace(tmp, path)
     print(f"added {len(drafts)} draft cases to {path}", file=sys.stderr)
     return 0
 
