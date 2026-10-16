@@ -106,6 +106,9 @@ OPTIONAL: dict[str, dict[str, Any]] = {
     "ledger/followups": {"status": None},
 }
 
+# Params that hold a timestamp. Each is stored as ISO text (`model.iso`).
+TIMESTAMPS: tuple[str, ...] = ("now", "at", "created_at", "updated_at", "valid_from", "valid_to")
+
 # Reads that return whole records: one column holding the node's properties, read back through
 # its model so both stores give the same keys (FalkorDB does not store null properties).
 RECORDS: dict[str, type[BaseModel]] = {
@@ -148,8 +151,14 @@ class _LedgerStore:
         return self._write(name, self._params(name, params))
 
     def _params(self, name: str, params: Mapping[str, Any]) -> dict[str, Any]:
+        """Fill the optional params; store every timestamp as ISO text (job writes pass
+        `Ctx.now`, an epoch int, and the ledger sorts timestamps as text)."""
         extra = {"slug": self.slug} if name == "ledger/review_start" else {}
-        return {**copy.deepcopy(OPTIONAL.get(name, {})), **params, **extra}
+        p = {**copy.deepcopy(OPTIONAL.get(name, {})), **params, **extra}
+        for key in TIMESTAMPS:
+            if p.get(key) is not None:
+                p[key] = iso(p[key])
+        return p
 
     def _episode(self, p: Mapping[str, Any]) -> list[Row]:
         """A runner Episode as a log line: the agent did `input`; why = its summary; evidence =

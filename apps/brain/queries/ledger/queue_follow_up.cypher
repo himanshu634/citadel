@@ -8,7 +8,7 @@ MATCH (c:Claim)
 WHERE (c.status = 'accepted' AND c.kind IN ['owner', 'expert', 'decision'])
    OR c.status = 'conflicts_with_source'
 OPTIONAL MATCH (f:FollowUp {claim: c.uid})
-WITH c, f
-WHERE f IS NULL
+WITH c, count(f) AS followups
+WHERE followups = 0
 RETURN properties(c) AS claim
 ORDER BY c.updated_at, c.uid

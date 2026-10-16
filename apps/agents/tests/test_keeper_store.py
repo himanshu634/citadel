@@ -318,3 +318,18 @@ def test_queue_follow_up(store):
     assert (f["uid"], f["claim"], f["title"], f["status"], f["created_at"]) == (
         f"followup:{owner.uid}", owner.uid, "Follow up", "open", T2)  # fmt: skip
     assert store.read("ledger/followups", {"status": "done", "limit": 10}) == []
+
+
+def test_epoch_now_is_stored_as_iso(store):
+    """Job writes go through roles.base.write, which passes Ctx.now: an epoch int."""
+    epoch, at = 1_792_224_000, "2026-10-17T08:00:00Z"
+    [g] = open_gap(store, "who owns billing", "t1", now=epoch)
+    set_status(store, g["uid"], ["open"], "in_review", now=epoch + 60)
+    gap = get_gap(store, g["uid"])
+    assert (gap["created_at"], gap["updated_at"]) == (at, "2026-10-17T08:01:00Z")
+
+    store.write("ledger/post_consult", KEEPER, {"gap": g["uid"], "role": "qa", "now": epoch})
+    answer = {"consult": f"consult:{g['uid']}:qa", "can_ground": False, "now": epoch}
+    store.write("ledger/answer_consult", "citadel_qa", answer)
+    [c] = store.read("ledger/consults_for_gap", {"gap": g["uid"]})
+    assert (c["created_at"], c["answered_at"]) == (at, at)
