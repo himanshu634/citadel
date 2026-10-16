@@ -20,8 +20,7 @@ export const NODE_PLURALS: Record<NodeType, string> = {
 	document: 'Documents'
 };
 
-export type WorkItemKind = 'pull_request' | 'issue' | 'thread';
-export type WorkItemState = 'open' | 'merged' | 'closed';
+export type WorkItemKind = 'pull_request' | 'issue' | 'ticket' | 'thread';
 
 export interface GraphNodeRef {
 	uid: string;
@@ -55,29 +54,13 @@ export interface WorkItem {
 	kind: WorkItemKind;
 	number?: number;
 	title: string;
-	state: WorkItemState;
-	author: string;
-	date: string;
+	/** Source-specific (open, closed, merged, done ...); the row styles `open` and `merged`. */
+	state: string;
+	author?: string;
+	/** An ISO date or timestamp; omitted when the source gave none. */
+	date?: string;
+	/** The systems it touched, comma-separated. */
 	system?: string;
-}
-
-export interface Person {
-	login: string;
-	name: string;
-	team: string;
-	prs: number;
-	reviews: number;
-}
-
-export interface SystemActivity {
-	name: string;
-	team: string;
-	changes: number;
-}
-
-export interface GraphCount {
-	type: NodeType;
-	count: number;
 }
 
 export interface MenuItem {
@@ -85,4 +68,183 @@ export interface MenuItem {
 	label: string;
 	hint?: string;
 	selected?: boolean;
+}
+
+// --- Companies and builds (the HTTP API) --------------------------------------------------------
+// Written by hand to match apps/backend/brain/api/models.py, jobs.py, events.py, config_diff.py and
+// the row models in tools.py. Field names are the backend's (snake_case), not renamed.
+
+/** `unknown`: FalkorDB did not answer and no build says otherwise (`graph_reachable` is false). */
+export type CompanyStatus = 'ready' | 'building' | 'failed' | 'empty' | 'invalid' | 'unknown';
+export type DataPermission = 'public' | 'synthetic' | 'own';
+
+export type BuildKind = 'build' | 'rebuild';
+export type BuildState = 'queued' | 'running' | 'done' | 'failed' | 'stopped';
+export type BuildStage = 'reset' | 'prepare' | 'fetch' | 'records' | 'normalize' | 'load' | 'done';
+export type BuildStatus = 'waiting' | 'running' | 'done' | 'skipped' | 'failed' | 'stopped';
+
+export interface BuildEvent {
+	slug: string;
+	stage: BuildStage;
+	status: BuildStatus;
+	/** Adapter key such as `github:FalkorDB/FalkorDB`; null for a stage of the whole company. */
+	source: string | null;
+	count: number | null;
+	message: string | null;
+	at: string;
+	/** Final event only: what the load wrote and dropped. */
+	totals: Record<string, unknown> | null;
+	/** The build's step when this happened (see `BuildSummary.step`); absent in old build files. */
+	step?: number | null;
+}
+
+/** The short form of a build that a company list entry carries (the last build, in any state). */
+export interface BuildSummary {
+	kind: BuildKind;
+	state: BuildState;
+	stage: BuildStage | null;
+	/** The planned stage order; the ingest stages run once per source. */
+	stages: BuildStage[];
+	started_at: string;
+	/**
+	 * "Step n of N", counted by the backend with every source's stages: `step` only goes forward
+	 * and keeps its value when the build ends. Null while queued, and both null (or absent) for
+	 * an old build file or a company whose sources could not be read.
+	 */
+	step?: number | null;
+	steps?: number | null;
+}
+
+export interface BuildSnapshot {
+	slug: string;
+	kind: BuildKind;
+	state: BuildState;
+	started_at: string;
+	stages: BuildStage[];
+	ended_at: string | null;
+	events: BuildEvent[];
+	error: string | null;
+	/** As in `BuildSummary`. */
+	step?: number | null;
+	steps?: number | null;
+}
+
+export interface Company {
+	slug: string;
+	name: string;
+	/** null when the company's YAML is invalid. */
+	data_permission: DataPermission | null;
+	/** Decide "building" from this, not from `build` (which may be a finished build). */
+	status: CompanyStatus;
+	last_synced_at: string | null;
+	/** The YAML's problem (`invalid`) or the last build's (`failed`). */
+	error: string | null;
+	build: BuildSummary | null;
+	graph_reachable: boolean;
+}
+
+/** A source entry of the company YAML; `type` selects the adapter, the rest is its own fields. */
+export interface SourceConfig {
+	type: string;
+	[field: string]: unknown;
+}
+
+/** The company YAML as the API reads and writes it (apps/backend/brain/config.py CompanyConfig). */
+export interface CompanyConfig {
+	slug: string;
+	name: string;
+	data_permission: DataPermission;
+	window: { since: string };
+	sources: SourceConfig[];
+	systems?: {
+		rules?: { match: string; system: string }[];
+		fallback?: 'depth_1' | 'depth_2' | 'depth_3' | 'none';
+		ignore?: string[];
+	};
+	people?: { bots?: string[]; aliases?: Record<string, string> };
+}
+
+export interface CompanyDetail extends Company {
+	config: CompanyConfig;
+}
+
+export interface FieldError {
+	loc: (string | number)[];
+	msg: string;
+}
+
+export interface ValidateResult {
+	ok: boolean;
+	errors: FieldError[];
+	/** The file Save would write; only when the draft is valid. */
+	yaml: string | null;
+	slug_taken: boolean;
+	/** Show verbatim under the slug field. */
+	slug_taken_detail: string | null;
+}
+
+/** What a Settings save requires (`PUT ?dry_run=1`, and the 409 `rebuild_required` detail). */
+export interface ConfigChange {
+	slug: string;
+	changed: boolean;
+	rebuild: boolean;
+	refetch: string[];
+	reasons: string[];
+}
+
+export interface GithubTokenCheck {
+	token: 'env' | 'gh' | null;
+}
+
+export interface GithubRepoCheck {
+	exists: boolean;
+	/** null when the repo does not exist. */
+	private: boolean | null;
+}
+
+export interface Stat {
+	kind: string;
+	type: string;
+	count: number;
+}
+
+export interface RecentWorkItem {
+	uid: string;
+	kind: string;
+	number: number | null;
+	title: string;
+	state: string;
+	url: string | null;
+	author: string | null;
+	last_at: string | null;
+	systems: string[];
+}
+
+export interface SystemSummary {
+	system: string;
+	system_uid: string;
+	path_rule: string | null;
+	changes: number;
+	people: number;
+	owners: string[];
+}
+
+export interface PersonActivity {
+	login: string;
+	person_uid: string;
+	display_name: string | null;
+	teams: string[];
+	prs: number;
+	reviews: number;
+}
+
+export interface Overview {
+	slug: string;
+	name: string;
+	/** The YAML's window.since, an ISO date. */
+	since: string;
+	counts: Stat[];
+	recent: RecentWorkItem[];
+	systems: SystemSummary[];
+	people: PersonActivity[];
 }

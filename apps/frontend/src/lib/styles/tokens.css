@@ -99,6 +99,12 @@
 	--control-sm: 2rem; /* 32 */
 	--control-md: 2.5rem; /* 40 */
 	--control-lg: 3rem; /* 48 */
+	--rail-width: 4.5rem; /* 72: the company rail left of the sidebar */
+	--rail-mark: 0.9375rem; /* 15: the monogram on a rail tile */
+	--rail-bar: 4px; /* the ink bar on the current tile's edge */
+	--rail-badge: 1.25rem; /* 20: status badge on a rail tile */
+	--rail-badge-icon: 0.75rem; /* 12 */
+	--rail-badge-offset: 6px; /* how far the badge hangs past the tile corner */
 	--sidebar-width: 15rem;
 	--topbar-height: 3.5rem;
 	--content-max: 80rem;

@@ -13,6 +13,7 @@ from redis.exceptions import ResponseError
 
 from brain import db, queries
 from brain.config import get_settings
+from brain.events import BuildEvent, OnEvent, noop
 
 SCHEMA_FILES = ["schema/range_indexes", "schema/fulltext_indexes", "schema/vector_index"]
 
@@ -24,7 +25,9 @@ class SchemaReport:
     warnings: list[str] = field(default_factory=list)
 
 
-def apply_schema(slug: str) -> SchemaReport:
+def apply_schema(slug: str, on_event: OnEvent | None = None) -> SchemaReport:
+    emit = on_event or noop
+    emit(BuildEvent(slug, "prepare", "running"))
     dim = get_settings().embedding_dim
     report = SchemaReport()
     for name in SCHEMA_FILES:
@@ -40,6 +43,7 @@ def apply_schema(slug: str) -> SchemaReport:
                     raise
                 report.existing.append(stmt)
     report.warnings.extend(_check_vector_dim(slug, dim))
+    emit(BuildEvent(slug, "prepare", "done"))
     return report
 
 

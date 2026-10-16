@@ -1,0 +1,619 @@
+"""Build job runner: one job per company, two at once, stoppable, persisted per company."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import threading
+import time
+
+import pytest
+from brain import config, db, registry
+from brain.adapters.canonical_jsonl import CanonicalJsonlSource
+from brain.events import BuildEvent
+from brain.jobs import BuildSnapshot, JobRunner, JobRunning, PipelineSteps
+from conftest import SECOND, SRC, FakeSteps, needs_graph, synthetic_company
+
+TERMINAL = {"done", "failed", "stopped"}
+
+RUNNING_SNAPSHOT = {
+    "slug": "a",
+    "kind": "build",
+    "state": "running",
+    "started_at": "2026-10-16T10:00:00+00:00",
+    "ended_at": None,
+    "events": [
+        {
+            "slug": "a",
+            "stage": "fetch",
+            "status": "running",
+            "source": "github:acme/widgets",
+            "at": "2026-10-16T10:00:01+00:00",
+        }
+    ],
+    "error": None,
+}
+
+
+def pairs(snap: BuildSnapshot, n: int) -> list[tuple]:
+    """The last n events as (stage, status, source)."""
+    return [(e.stage, e.status, e.source) for e in snap.events[-n:]]
+
+
+def wait_done(runner: JobRunner, slug: str, timeout: float = 5) -> BuildSnapshot:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        snap = runner.current(slug)
+        if snap is not None and snap.state in TERMINAL:
+            return snap
+        time.sleep(0.01)
+    raise AssertionError(f"job {slug} did not finish: {runner.current(slug)}")
+
+
+@pytest.fixture
+def gate():
+    g = threading.Event()
+    yield g
+    g.set()  # never leave a worker blocked
+
+
+@pytest.fixture
+def runner(tmp_path, gate):
+    return JobRunner(steps=FakeSteps(gate=gate), jobs_dir=tmp_path)
+
+
+@pytest.fixture
+def runner_recording(tmp_path):
+    return JobRunner(steps=FakeSteps(), jobs_dir=tmp_path)
+
+
+@pytest.fixture
+def runner_failing(tmp_path):
+    return JobRunner(steps=FakeSteps(fail_on="ingest"), jobs_dir=tmp_path)
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+def test_second_start_same_slug_raises(runner, gate):
+    runner.start("a")
+    with pytest.raises(JobRunning):
+        runner.start("a")
+
+
+def test_concurrent_starts_same_slug_only_one_wins(runner, gate):
+    barrier = threading.Barrier(2)
+    outcomes: list[str] = []
+
+    def go():
+        barrier.wait()
+        try:
+            runner.start("a")
+            outcomes.append("started")
+        except JobRunning:
+            outcomes.append("refused")
+
+    threads = [threading.Thread(target=go) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(5)
+    assert sorted(outcomes) == ["refused", "started"]
+
+
+def test_third_company_queues(runner, gate):
+    assert runner.start("a").state == "running"
+    assert runner.start("b").state == "running"
+    assert runner.start("c").state == "queued"
+    gate.set()
+    wait_done(runner, "c")
+    assert runner.current("c").state == "done"
+
+
+def test_build_order_and_totals(runner_recording):
+    runner_recording.start("a", full=True)
+    snap = wait_done(runner_recording, "a")
+    assert runner_recording.steps.calls == ["prepare", "fetch(None)", "ingest(full=True)"]
+    assert snap.state == "done" and snap.ended_at and snap.error is None
+    last = snap.events[-1]
+    assert (last.stage, last.status) == ("done", "done")
+    assert last.totals == {"written": {"load/person": 3}, "dropped": {}}
+
+
+def test_build_fetches_only_refetch_keys(runner_recording):
+    runner_recording.start("a", refetch={"github:acme/new"})
+    wait_done(runner_recording, "a")
+    assert runner_recording.steps.calls == [
+        "prepare",
+        "fetch(['github:acme/new'])",
+        "ingest(full=False)",
+    ]
+
+
+def test_rebuild_order(runner_recording):
+    runner_recording.start("a", kind="rebuild", refetch=set())
+    snap = wait_done(runner_recording, "a")
+    assert runner_recording.steps.calls == ["reset", "prepare", "ingest(full=True)"]
+    assert [(e.stage, e.status) for e in snap.events[:3]] == [
+        ("reset", "waiting"),
+        ("reset", "running"),
+        ("reset", "done"),
+    ]
+
+
+def test_rebuild_fetches_refetch_keys(runner_recording):
+    runner_recording.start("a", kind="rebuild", refetch={"github:acme/widgets"})
+    wait_done(runner_recording, "a")
+    assert runner_recording.steps.calls == [
+        "reset",
+        "prepare",
+        "fetch(['github:acme/widgets'])",
+        "ingest(full=True)",
+    ]
+
+
+def test_stop(runner, gate):
+    runner.start("a")
+    assert runner.stop("a") is True
+    gate.set()
+    snap = wait_done(runner, "a")
+    assert snap.state == "stopped"
+    last = snap.events[-1]
+    assert last.status == "stopped"
+    finished = {(e.stage, e.source) for e in snap.events if e.status == "done"}
+    assert (last.stage, last.source) not in finished  # never on a stage that finished
+    assert runner.steps.calls in ([], ["prepare"])  # nothing after the stop
+
+
+def test_stop_before_the_worker_starts(runner):
+    with runner._lock:  # the worker cannot begin until both calls are done
+        assert runner.start("a").state == "running"
+        assert runner.stop("a") is True
+    snap = wait_done(runner, "a")
+    assert snap.state == "stopped"
+    assert pairs(snap, 2) == [("prepare", "waiting", None), ("prepare", "stopped", None)]
+    assert runner.steps.calls == []
+
+
+def test_stop_after_a_finished_stage_lands_on_the_next(tmp_path, gate):
+    r = JobRunner(steps=FakeSteps(gate=gate, gate_at=2), jobs_dir=tmp_path)
+    r.start("a")
+    deadline = time.monotonic() + 5
+    while pairs(r.current("a"), 1) != [("prepare", "done", None)]:
+        assert time.monotonic() < deadline, r.current("a")
+        time.sleep(0.01)
+    r.stop("a")
+    gate.set()
+    snap = wait_done(r, "a")
+    assert pairs(snap, 2) == [("prepare", "done", None), ("fetch", "stopped", None)]
+    assert r.steps.calls == ["prepare"]
+
+
+def test_stop_queued_job_never_runs(runner, gate):
+    runner.start("a")
+    runner.start("b")
+    assert runner.start("c").state == "queued"
+    assert runner.stop("c") is True
+    assert runner.current("c").state == "stopped"
+    gate.set()
+    wait_done(runner, "a")
+    wait_done(runner, "b")
+    assert runner.steps.calls.count("prepare") == 2  # a and b only
+    assert runner.current("c").state == "stopped"
+
+
+def test_stop_without_job_is_false(runner):
+    assert runner.stop("a") is False
+
+
+def test_failed_step_records_error(runner_failing):
+    runner_failing.start("a")
+    snap = wait_done(runner_failing, "a")
+    assert snap.state == "failed" and "boom" in snap.error
+    assert pairs(snap, 2) == [("load", "running", SRC), ("load", "failed", SRC)]
+    assert snap.events[-1].message == "boom"
+
+
+def test_failure_before_a_step_emits_lands_on_its_first_stage(tmp_path):
+    r = JobRunner(steps=FakeSteps(fail_on="ingest", fail_after=0), jobs_dir=tmp_path)
+    r.start("a")
+    snap = wait_done(r, "a")
+    assert snap.state == "failed"
+    assert pairs(snap, 2) == [("fetch", "done", SRC), ("records", "failed", None)]
+
+
+def test_failure_between_ingest_stages_lands_on_the_next(tmp_path):
+    # e.g. loader.get_cursor or normalize raising after `records done`
+    r = JobRunner(steps=FakeSteps(fail_on="ingest", fail_after=2), jobs_dir=tmp_path)
+    r.start("a")
+    snap = wait_done(r, "a")
+    assert pairs(snap, 2) == [("records", "done", SRC), ("normalize", "failed", SRC)]
+
+
+def test_failure_before_prepare_emits(tmp_path):
+    r = JobRunner(steps=FakeSteps(fail_on="prepare", fail_after=0), jobs_dir=tmp_path)
+    r.start("a")
+    snap = wait_done(r, "a")
+    assert pairs(snap, 2) == [("prepare", "waiting", None), ("prepare", "failed", None)]
+
+
+def test_invalid_arguments_do_not_leak_a_slot(tmp_path, gate):
+    r = JobRunner(max_parallel=1, steps=FakeSteps(gate=gate), jobs_dir=tmp_path)
+    for _ in range(2):
+        with pytest.raises(ValueError):
+            r.start("a", kind="Build")
+        with pytest.raises(TypeError):
+            r.start("a", refetch=5)
+    assert r.current("a") is None
+    assert r.start("a").state == "running"
+
+
+def test_thread_start_failure_releases_slot_and_fails_job(tmp_path, gate, monkeypatch):
+    r = JobRunner(max_parallel=1, steps=FakeSteps(gate=gate), jobs_dir=tmp_path)
+
+    def no_threads(self):
+        raise RuntimeError("can't start new thread")
+
+    with monkeypatch.context() as m:
+        m.setattr(threading.Thread, "start", no_threads)
+        with pytest.raises(RuntimeError):
+            r.start("a")
+    snap = r.current("a")
+    assert snap.state == "failed" and "can't start new thread" in snap.error
+    assert r.start("a").state == "running"  # not JobRunning, and the slot is free
+
+
+def test_failed_reset_is_reported_on_reset(tmp_path):
+    r = JobRunner(steps=FakeSteps(fail_on="reset"), jobs_dir=tmp_path)
+    r.start("a", kind="rebuild", refetch=set())
+    snap = wait_done(r, "a")
+    assert snap.state == "failed"
+    assert (snap.events[-1].stage, snap.events[-1].status) == ("reset", "failed")
+
+
+def test_failed_job_can_start_again(runner_failing):
+    runner_failing.start("a")
+    wait_done(runner_failing, "a")
+    runner_failing.steps.fail_on = None
+    runner_failing.start("a")
+    assert wait_done(runner_failing, "a").state == "done"
+
+
+def test_snapshot_is_persisted(runner_recording, tmp_path):
+    runner_recording.start("a")
+    snap = wait_done(runner_recording, "a")
+    path = tmp_path / "a.json"
+    assert path.stat().st_mode & 0o777 == 0o644
+    assert BuildSnapshot.model_validate_json(path.read_text()) == snap
+    assert not list(tmp_path.glob(".*"))  # no temp files left behind
+    fresh = JobRunner(steps=FakeSteps(), jobs_dir=tmp_path)
+    assert fresh.current("a") == snap
+
+
+def test_current_without_any_job_is_none(runner):
+    assert runner.current("a") is None
+    assert runner.summary("a") is None
+
+
+def test_summary(runner, gate):
+    runner.start("a")
+    deadline = time.monotonic() + 5
+    while runner.summary("a").stage != "prepare" and time.monotonic() < deadline:
+        time.sleep(0.01)
+    s = runner.summary("a")
+    assert (s.state, s.stage) == ("running", "prepare") and s.started_at
+    assert s.kind == "build" and s.stages == ["prepare", "fetch", "records", "normalize", "load"]
+
+
+A, B = "github:acme/a", "github:acme/b"
+
+
+def steps_of(snap: BuildSnapshot) -> list[int | None]:
+    """The step each event was stamped with, in order."""
+    return [e.step for e in snap.events]
+
+
+def test_two_source_build_counts_steps_per_source(tmp_path):
+    r = JobRunner(steps=FakeSteps(sources=[A, B]), jobs_dir=tmp_path)
+    r.start("a")
+    snap = wait_done(r, "a")
+    # prepare, fetch a, fetch b, then records/normalize/load for a, then for b
+    assert snap.steps == 9 and snap.step == 9
+    stamped = steps_of(snap)
+    assert stamped == sorted(stamped)  # never goes backwards
+    reached = {(e.stage, e.source): e.step for e in snap.events if e.status != "waiting"}
+    assert reached[("prepare", None)] == 1
+    assert (reached[("fetch", A)], reached[("fetch", B)]) == (2, 3)
+    assert reached[("records", A)] == 4 and reached[("load", A)] == 6
+    assert reached[("records", B)] == 7 and reached[("load", B)] == 9
+    assert reached[("done", None)] == 9  # the closing done keeps the last step
+    summary = r.summary("a")
+    assert (summary.step, summary.steps) == (9, 9)
+
+
+def test_skipped_records_jump_over_that_sources_ingest_steps(tmp_path):
+    r = JobRunner(steps=FakeSteps(sources=[A, B], skip_records={A}), jobs_dir=tmp_path)
+    r.start("a")
+    snap = wait_done(r, "a")
+    reached = {(e.stage, e.source): e.step for e in snap.events if e.status != "waiting"}
+    assert reached[("records", A)] == 4 and reached[("records", B)] == 7
+    assert snap.step == snap.steps == 9
+
+
+def test_rebuild_without_fetch_counts_reset_and_no_fetch(tmp_path):
+    r = JobRunner(steps=FakeSteps(sources=[A, B]), jobs_dir=tmp_path)
+    r.start("a", kind="rebuild", refetch=set())
+    snap = wait_done(r, "a")
+    assert snap.steps == 2 + 6  # reset, prepare, then 3 ingest stages per source
+    assert snap.step == snap.steps
+    assert [e.step for e in snap.events if e.stage == "reset"][-1] == 1
+
+
+def test_partial_refetch_counts_only_the_fetched_sources(tmp_path):
+    r = JobRunner(steps=FakeSteps(sources=[A, B]), jobs_dir=tmp_path)
+    r.start("a", refetch={B})
+    snap = wait_done(r, "a")
+    assert snap.steps == 1 + 1 + 6
+    assert [e.step for e in snap.events if e.stage == "fetch"] == [2, 2]
+    assert snap.step == snap.steps
+
+
+def test_queued_build_has_no_step_yet(runner, gate):
+    runner.start("a")
+    runner.start("b")
+    queued = runner.start("c")
+    assert queued.state == "queued" and queued.step is None and queued.steps == 5
+    assert runner.summary("c").step is None
+    running = runner.summary("a")
+    assert running.state == "running" and running.step == 1
+    gate.set()
+    assert wait_done(runner, "c").step == 5
+
+
+def test_stopped_build_keeps_its_step(tmp_path, gate):
+    r = JobRunner(steps=FakeSteps(gate=gate, gate_at=2, sources=[A, B]), jobs_dir=tmp_path)
+    r.start("a")
+    deadline = time.monotonic() + 5
+    while r.current("a").events[-1].status != "done" and time.monotonic() < deadline:
+        time.sleep(0.01)
+    r.stop("a")
+    gate.set()
+    snap = wait_done(r, "a")
+    assert snap.state == "stopped" and snap.step == 1  # stopped after prepare, before fetch
+    assert snap.events[-1].step == 1
+
+
+def test_steps_unknown_when_the_sources_cannot_be_read(tmp_path):
+    class NoSources(FakeSteps):
+        def sources(self, slug, keys):
+            raise ValueError("bad yaml")
+
+    r = JobRunner(steps=NoSources(), jobs_dir=tmp_path)
+    snap = r.start("a")
+    assert snap.steps is None and snap.step is None
+    done = wait_done(r, "a")
+    assert done.steps is None and done.step is None
+
+
+def test_old_snapshot_file_has_no_step(tmp_path):
+    (tmp_path / "a.json").write_text(json.dumps(RUNNING_SNAPSHOT))
+    snap = JobRunner(jobs_dir=tmp_path, steps=FakeSteps()).current("a")
+    assert snap.step is None and snap.steps is None
+
+
+def test_snapshot_carries_its_planned_stages(runner_recording, tmp_path):
+    snap = runner_recording.start("a", "rebuild", refetch=set())  # nothing to fetch
+    assert snap.stages == ["reset", "prepare", "records", "normalize", "load"]
+    wait_done(runner_recording, "a")
+    fresh = JobRunner(steps=FakeSteps(), jobs_dir=tmp_path)
+    assert fresh.summary("a").stages == snap.stages  # survives a restart
+
+
+def test_snapshot_file_without_stages_gets_the_full_plan(tmp_path):
+    (tmp_path / "a.json").write_text(json.dumps(RUNNING_SNAPSHOT))
+    snap = JobRunner(jobs_dir=tmp_path, steps=FakeSteps()).current("a")
+    assert snap.stages == ["prepare", "fetch", "records", "normalize", "load"]
+
+
+def test_restart_uses_the_planned_stages(tmp_path):
+    snap = {
+        **RUNNING_SNAPSHOT,
+        "stages": ["prepare", "records", "normalize", "load"],  # a build that fetched nothing
+        "events": [{"slug": "a", "stage": "prepare", "status": "done"}],
+    }
+    (tmp_path / "a.json").write_text(json.dumps(snap))
+    r = JobRunner(jobs_dir=tmp_path, steps=FakeSteps())
+    r.recover()
+    assert pairs(r.current("a"), 1) == [("records", "stopped", None)]
+
+
+def test_jobs_dir_defaults_under_repo_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    r = JobRunner(steps=FakeSteps())
+    r.start("a")
+    wait_done(r, "a")
+    assert (tmp_path / "data" / "jobs" / "a.json").is_file()
+
+
+def test_invalid_slug_is_refused(runner):
+    with pytest.raises(ValueError):
+        runner.start("../x")
+    with pytest.raises(ValueError):
+        runner.current("../x")
+
+
+def test_restart_marks_running_as_stopped(tmp_path):
+    (tmp_path / "a.json").write_text(json.dumps(RUNNING_SNAPSHOT))
+    r = JobRunner(jobs_dir=tmp_path, steps=FakeSteps())
+    r.recover()
+    snap = r.current("a")
+    assert snap.state == "stopped" and snap.ended_at
+    assert (snap.events[-1].stage, snap.events[-1].status) == ("fetch", "stopped")
+    assert json.loads((tmp_path / "a.json").read_text())["state"] == "stopped"
+    r.start("a")  # does not raise
+    assert wait_done(r, "a").state == "done"
+
+
+def test_restart_after_a_finished_stage_marks_the_next_stopped(tmp_path):
+    snap = {**RUNNING_SNAPSHOT, "events": [{"slug": "a", "stage": "prepare", "status": "done"}]}
+    (tmp_path / "a.json").write_text(json.dumps(snap))
+    r = JobRunner(jobs_dir=tmp_path, steps=FakeSteps())
+    r.recover()
+    assert pairs(r.current("a"), 1) == [("fetch", "stopped", None)]
+
+
+@pytest.mark.anyio
+async def test_subscribe_gets_events(runner, gate):
+    it = runner.subscribe("a")
+    runner.start("a")
+    first = await asyncio.wait_for(anext(it), 2)
+    assert (first.slug, first.stage, first.status) == ("a", "prepare", "waiting")
+    second = await asyncio.wait_for(anext(it), 2)
+    assert (second.stage, second.status) == ("prepare", "running")
+    await it.aclose()
+
+
+@pytest.mark.anyio
+async def test_subscribe_all_and_other_slug(runner, gate):
+    every = runner.subscribe(None)
+    other = runner.subscribe("b")
+    runner.start("a")
+    assert (await asyncio.wait_for(anext(every), 2)).slug == "a"
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(anext(other), 0.2)
+    await every.aclose()
+    await other.aclose()
+    assert not runner._subscribers  # closed iterators unregister
+
+
+@pytest.mark.anyio
+async def test_subscription_closed_before_iterating_unregisters(runner):
+    it = runner.subscribe("a")
+    await it.aclose()  # e.g. an SSE client that left before the first event
+    assert not runner._subscribers
+
+
+class FetchReportsItsFailure(FakeSteps):
+    """Like pipeline.fetch: emit the source's `failed` event, then raise."""
+
+    def fetch(self, slug, keys, on_event):
+        on_event(BuildEvent(slug, "fetch", "failed", SRC, message="boom"))
+        raise RuntimeError("boom")
+
+
+def test_failure_already_reported_is_published_again_after_the_state_change(tmp_path):
+    r = JobRunner(steps=FetchReportsItsFailure(), jobs_dir=tmp_path)
+    published: list[tuple[str, str, str]] = []
+    publish = r._publish
+
+    def record(event):
+        published.append((event.stage, event.status, r._jobs["a"].snapshot.state))
+        publish(event)
+
+    r._publish = record
+    r.start("a")
+    snap = wait_done(r, "a")
+    assert snap.state == "failed" and pairs(snap, 1) == [("fetch", "failed", SRC)]
+    # Subscribers recompute status on each event, so the last one must see the final state.
+    assert published[-1] == ("fetch", "failed", "failed")
+    assert len(snap.events) == len(published) - 1  # re-published, not stored twice
+
+
+# --- real pipeline steps on a throwaway company ------------------------------------------------
+
+REBUILD_SLUG = "test_rebuild"
+
+
+class FailIngestOnce(PipelineSteps):
+    def __init__(self):
+        self.failures_left = 0
+
+    def ingest(self, slug, full, on_event):
+        if self.failures_left:
+            self.failures_left -= 1
+            raise RuntimeError("boom")
+        return super().ingest(slug, full, on_event)
+
+
+@pytest.fixture
+def rebuild_company(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    (tmp_path / "companies").mkdir()
+    registry.write_new(synthetic_company(REBUILD_SLUG))
+    db.delete_graph(REBUILD_SLUG)
+    yield REBUILD_SLUG
+    db.delete_graph(REBUILD_SLUG)
+
+
+def _synced_sources(slug: str) -> list:
+    return db.run(slug, "load/sync_state_latest", read_only=True)[0]["sources"]
+
+
+@needs_graph
+def test_rebuild_failure_after_reset_leaves_failed_and_retry_works(rebuild_company, tmp_path):
+    steps = FailIngestOnce()
+    r = JobRunner(steps=steps, jobs_dir=tmp_path / "jobs")
+    r.start(rebuild_company)
+    assert wait_done(r, rebuild_company, 30).state == "done"
+    assert _synced_sources(rebuild_company)
+
+    steps.failures_left = 1
+    r.start(rebuild_company, kind="rebuild", refetch=set())
+    snap = wait_done(r, rebuild_company, 30)
+    assert snap.state == "failed" and "boom" in snap.error
+    # reset wiped the old data; prepare re-created the graph with indexes only
+    assert not _synced_sources(rebuild_company)
+    assert registry.exists(rebuild_company)  # the config is untouched
+
+    r.start(rebuild_company)
+    assert wait_done(r, rebuild_company, 30).state == "done"
+    assert _synced_sources(rebuild_company)
+
+
+def test_forget_deletes_the_build_history(runner_recording, tmp_path):
+    assert not runner_recording.has_history("a") and runner_recording.forget("a") is False
+    runner_recording.start("a")
+    wait_done(runner_recording, "a")
+    assert runner_recording.has_history("a")
+    assert runner_recording.forget("a") is True
+    assert not (tmp_path / "a.json").exists() and runner_recording.current("a") is None
+    assert not runner_recording.has_history("a")
+
+
+def test_forget_refuses_a_running_build(runner, gate):
+    runner.start("a")
+    with pytest.raises(JobRunning):
+        runner.forget("a")
+    assert runner.has_history("a")
+
+
+@pytest.fixture
+def two_source_company(tmp_path, monkeypatch):
+    """The synthetic company plus a missing folder (its records are skipped) and a second one."""
+    slug = "test_steps"
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    (tmp_path / "companies").mkdir()
+    cfg = synthetic_company(slug)
+    cfg.sources = [
+        *cfg.sources,
+        CanonicalJsonlSource(type="canonical_jsonl", path=tmp_path / "missing"),
+        CanonicalJsonlSource(type="canonical_jsonl", path=SECOND),
+    ]
+    registry.write_new(cfg)
+    db.delete_graph(slug)
+    yield slug
+    db.delete_graph(slug)
+
+
+@needs_graph
+def test_real_pipeline_reaches_the_planned_step_count(two_source_company, tmp_path):
+    r = JobRunner(jobs_dir=tmp_path / "jobs")
+    r.start(two_source_company)
+    snap = wait_done(r, two_source_company, 60)
+    assert snap.state == "done", snap.error
+    assert snap.steps == 1 + 3 + 3 * 3  # prepare, a fetch and three ingest stages per source
+    stamped = steps_of(snap)
+    assert stamped == sorted(stamped)
+    assert snap.events[-2].step == snap.steps == snap.step  # the last stage before `done`

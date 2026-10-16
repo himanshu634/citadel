@@ -6,10 +6,16 @@
 	import '$lib/styles/base.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
+	import { Companies, setCompanies } from '$lib/companies.svelte';
 	import { Theme, setTheme } from '$lib/theme.svelte';
+	import { onMount } from 'svelte';
 
 	let { children } = $props();
 	setTheme(new Theme());
+	const companies = new Companies();
+	setCompanies(companies);
+	// Reads the list and follows live status events; the returned stopper closes the stream.
+	onMount(() => companies.start());
 </script>
 
 <svelte:head>

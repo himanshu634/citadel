@@ -13,45 +13,73 @@ the shell. Sections that are not built yet stay visible but inert, marked "Soon"
 		MessageSquareText,
 		Network,
 		Palette,
+		Settings,
 		Users
 	} from '@lucide/svelte';
 	import type { Component } from 'svelte';
+	import { getCompanies } from '$lib/companies.svelte';
 
 	type Props = { onnavigate?: () => void };
 	let { onnavigate }: Props = $props();
 
-	type Item = { label: string; href?: '/' | '/components'; icon: Component };
-	const groups: { heading: string; items: Item[] }[] = [
-		{
-			heading: 'Brain',
-			items: [
-				{ label: 'Overview', href: '/', icon: LayoutDashboard },
-				{ label: 'Ask', icon: MessageSquareText },
-				{ label: 'Graph', icon: Network },
-				{ label: 'People', icon: Users },
-				{ label: 'Systems', icon: Boxes },
-				{ label: 'Sources', icon: BookOpen }
-			]
-		},
-		{
-			heading: 'Build',
-			items: [{ label: 'Components', href: '/components', icon: Palette }]
-		}
-	];
+	const companies = getCompanies();
+	const slug = $derived(companies.current);
+	const company = $derived(companies.currentCompany);
+
+	/** `path` is relative to `/c/<slug>/`; an item without one is not built yet and stays inert. */
+	type Item = { label: string; path?: string; href?: '/components'; icon: Component };
+	type Group = { heading: string; items: Item[] };
+
+	const brain: Group = {
+		heading: 'Brain',
+		items: [
+			{ label: 'Overview', path: '', icon: LayoutDashboard },
+			{ label: 'Ask', icon: MessageSquareText },
+			{ label: 'Graph', icon: Network },
+			{ label: 'People', icon: Users },
+			{ label: 'Systems', icon: Boxes },
+			{ label: 'Sources', icon: BookOpen }
+		]
+	};
+	const manage: Group = {
+		heading: 'Company',
+		items: [{ label: 'Settings', path: 'settings', icon: Settings }]
+	};
+	const build: Group = {
+		heading: 'Build',
+		items: [{ label: 'Components', href: '/components', icon: Palette }]
+	};
+	// The company groups only make sense inside a company; elsewhere the sidebar keeps Build.
+	const groups = $derived(slug === null ? [build] : [brain, manage, build]);
+
+	// Paths are this app's own routes; the cast to '/' only satisfies `resolve`'s route typing.
+	const trim = (path: string) => path.replace(/\/+$/, '');
+	function pathOf(item: Item): string | undefined {
+		if (item.href) return item.href;
+		if (item.path === undefined || slug === null) return undefined;
+		return `/c/${slug}/${item.path}`;
+	}
 </script>
 
 <nav class="sidebar" aria-label="Main">
 	<a class="brand" href={resolve('/')} onclick={onnavigate}>Citadel</a>
+	{#if slug !== null && company}
+		<div class="company">
+			<p class="company-name">{company.name}</p>
+			<p class="company-graph">brain_{company.slug}</p>
+		</div>
+	{/if}
 	{#each groups as group (group.heading)}
 		<div class="group">
 			<h2>{group.heading}</h2>
 			<ul>
 				{#each group.items as item (item.label)}
-					{@const active = !!item.href && resolve(item.href) === page.url.pathname}
+					{@const path = pathOf(item)}
+					{@const active = path !== undefined && trim(resolve(path as '/')) === trim(page.url.pathname)}
 					<li>
-						{#if item.href}
+						{#if path !== undefined}
 							<a
-								href={resolve(item.href)}
+								href={resolve(path as '/')}
 								class={['item', { active }]}
 								aria-current={active ? 'page' : undefined}
 								onclick={onnavigate}
@@ -92,6 +120,31 @@ the shell. Sections that are not built yet stay visible but inert, marked "Soon"
 		font-variation-settings: 'wdth' var(--width-brand);
 		letter-spacing: -0.01em;
 		text-decoration: none;
+	}
+	.company {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding-inline: var(--space-3);
+		/* Hangs from the brand: the company head belongs to the brand above it. */
+		margin-top: calc(-1 * var(--space-3));
+	}
+	.company-name {
+		overflow: hidden;
+		color: var(--color-text);
+		font-size: var(--text-lg);
+		font-weight: var(--weight-bold);
+		font-variation-settings: 'wdth' var(--width-heading);
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.company-graph {
+		overflow: hidden;
+		color: var(--color-text-muted);
+		font-family: var(--font-mono);
+		font-size: var(--text-xs);
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.group {
 		display: flex;

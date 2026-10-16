@@ -55,6 +55,13 @@ All colours are tokens in `tokens.css`, with light values on `:root` and dark va
 Rules:
 
 - The accent fill appears at most once per region: active nav item, selected tab, primary button.
+- The current company tile in the rail is **ink**, never accent: `--color-text` fill, `--color-surface`
+  text, weight 900, a `--rail-bar` ink bar on the rail edge, `aria-current="true"`. Accent stays with
+  the active nav item next to it.
+- A company's status is a badge on its tile: building = spinner icon in `--color-warning`; failed
+  and invalid = alert icon in `--color-danger`; unknown (graph unreachable) = cloud-off icon in
+  `--color-text-muted`; ready and empty = no badge. The icon repeats what the accessible name says in
+  words ("building", "last build failed", "config invalid", "graph unreachable").
 - `-soft` tints are for selected rows and citation chips, with text in the matching strong colour.
 - Node colours are for marks (dots, bars, avatar initials), never for body text or buttons.
 - Work item state maps to badges as: open = success, merged = accent, closed = neutral.
@@ -104,10 +111,13 @@ Rules:
 
 ## 6. Layout
 
-- `AppShell` is the frame: sidebar (`--sidebar-width`, 240px), sticky top bar
-  (`--topbar-height`), content up to `--content-max` (1280px).
-- Below 900px the sidebar becomes a drawer, opened from the top bar and closed by the scrim,
-  Escape or a navigation. Below 640px the ask field takes its own row.
+- `AppShell` is the frame: company rail (`--rail-width`, 72px), sidebar (`--sidebar-width`, 240px),
+  sticky top bar (`--topbar-height`), content up to `--content-max` (1280px).
+- The rail is a full-height column of 48px tiles (`--control-lg`, `--radius-md`, `--space-2`
+  apart) under the label "Brains". Its tile list scrolls without a visible scrollbar; the add tile
+  below a hairline stays pinned. The current tile is scrolled into view when the company changes.
+- Below 900px the rail and sidebar become one drawer side by side, opened from the top bar and
+  closed by the scrim, Escape or a navigation. Below 640px the ask field takes its own row.
 - Dashboard pages use a 12-column grid: main content spans 8, side panels span 4. At 1100px and
   below, panels go to 6 or full width; at 720px and below, everything is one column.
 - Content is left-aligned. Nothing is centred except icons inside controls.
@@ -116,25 +126,36 @@ Rules:
 ## 7. Components
 
 Import from `$lib` (`import { Button, Card } from '$lib'`). Interactive primitives with focus
-management (Tabs, Tooltip, Dialog, Menu) are built on **bits-ui** and styled with our tokens. Do
+management (Tabs, Tooltip, Dialog, Menu, Select) are built on **bits-ui** and styled with our tokens. Do
 not add another component library.
 
 | Component    | Rule                                                                                           |
 | ------------ | ---------------------------------------------------------------------------------------------- |
 | `Button`     | Variants: `primary` (one per view), `secondary` (default), `ghost` (toolbars), `danger` (destructive). Sizes `sm` 32, `md` 40, `lg` 48. Icon-only needs `label`. The label says what happens ("Delete graph", not "OK"). |
 | `Badge`      | Status words. The word carries the meaning; the tone repeats it.                               |
+| `Banner`     | The state of a whole view (building, failed, invalid, unreachable) with its one action. Icon and title carry the state; tone repeats it. |
 | `NodeChip`   | A graph node reference: type dot plus label. Type is in the accessible name.                   |
 | `Avatar`     | Initials on the node colour of what it stands for. Always next to the name.                    |
 | `Card`       | A titled panel. Title in wide type, optional description and actions. No nesting, no shadow.   |
-| `Input`      | Always has a label (`hideLabel` keeps it for screen readers). `hint` explains; `error` says what is wrong and how to fix it. |
+| `Input`      | Always has a label (`hideLabel` keeps it for screen readers). `hint` explains; `error` says what is wrong and how to fix it. Disabled: sunken fill, muted text, no hover change, `not-allowed` cursor. `prefix` shows fixed mono text before the value (`brain_`, `github.com/`); `mono` sets the field in the mono face. |
+| `Select`     | Pick one of a short list (bits-ui). Label always visible; `hint` explains, `error` says what to fix. Two or three options that need explaining are `ChoiceCard`s instead. |
+| `ChoiceCard` | One option of a few that need a sentence each. A real radio in a label: selected = accent border, `--color-accent-soft` fill and a filled dot. Wrap the set in a `fieldset` with a `legend`. |
+| `Checkbox`   | One yes/no with its label beside it. Checked is an ink box with a check, never accent, so it does not compete with the one accent block. |
+| `TagInput`   | Several short values in one field. Enter or comma adds, paste splits, Backspace on empty removes the last; each tag has "Remove <tag>". `mono` for paths and ids. A comma inside `{}` stays in the tag (`*.{ts,tsx}`). Rules live in `src/lib/tags.ts`. |
+| `Stepper`    | The steps of a flow. The current step is the one solid accent block with square corners; done steps show a check in an ink circle, later steps their number. |
 | `Tabs`       | The selected tab is the solid accent block with square corners.                                |
 | `Menu`       | Pick one of a set or run a command. Selected item shows a check.                               |
-| `Tooltip`    | Extra hint only. Never the only place information lives.                                       |
+| `Tooltip`    | Extra hint only. Never the only place information lives. `detail` adds a mono second line (an id).                                       |
 | `Dialog`     | Confirm destructive or blocking actions. Title is a question; the confirming action is last and named for what it does. |
 | `Stat`       | A count with its label, inside a `<dl>`. For summaries, not decoration.                        |
 | `EmptyState` | Says what will appear and how to get it, with one action.                                      |
 | `CitedAnswer`, `GraphPath` | The answer pattern from section 1. Citation chips link to the numbered source.   |
 | `EntityRow`, `WorkItemRow`, `ActivityBars` | List and comparison patterns for people, teams, systems and work items. |
+| `CompanyForm` | The fields of a company file for one wizard step or all three (Settings). Edits the draft; the page validates and hands back `errors`, which show under the field their `loc` names. Errors no field shows are listed at the foot of the step, so nothing blocks without a reason. Rules in `src/lib/onboarding.ts`. |
+| `SourceCard` | One source of a company. GitHub: repository, what to read, token note with "Check again", GitHub's answer; an error only when the repository is private while the data is not `own`. Not found, rate limits and outages are warnings with "Check again", never blockers; Continue waits while a check is unanswered. |
+| `ConfigPreview` | The YAML the server will write, with the top-level keys of the current step marked (bar, tint and a line of words). Shows the last valid text while the form has errors, and says so. |
+| `BuildProgress` | One build: "Step n of N" from the plan, an ink progress meter (the one accent block of the view is the primary button), a table with a cell per source and stage, and the plain log. Each cell is icon plus word plus count or message; a skipped source is one merged cell saying why. Rules live in `src/lib/buildProgress.ts`. |
+| `CompanyRail` | One tile per company brain; one click switches company and keeps the section you are on. Monogram 15px at width 118; ink for the current tile (section 3). Tooltip shows the name and `brain_<slug>` in mono. |
 | `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". |
 
 Adding a component:
@@ -162,7 +183,7 @@ Adding a component:
 - Name things by what the user knows: "Sync now", "Open graph", "Company graph".
 - Buttons are verbs that say what happens, and the result uses the same word ("Delete graph",
   then "Graph deleted").
-- Errors say what went wrong and what to do: "Use lowercase letters, digits and dashes only".
+- Errors say what went wrong and what to do: "Use lowercase letters, digits and underscores only, like acme_labs".
 - Empty states invite the next step instead of describing emptiness.
 - Dates in tables and meta lines: `6 Feb`; with a year when it is not this year.
 

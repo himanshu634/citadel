@@ -1,21 +1,32 @@
 // Public surface of the design system. Import components from here: `import { Button } from '$lib'`.
 export { default as Avatar } from './components/ui/Avatar.svelte';
 export { default as Badge } from './components/ui/Badge.svelte';
+export { default as Banner } from './components/ui/Banner.svelte';
 export { default as Button } from './components/ui/Button.svelte';
 export { default as Card } from './components/ui/Card.svelte';
+export { default as Checkbox } from './components/ui/Checkbox.svelte';
+export { default as ChoiceCard } from './components/ui/ChoiceCard.svelte';
 export { default as Dialog } from './components/ui/Dialog.svelte';
 export { default as EmptyState } from './components/ui/EmptyState.svelte';
 export { default as Input } from './components/ui/Input.svelte';
 export { default as Menu } from './components/ui/Menu.svelte';
 export { default as NodeChip } from './components/ui/NodeChip.svelte';
+export { default as Select } from './components/ui/Select.svelte';
 export { default as Stat } from './components/ui/Stat.svelte';
+export { default as Stepper } from './components/ui/Stepper.svelte';
 export { default as Tabs } from './components/ui/Tabs.svelte';
+export { default as TagInput } from './components/ui/TagInput.svelte';
 export { default as Tooltip } from './components/ui/Tooltip.svelte';
 
 export { default as ActivityBars } from './components/brain/ActivityBars.svelte';
+export { default as BuildProgress } from './components/brain/BuildProgress.svelte';
 export { default as CitedAnswer } from './components/brain/CitedAnswer.svelte';
+export { default as CompanyForm } from './components/brain/CompanyForm.svelte';
+export { default as ConfigPreview } from './components/brain/ConfigPreview.svelte';
 export { default as EntityRow } from './components/brain/EntityRow.svelte';
 export { default as GraphPath } from './components/brain/GraphPath.svelte';
+export { default as SourceCard } from './components/brain/SourceCard.svelte';
 export { default as WorkItemRow } from './components/brain/WorkItemRow.svelte';
 
 export { default as AppShell } from './components/layout/AppShell.svelte';
+export { default as CompanyRail } from './components/layout/CompanyRail.svelte';

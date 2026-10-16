@@ -11,17 +11,27 @@ One work item (PR, issue or thread) in a list: kind icon, title, who and when, s
 
 	let { item }: Props = $props();
 
-	const Icon = $derived(
-		item.kind === 'pull_request' ? GitPullRequest : item.kind === 'issue' ? CircleDot : MessagesSquare
-	);
-	const kindLabel = $derived(
-		item.kind === 'pull_request' ? 'PR' : item.kind === 'issue' ? 'Issue' : 'Thread'
-	);
+	const KINDS = {
+		pull_request: { icon: GitPullRequest, label: 'PR' },
+		issue: { icon: CircleDot, label: 'Issue' },
+		ticket: { icon: CircleDot, label: 'Ticket' },
+		thread: { icon: MessagesSquare, label: 'Thread' }
+	} as const;
+	const kind = $derived(KINDS[item.kind] ?? KINDS.thread);
+	const Icon = $derived(kind.icon);
 	const tone = $derived(
 		item.state === 'open' ? 'success' : item.state === 'merged' ? 'accent' : 'neutral'
 	);
 	const date = $derived(
-		new Date(item.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+		item.date && !Number.isNaN(new Date(item.date).getTime())
+			? new Date(item.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+			: null
+	);
+	// Author, date and system are each optional: join only the ones the source gave.
+	const meta = $derived(
+		[`${kind.label}${item.number ? ` #${item.number}` : ''}`, item.author, date, item.system]
+			.filter(Boolean)
+			.join(', ')
 	);
 </script>
 
@@ -29,11 +39,7 @@ One work item (PR, issue or thread) in a list: kind icon, title, who and when, s
 	<span class="icon" aria-hidden="true"><Icon /></span>
 	<div class="main">
 		<span class="title">{item.title}</span>
-		<span class="meta">
-			{kindLabel}{item.number ? ` #${item.number}` : ''}, {item.author}, {date}{item.system
-				? `, ${item.system}`
-				: ''}
-		</span>
+		<span class="meta">{meta}</span>
 	</div>
 	<Badge {tone}>{item.state}</Badge>
 </div>
