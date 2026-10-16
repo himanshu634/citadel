@@ -163,7 +163,11 @@ export function parseRepo(repo: string): [string, string] | null {
 export function normalizeRepo(text: string): string {
 	const url = /^\s*(https?:\/\/)?(www\.)?github\.com\//i;
 	if (!url.test(text)) return text;
-	return text.replace(url, '').trim().replace(/\/+$/, '').replace(/\.git$/, '');
+	const path = text.replace(url, '').trim().replace(/[?#].*$/, '').replace(/\/+$/, '');
+	// A link to a page inside the repository (/tree/main, /pulls) still names the repository.
+	const [owner, name, ...rest] = path.split('/');
+	const repo = rest.length > 0 && name ? `${owner}/${name}` : path;
+	return repo.replace(/\.git$/, '');
 }
 
 export const PRIVATE_REPO_MESSAGE =

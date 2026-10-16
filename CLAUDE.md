@@ -98,9 +98,12 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   round-trip so hand-written comments survive; writes are atomic), `config_diff.py` (says if a
   saved change needs a graph rebuild or a new download), and `jobs.py` (one build per company,
   at most two at once, progress as SSE events, last build kept in `data/jobs/<slug>.json`, a
-  build cut off by a restart is marked `stopped`). `api/ask.py`: POST `.../ask` answers one
-  question as SSE (`start`, `step` / `step_done` per tool call, `answer` or `error`) from a
-  worker thread; one run per thread_id; closing the stream stops the run at its next step.
+  build cut off by a restart is marked `stopped`). `/api/onboard/github` adds a company from one
+  public GitHub repo (the rail's + dialog): `brain/onboard.py` derives name, slug and window; the
+  create re-checks visibility (private repos are refused) and writes and starts under the
+  start lock. `api/ask.py`: POST `.../ask` answers one question as SSE (`start`, `step` /
+  `step_done` per tool call, `answer` or `error`) from a worker thread; one run per thread_id;
+  closing the stream stops the run at its next step.
 
 ### Agents (`brain/agents`)
 

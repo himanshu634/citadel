@@ -13,7 +13,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from brain.config_diff import ConfigDiff
-from brain.jobs import BuildSummary
+from brain.jobs import BuildSnapshot, BuildSummary
 from brain.registry import FieldError
 from brain.tools import PersonActivity, RecentWorkItem, Stat, SystemSummary
 
@@ -47,6 +47,38 @@ class ValidateOut(BaseModel):
     # history are still there (then the detail says to run make reset).
     slug_taken: bool = False
     slug_taken_detail: str | None = None  # the same text a create would answer with (409)
+
+
+class CompanyRef(BaseModel):
+    slug: str
+    name: str
+
+
+class RepoLookup(BaseModel):
+    """What the add-a-company dialog shows for a pasted repository. The suggestion (name, slug,
+    since) is only made for a public repository that exists."""
+
+    repo: str  # owner/name as GitHub spells it, or as asked when it does not exist
+    exists: bool
+    private: bool | None = None
+    owner_name: str | None = None  # the owner's display name, else its login in words
+    name: str | None = None  # suggested company name
+    slug: str | None = None  # suggested slug, free to use
+    since: str | None = None  # the window start the company would get, an ISO date
+    company: CompanyRef | None = None  # the company that already reads this repository
+    owner_company: CompanyRef | None = None  # a company that reads another repo of this owner
+
+
+class OnboardIn(BaseModel):
+    repo: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$")
+    name: str | None = None  # default: the suggestion
+    slug: str | None = None  # default: the suggestion; a taken one given here is a 409
+
+
+class OnboardOut(BaseModel):
+    company: CompanyDetail
+    build: BuildSnapshot | None  # None: the company was saved but its build did not start
+    build_error: str | None = None
 
 
 class Overview(BaseModel):

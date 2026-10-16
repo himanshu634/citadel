@@ -146,7 +146,7 @@ not add another component library.
 | `Tabs`       | The selected tab is the solid accent block with square corners.                                |
 | `Menu`       | Pick one of a set or run a command. Selected item shows a check.                               |
 | `Tooltip`    | Extra hint only. Never the only place information lives. `detail` adds a mono second line (an id).                                       |
-| `Dialog`     | Confirm destructive or blocking actions. Title is a question; the confirming action is last and named for what it does. |
+| `Dialog`     | Confirm destructive or blocking actions, or a short task that keeps the page behind it (add a company). The confirming action is last and named for what it does. `initialFocus` puts focus in the first field; `placement="top"` pins the top edge of a dialog whose body grows while you type. |
 | `Stat`       | A count with its label, inside a `<dl>`. For summaries, not decoration.                        |
 | `EmptyState` | Says what will appear and how to get it, with one action.                                      |
 | `CitedAnswer`, `GraphPath` | The answer pattern from section 1. Citation chips link to the numbered source.   |
@@ -158,7 +158,8 @@ not add another component library.
 | `SourceCard` | One source of a company. GitHub: repository, what to read, token note with "Check again", GitHub's answer; an error only when the repository is private while the data is not `own`. Not found, rate limits and outages are warnings with "Check again", never blockers; Continue waits while a check is unanswered. |
 | `ConfigPreview` | The YAML the server will write, with the top-level keys of the current step marked (bar, tint and a line of words). Shows the last valid text while the form has errors, and says so. |
 | `BuildProgress` | One build: "Step n of N" from the plan, an ink progress meter (the one accent block of the view is the primary button), a table with a cell per source and stage, and the plain log. Each cell is icon plus word plus count or message; a skipped source is one merged cell saying why. Rules live in `src/lib/buildProgress.ts`. |
-| `CompanyRail` | One tile per company brain; one click switches company and keeps the section you are on. Monogram 15px at width 118; ink for the current tile (section 3). Tooltip shows the name and `brain_<slug>` in mono. |
+| `AddCompanyDialog` | Add a company from one public GitHub repository: one field (a link or `owner/name`), then what Citadel will make (company, graph, window). Private repos are refused in the field's error; no token, GitHub down and a company that already reads the repo or its owner are banners with their one action. "Advanced setup" opens the step-by-step form at `/new`. Rules in `src/lib/addCompany.svelte.ts`. |
+| `CompanyRail` | One tile per company brain; one click switches company and keeps the section you are on. Monogram 15px at width 118; ink for the current tile (section 3). Tooltip shows the name and `brain_<slug>` in mono. The + opens `AddCompanyDialog`. |
 | `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". |
 
 Adding a component:
