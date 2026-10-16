@@ -191,9 +191,10 @@ Run: `make test ARGS="apps/brain/tests/test_embeddings.py"` → PASS. `make lint
     - `comment`: `chunk:<comment uid>` (exists)
     - `work_item`: `chunk:<work item uid>:body`, text = `title + "\n\n" + body` (title alone when
       body is empty)
-    - `document`: `chunk:<document uid>:<i>` for `i` in `0..n-1`, from `split_text(title + "\n\n" + body)`
-  - `load/prune_document_chunks` params `$rows: [{doc_uid, keep}]`: deletes Chunks FROM that
-    document whose index (stored as `c.idx`) is `>= keep`
+    - `document`: `chunk:<document uid>:<i>` for `i` in `0..n-1`, from `split_text(title + "\n\n" + body)`;
+      the row carries `idx: i` and `document_chunk.cypher` sets `c.idx = row.idx`
+  - `load/prune_document_chunks` params `$rows: [{doc_uid, keep}]` (`keep` = that document's chunk
+    count in this load): `DETACH DELETE`s Chunks FROM that document with `c.idx >= keep`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -212,20 +213,32 @@ def test_split_empty_and_hash_stable():
 # test_graph.py
 def test_bodies_and_documents_become_chunks(synthetic_graph):
     issue = tools.get_entity(synthetic_graph, uid="synthetic:issue:14")
-    assert any(n.uid == "chunk:synthetic:issue:14:body" for n in issue.neighbours)
-    rows = db.run(synthetic_graph, "graph/nodes", read_only=True)
-    pr4 = next(r for r in rows if r["uid"] == "synthetic:pr:4")
-    assert pr4["comments"] == <comment count for PR 4 from generate.py>   # body chunk not counted
+    chunks = [n for n in issue.neighbours if n.label == "Chunk" and n.rel == "FROM"]
+    assert {n.uid for n in chunks} == {"chunk:synthetic:issue:14:body", "chunk:synthetic:comment:7"}
+    doc = tools.get_entity(synthetic_graph, uid="synthetic:doc:docs/billing-runbook.md")
+    assert any(n.uid == "chunk:synthetic:doc:docs/billing-runbook.md:0" for n in doc.neighbours)
+    rows = {r["uid"]: r for r in db.run(synthetic_graph, "graph/nodes", read_only=True)}
+    assert rows["synthetic:issue:14"]["comments"] == 1    # its body chunk is not a comment
+    assert rows["synthetic:pr:3"]["comments"] == 2
 
-def test_shrunk_document_leaves_no_stale_chunks(synthetic_graph):
-    # load one Document with 3 paragraphs over max size, then the same uid with 1 paragraph
-    ...
-    assert chunk_uids_from(doc_uid) == [f"chunk:{doc_uid}:0"]
+def test_shrunk_document_leaves_no_stale_chunks():          # Review Focus 4
+    slug = "test_doc_shrink"
+    db.delete_graph(slug)
+    long = "\n\n".join(("para%d " % i) * 200 for i in range(3))   # 3 chunks at 1200 chars
+    doc = lambda body: Document(uid="t:doc:a.md", source="t", path="a.md", title="A", body=body)
+    loader.load(slug, [doc(long)])
+    loader.load(slug, [doc("one short paragraph")])
+    rows = db.run_text(slug, "MATCH (c:Chunk)-[:FROM]->(:Document) RETURN c.uid AS uid")
+    assert [r["uid"] for r in rows] == ["chunk:t:doc:a.md:0"]
+    db.delete_graph(slug)
 ```
 
-(Use the real field names of `get_entity`'s neighbour rows; the count for PR 4 comes from
-`apps/brain/examples/synthetic_company/generate.py`. The shrink test loads through
-`loader.load(slug, [Document(...)])` twice into a throwaway graph and deletes it after.)
+(Neighbour fields come from `get_entity.cypher`: `rel, direction, uid, label, title, url`.
+Comment 7 is issue 14's only comment and PR 3 has comments 3 and 4, per `COMMENTS` in
+`apps/brain/examples/synthetic_company/generate.py`. Build `Document` with whatever other
+required fields `canonical.Document` / `Record` has; skip the shrink test when `falkordb_up()` is
+false. If `db.run_text` cannot take a read query, add a one-line test-only `.cypher` under
+`apps/brain/tests/fixtures/` instead.)
 
 - [ ] **Step 2: Run to verify they fail** — `make test ARGS="apps/brain/tests/test_chunking.py
   apps/brain/tests/test_graph.py"` → FAIL (module missing; body chunk not found).
@@ -247,7 +260,8 @@ def test_shrunk_document_leaves_no_stale_chunks(synthetic_graph):
 ### Task 3: The embed stage
 
 **Files:**
-- Create: `apps/brain/queries/load/chunks_to_embed.cypher`, `apps/brain/queries/load/chunk_embedding.cypher`
+- Create: `apps/brain/queries/load/chunks_to_embed.cypher`, `apps/brain/queries/load/chunk_embedding.cypher`,
+  `apps/brain/queries/load/clear_embedded.cypher`
 - Modify: `apps/brain/brain/embeddings.py`, `apps/brain/brain/loader.py`, `apps/brain/brain/pipeline.py`,
   `apps/brain/brain/events.py` (`Stage` gains `"embed"`), `apps/brain/brain/cli.py`
   (`brain embed SLUG [--all]`), `Makefile` (`embed` target; `synthetic` runs it after ingest),
@@ -267,9 +281,11 @@ def test_shrunk_document_leaves_no_stale_chunks(synthetic_graph):
     on_event: OnEvent | None = None, everything: bool = False) -> EmbedReport` — `embedder=None`
     means `get_embedder()`; when that is `None` or raises `EmbeddingUnavailable`, emits
     `BuildEvent(slug, "embed", "skipped", message=...)` and returns the reason; otherwise emits
-    `running` then `done` with `count`. `everything=True` (CLI `--all`) passes a model name that
-    cannot match, forcing a full re-embed. Stops when a batch comes back empty or when a write
-    returns 0 (guards an endless loop).
+    `running` then `done` with `count`. `everything=True` (CLI `--all`) first runs
+    `load/clear_embedded` (via `loader.clear_embedded(slug) -> int`: `SET c.embedded_hash = NULL`
+    on every Chunk) and then the normal loop, so every chunk is pending exactly once. Never force a
+    re-embed by passing a model name that cannot match: the same first batch would come back
+    forever. Stops when a batch comes back empty or when a write returns 0 (guards an endless loop).
   - `IngestReport.embed: EmbedReport`; `pipeline.ingest` calls `embed_pending` after the source loop
     (also when `only=` limits the sources)
   - `brain.testing.embedded_graph` session fixture: like `synthetic_graph` on slug
@@ -300,6 +316,11 @@ def test_no_provider_skips_with_a_reason(fresh_synthetic):           # Review Fo
     report = embed_pending(fresh_synthetic, on_event=events.append)
     assert report.embedded == 0 and "EMBEDDING_PROVIDER" in report.skipped_reason
     assert events[-1].stage == "embed" and events[-1].status == "skipped"
+
+def test_everything_reembeds_each_chunk_once(fresh_synthetic):
+    embed_pending(fresh_synthetic, FakeEmbedder())
+    report = embed_pending(fresh_synthetic, FakeEmbedder(), batch=4, everything=True)
+    assert report.embedded == count_chunks(fresh_synthetic)          # terminates; no repeats
 
 def test_unloadable_model_skips_not_fails(fresh_synthetic):
     class Broken(FakeEmbedder):
@@ -350,7 +371,10 @@ In `test_pipeline_events.py`: the existing ingest event-order test now ends with
   - Tool description: `"Work items and documents whose text means the same as the question, even
     in other words (semantic search). Use for why/how questions; use related_work_items for exact
     names, numbers and keys."`
-  - `_semantic(p)` -> `{"vector": list[float] | None, "k": min(limit * 4, 200), "limit", "kinds"}`;
+  - `_semantic(p)` -> `{"vector": list[float] | None, "k": ..., "limit", "kinds"}` with
+    `k = min(limit * 4, 200)`, or `k = 200` when `kinds` is set (the filter runs after the
+    nearest-neighbour step, so comments could otherwise crowd out every document; say so in the
+    query's `// notes:`);
     `vector` is `None` for blank text; raises `EmbeddingUnavailable("Semantic search is off: set
     EMBEDDING_PROVIDER=fastembed and run make embed.")` when `get_embedder()` is `None`
   - `tools.call` returns `[]` when `query_params.get("vector", ...) is None` (same short-circuit
@@ -370,9 +394,10 @@ In `test_pipeline_events.py`: the existing ingest event-order test now ends with
 
 ```python
 def test_finds_a_comment_by_its_words_and_cites_its_work_item(embedded_graph):
-    # words copied from one synthetic comment on PR 4 (see generate.py)
-    hits = tools.semantic_search(embedded_graph, text="<words from that comment>")
-    assert hits[0].uid == "synthetic:pr:4" and hits[0].chunk_kind == "comment"
+    # erin's comment on PR 3 (comment 3 in generate.py): "Rounding is off by a cent for annual plans."
+    hits = tools.semantic_search(embedded_graph, text="rounding off by a cent on annual plans")
+    assert hits[0].uid == "synthetic:pr:3"     # cited by its PR, not by the chunk
+    assert hits[0].chunk_uid in {"chunk:synthetic:comment:3", "chunk:synthetic:pr:3:body"}
     assert hits == sorted(hits, key=lambda h: -h.similarity) and 0 <= hits[-1].similarity <= 1
 
 def test_one_row_per_source_and_kinds_filter(embedded_graph):
@@ -442,14 +467,18 @@ error results).
 ### Task 6: `embed` in the build progress
 
 **Files:**
-- Modify: `apps/backend/backend/jobs.py` (`_plan` appends `"embed"` after `_INGEST`; the trail
-  ends with `("embed", None)`), `apps/frontend/src/lib/types.ts` (`BuildStage` gains `'embed'`),
+- Modify: `apps/backend/backend/jobs.py` in three places: `_plan` (~line 186) appends `"embed"`
+  after `_INGEST`, so the trail ends with `("embed", None)`; `_STEP_STAGES` (~line 45) puts
+  `"embed"` under the `ingest` step (after the per-source stages, not repeated per source);
+  `_after` (~line 193) returns `("embed", None)` after the last source's `load`, so a stop or
+  failure during embedding is credited to `embed`, not to a phantom next `records`, `apps/frontend/src/lib/types.ts` (`BuildStage` gains `'embed'`),
   `apps/frontend/src/lib/buildProgress.ts` (a company-wide row like `prepare`, labelled
   "Embed text")
 - Test: the backend jobs tests (`apps/backend/tests/`), `apps/frontend/src/lib/buildProgress.test.ts`
 
 - [ ] **Step 1: Failing tests** — backend: a planned ingest job's trail ends with `("embed",
-  None)` and the step counter counts it; frontend: a build whose events end with `embed done`
+  None)` and the step counter counts it; a job stopped after the last source's `load done`
+  gets its closing event on stage `embed`; frontend: a build whose events end with `embed done`
   shows an Embed row after the per-source rows, and `embed skipped` shows its message.
 - [ ] **Step 2: Run** `make test ARGS="apps/backend/tests"` and `make fe-test` → FAIL.
 - [ ] **Step 3: Implement.**
