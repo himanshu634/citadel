@@ -9,11 +9,13 @@ from __future__ import annotations
 from brain.adapters.base import Adapter, SourceUnavailable
 from brain.adapters.canonical_jsonl import CanonicalJsonlAdapter
 from brain.adapters.github import GithubAdapter
+from brain.adapters.linear import LinearAdapter
 from brain.adapters.local_docs import LocalDocsAdapter
 
 REGISTRY: dict[str, Adapter] = {
     "canonical_jsonl": CanonicalJsonlAdapter(),
     "github": GithubAdapter(),
+    "linear": LinearAdapter(),
     "local_docs": LocalDocsAdapter(),
 }
 

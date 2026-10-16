@@ -1,0 +1,5 @@
+# Create one issue. The input carries teamId, title, description, assigneeId, stateId, priority,
+# dueDate and createdAt.
+mutation IssueCreate($input: IssueCreateInput!) {
+  issueCreate(input: $input) { success issue { id identifier } }
+}

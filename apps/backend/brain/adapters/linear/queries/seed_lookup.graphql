@@ -1,0 +1,9 @@
+# What the seeder needs before it writes: the workspace, each team's workflow states and the
+# users. We ask for no contact details.
+query SeedLookup {
+  viewer { organization { urlKey } }
+  teams(first: 50) {
+    nodes { id key states { nodes { id type position } } }
+  }
+  users(first: 100) { nodes { id displayName active } }
+}

@@ -1,0 +1,27 @@
+# Issues of the given teams that changed since $since, plus every issue still open (a ticket that
+# is open but untouched is still work in flight). Oldest update first, so a stopped run can resume
+# from its cursor. Relations, attachments and comments are capped per issue; no contact details.
+query Issues($teams: [String!]!, $since: DateTimeOrDuration!, $first: Int!, $after: String) {
+  issues(
+    first: $first, after: $after, orderBy: updatedAt,
+    filter: {
+      team: {key: {in: $teams}},
+      or: [{updatedAt: {gte: $since}}, {state: {type: {nin: ["completed", "canceled"]}}}]
+    }
+  ) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      id identifier number title description url priority dueDate
+      createdAt updatedAt completedAt canceledAt
+      state { name type }
+      team { key name }
+      creator { displayName }
+      assignee { displayName }
+      labels(first: 25) { nodes { name } }
+      relations(first: 25) { nodes { type relatedIssue { id } } }
+      inverseRelations(first: 25) { nodes { type issue { id } } }
+      attachments(first: 25) { nodes { url title } }
+      comments(first: 25) { nodes { id body createdAt user { displayName } } }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+# The workspace the API key belongs to. Used to check `workspace:` in the company YAML.
+query Meta {
+  viewer { organization { urlKey name } }
+}

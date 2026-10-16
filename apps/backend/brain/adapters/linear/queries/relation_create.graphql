@@ -1,0 +1,4 @@
+# Make `issueId` block `relatedIssueId` (type: blocks).
+mutation IssueRelationCreate($input: IssueRelationCreateInput!) {
+  issueRelationCreate(input: $input) { success }
+}

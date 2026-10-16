@@ -1,0 +1,4 @@
+# Attach a link (here: a pull request URL) to an issue.
+mutation AttachmentCreate($input: AttachmentCreateInput!) {
+  attachmentCreate(input: $input) { success }
+}

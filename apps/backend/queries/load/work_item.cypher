@@ -2,7 +2,10 @@
 //          `kind`. Timestamps are ISO strings for display plus *_ts epoch seconds for math
 //          (FalkorDB has no epoch accessor on temporal values).
 // params:  $company, $rows: [{uid, kind, number, title, body, state, created_at, created_ts,
-//          updated_at, closed_at, closed_ts, merged_at, labels, container, source, url}]
+//          updated_at, closed_at, closed_ts, merged_at, labels, container, source, url,
+//          key, status_category, priority, priority_rank, due_date, due_ts}]
+//          (the ticket fields are null for GitHub PRs and issues; due_ts is the due date at
+//          00:00 UTC, priority_rank is 1 urgent .. 4 low, 5 none, null without a status)
 // returns: n (rows written)
 // example: loader.load("falkordb", [WorkItem(uid="github:FalkorDB/FalkorDB:pr:3330", ...)])
 UNWIND $rows AS row
@@ -21,6 +24,12 @@ SET w.company = $company,
     w.merged_at = row.merged_at,
     w.labels = row.labels,
     w.container = row.container,
+    w.key = row.key,
+    w.status_category = row.status_category,
+    w.priority = row.priority,
+    w.priority_rank = row.priority_rank,
+    w.due_date = row.due_date,
+    w.due_ts = row.due_ts,
     w.source = row.source,
     w.url = row.url
 RETURN count(w) AS n

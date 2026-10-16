@@ -2,8 +2,10 @@
 
 from datetime import UTC, datetime
 
+from brain import config, loader, pipeline, registry
 from brain.canonical import Change, Document, Person, WorkItem
 from brain.pipeline import next_cursor, select_new
+from conftest import synthetic_company
 
 CURSOR = datetime(2026, 8, 1, tzinfo=UTC)
 NOW = datetime(2026, 10, 16, tzinfo=UTC)
@@ -38,3 +40,20 @@ def test_git_dates_never_move_the_cursor_and_it_never_passes_now():
     )
     assert next_cursor([item("f", "2031-01-01T00:00:00Z")], None, NOW) == NOW
     assert next_cursor([], None, NOW) is None
+
+
+def test_ingest_passes_source_key_as_origin(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    (tmp_path / "companies").mkdir()
+    registry.write_new(synthetic_company("test_origin"))
+    origins: list[str | None] = []
+    monkeypatch.setattr(loader, "get_cursor", lambda *a: None)
+    monkeypatch.setattr(loader, "set_sync_state", lambda *a: None)
+
+    def fake_load(slug, records, origin=None):
+        origins.append(origin)
+        return loader.LoadReport()
+
+    monkeypatch.setattr(loader, "load", fake_load)
+    pipeline.ingest("test_origin")
+    assert len(origins) == 1 and origins[0].startswith("canonical_jsonl:")

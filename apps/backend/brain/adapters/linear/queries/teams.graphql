@@ -1,0 +1,10 @@
+# Teams of the workspace with their members. Members give people their display names; we ask
+# for no contact details.
+query Teams {
+  teams(first: 50) {
+    nodes {
+      id key name
+      members(first: 100) { nodes { id displayName name active } }
+    }
+  }
+}

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from importlib import resources
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -20,6 +21,9 @@ from rich.table import Table
 
 from brain import config, db, pipeline, schema, tools
 from brain.adapters.github.client import GithubError
+from brain.adapters.linear import seed as linear_seed
+from brain.adapters.linear.client import LinearClient, LinearError
+from brain.adapters.linear.source import LinearSource
 from brain.jobs import JobRunner
 
 app = typer.Typer(help="Company Brain: a company's engineering activity as one FalkorDB graph.")
@@ -119,6 +123,49 @@ def reset(slug: str, yes: bool = typer.Option(False, "--yes", help="Confirm dele
     if TraceStore(slug).forget():
         deleted.append(f"data/traces/{slug}.jsonl")
     typer.echo(f"Deleted {', '.join(deleted)}." if deleted else f"Nothing to delete for {slug}.")
+
+
+SEED_TICKETS = "apps/backend/examples/synthetic_company/tickets"
+
+
+@app.command("linear-seed")
+def linear_seed_cmd(
+    slug: str,
+    tickets: Annotated[
+        Path | None, typer.Option("--tickets", help=f"Tickets folder (default: {SEED_TICKETS}).")
+    ] = None,
+    yes: bool = typer.Option(False, "--yes", help="Write to Linear (without it: print the plan)."),
+) -> None:
+    """Copy the synthetic tickets into the Linear workspace named in companies/<slug>.yaml.
+    Without --yes it only prints the plan. Writes to Linear, so it needs data_permission:
+    synthetic and LINEAR_API_KEY. Safe to re-run: already-created tickets are skipped."""
+    cfg = _company(slug)
+    sources = [s for s in cfg.sources if isinstance(s, LinearSource)]
+    if len(sources) != 1:
+        _fail(f"companies/{slug}.yaml needs exactly one `linear` source (found {len(sources)}).")
+    source = sources[0]
+    folder = cfg.resolve(tickets or Path(SEED_TICKETS))
+    try:
+        data = linear_seed.load_seed(folder)
+    except (OSError, ValueError) as e:
+        _fail(f"cannot read tickets in {folder}: {e}")
+    typer.echo(
+        f"Linear workspace {source.workspace!r} (company {slug}): {len(data.tickets)} tickets "
+        f"in teams {', '.join(data.teams)}, {len(data.blocks)} blocks, "
+        f"{len(data.attachments)} attachments."
+    )
+    if not yes:
+        typer.secho(
+            "Nothing written. Re-run with --yes (make linear-seed: CONFIRM=1).", fg="yellow"
+        )
+        return
+    state = config.raw_dir(slug, "linear") / source.workspace / "seed_state.json"
+    try:
+        with LinearClient(log=typer.echo) as client:
+            report = linear_seed.seed(client, cfg, source, data, state, log=typer.echo)
+    except (PermissionError, LinearError, RuntimeError) as e:
+        _fail(str(e))
+    typer.echo(f"Created {report.created}, skipped {report.skipped} already present.")
 
 
 SOURCE_OPT = typer.Option(None, "--source", help="Only this source type, e.g. github.")

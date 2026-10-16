@@ -1,0 +1,8 @@
+{"from_label": "WorkItem", "from_uid": "synthetic:ticket:IDN-1", "rel": "BLOCKS", "to_label": "WorkItem", "to_uid": "synthetic:ticket:IDN-2"}
+{"from_label": "WorkItem", "from_uid": "synthetic:ticket:PAY-2", "rel": "BLOCKS", "to_label": "WorkItem", "to_uid": "synthetic:ticket:IDN-2"}
+{"from_label": "WorkItem", "from_uid": "synthetic:ticket:PAY-3", "rel": "BLOCKS", "to_label": "WorkItem", "to_uid": "synthetic:ticket:PAY-2"}
+{"from_label": "WorkItem", "from_uid": "synthetic:ticket:IDN-1", "rel": "BLOCKS", "to_label": "WorkItem", "to_uid": "synthetic:ticket:PAY-4"}
+{"from_label": "WorkItem", "from_uid": "synthetic:ticket:IDN-4", "rel": "MENTIONS", "to_label": "WorkItem", "to_uid": "synthetic:pr:10"}
+{"from_label": "WorkItem", "from_uid": "synthetic:ticket:PAY-1", "rel": "MENTIONS", "to_label": "WorkItem", "to_uid": "synthetic:pr:4"}
+{"from_label": "WorkItem", "from_uid": "synthetic:ticket:PAY-3", "rel": "MENTIONS", "to_label": "WorkItem", "to_uid": "synthetic:pr:9"}
+{"from_label": "WorkItem", "from_uid": "synthetic:ticket:PAY-6", "rel": "MENTIONS", "to_label": "WorkItem", "to_uid": "synthetic:issue:14"}

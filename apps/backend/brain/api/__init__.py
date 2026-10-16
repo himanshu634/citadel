@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from brain.api import ask, builds, checks, companies, graph, onboard, overview, tools
+from brain.api import ask, builds, checks, companies, graph, onboard, overview, tools, traces
 from brain.api.ask import Asker
 from brain.jobs import JobRunner
 

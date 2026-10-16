@@ -1,0 +1,293 @@
+[
+ {
+  "id": "i-2",
+  "identifier": "IDN-2",
+  "number": 2,
+  "title": "Session audit log",
+  "description": null,
+  "url": "https://linear.app/synthetic-co/issue/IDN-2",
+  "priority": 0,
+  "dueDate": null,
+  "createdAt": "2026-10-01T09:00:00.000Z",
+  "updatedAt": "2026-10-10T09:00:00.000Z",
+  "completedAt": null,
+  "canceledAt": null,
+  "state": {
+   "name": "Triage",
+   "type": "triage"
+  },
+  "team": {
+   "key": "IDN",
+   "name": "Identity"
+  },
+  "creator": {
+   "displayName": "bob"
+  },
+  "assignee": null,
+  "labels": {
+   "nodes": []
+  },
+  "relations": {
+   "nodes": []
+  },
+  "inverseRelations": {
+   "nodes": [
+    {
+     "type": "blocks",
+     "issue": {
+      "id": "i-1"
+     }
+    }
+   ]
+  },
+  "attachments": {
+   "nodes": []
+  },
+  "comments": {
+   "nodes": []
+  }
+ },
+ {
+  "id": "i-3",
+  "identifier": "PAY-1",
+  "number": 1,
+  "title": "Refund webhook retries",
+  "description": null,
+  "url": "https://linear.app/synthetic-co/issue/PAY-1",
+  "priority": 4,
+  "dueDate": null,
+  "createdAt": "2026-10-01T09:00:00.000Z",
+  "updatedAt": "2026-10-10T09:00:00.000Z",
+  "completedAt": null,
+  "canceledAt": null,
+  "state": {
+   "name": "Review",
+   "type": "weird_new_type"
+  },
+  "team": {
+   "key": "PAY",
+   "name": "Payments"
+  },
+  "creator": {
+   "displayName": "bob"
+  },
+  "assignee": {
+   "displayName": "dave"
+  },
+  "labels": {
+   "nodes": []
+  },
+  "relations": {
+   "nodes": [
+    {
+     "type": "blocks",
+     "relatedIssue": {
+      "id": "i-9"
+     }
+    }
+   ]
+  },
+  "inverseRelations": {
+   "nodes": [
+    {
+     "type": "blocks",
+     "issue": {
+      "id": "i-5"
+     }
+    },
+    {
+     "type": "related",
+     "issue": {
+      "id": "i-1"
+     }
+    }
+   ]
+  },
+  "attachments": {
+   "nodes": []
+  },
+  "comments": {
+   "nodes": []
+  }
+ },
+ {
+  "id": "i-6",
+  "identifier": "IDN-4",
+  "number": 4,
+  "title": "Passkey enrolment",
+  "description": null,
+  "url": "https://linear.app/synthetic-co/issue/IDN-4",
+  "priority": 3,
+  "dueDate": null,
+  "createdAt": "2026-10-01T09:00:00.000Z",
+  "updatedAt": "2026-10-10T09:00:00.000Z",
+  "completedAt": null,
+  "canceledAt": null,
+  "state": {
+   "name": "Todo",
+   "type": "unstarted"
+  },
+  "team": {
+   "key": "IDN",
+   "name": "Identity"
+  },
+  "creator": null,
+  "assignee": {
+   "displayName": "carol"
+  },
+  "labels": {
+   "nodes": []
+  },
+  "relations": {
+   "nodes": [
+    {
+     "type": "blocks",
+     "relatedIssue": {
+      "id": "i-1"
+     }
+    }
+   ]
+  },
+  "inverseRelations": {
+   "nodes": []
+  },
+  "attachments": {
+   "nodes": []
+  },
+  "comments": {
+   "nodes": []
+  }
+ },
+ {
+  "id": "i-1",
+  "identifier": "IDN-1",
+  "number": 1,
+  "title": "Rotate signing keys",
+  "description": "Keys older than 90 days must be rotated.",
+  "url": "https://linear.app/synthetic-co/issue/IDN-1",
+  "priority": 2,
+  "dueDate": "2026-11-06",
+  "createdAt": "2026-10-01T09:00:00.000Z",
+  "updatedAt": "2026-10-12T10:30:00.000Z",
+  "completedAt": null,
+  "canceledAt": null,
+  "state": {
+   "name": "In Progress",
+   "type": "started"
+  },
+  "team": {
+   "key": "IDN",
+   "name": "Identity"
+  },
+  "creator": {
+   "displayName": "bob"
+  },
+  "assignee": {
+   "displayName": "alice"
+  },
+  "labels": {
+   "nodes": [
+    {
+     "name": "security"
+    },
+    {
+     "name": "ops"
+    }
+   ]
+  },
+  "relations": {
+   "nodes": [
+    {
+     "type": "blocks",
+     "relatedIssue": {
+      "id": "i-2"
+     }
+    },
+    {
+     "type": "related",
+     "relatedIssue": {
+      "id": "i-3"
+     }
+    },
+    {
+     "type": "duplicate",
+     "relatedIssue": {
+      "id": "i-4"
+     }
+    }
+   ]
+  },
+  "inverseRelations": {
+   "nodes": []
+  },
+  "attachments": {
+   "nodes": [
+    {
+     "url": "https://github.com/synthetic-co/app/pull/12",
+     "title": "Rotate keys"
+    }
+   ]
+  },
+  "comments": {
+   "nodes": [
+    {
+     "id": "c-1",
+     "body": "Started on the rotation job.",
+     "createdAt": "2026-10-11T08:00:00.000Z",
+     "user": {
+      "displayName": "alice"
+     }
+    },
+    {
+     "id": "c-2",
+     "body": "Deleted user wrote this.",
+     "createdAt": "2026-10-11T09:00:00.000Z",
+     "user": null
+    }
+   ]
+  }
+ },
+ {
+  "id": "i-7",
+  "identifier": "PAY-4",
+  "number": 4,
+  "title": "Move billing consent",
+  "description": null,
+  "url": "https://linear.app/synthetic-co/issue/PAY-4",
+  "priority": 0,
+  "dueDate": null,
+  "createdAt": "2026-10-01T09:00:00.000Z",
+  "updatedAt": "2026-10-15T09:00:00.000Z",
+  "completedAt": null,
+  "canceledAt": null,
+  "state": {
+   "name": "In Progress",
+   "type": "started"
+  },
+  "team": {
+   "key": "PAY",
+   "name": "Payments"
+  },
+  "creator": {
+   "displayName": "bob"
+  },
+  "assignee": {
+   "displayName": "dave"
+  },
+  "labels": {
+   "nodes": []
+  },
+  "relations": {
+   "nodes": []
+  },
+  "inverseRelations": {
+   "nodes": []
+  },
+  "attachments": {
+   "nodes": []
+  },
+  "comments": {
+   "nodes": []
+  }
+ }
+]

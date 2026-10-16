@@ -2,7 +2,7 @@
 
 A company is one YAML file, `companies/<slug>.yaml`, and becomes one graph, `brain_<slug>`.
 Nothing in the loader, the schema or the queries knows about a particular company or tool.
-There are three ways in.
+There are a few ways in.
 
 Every config declares `data_permission`:
 
@@ -115,3 +115,68 @@ make query SLUG=synthetic TOOL=owners_vs_experts
 
 Copy `generate.py` to make your own demo company: edit the Python data at the top, run it, and
 point a new `companies/<slug>.yaml` at the output folder.
+
+## (d) Linear
+
+Tickets, their assignees and blockers, and the pull requests attached to them. Linear data is
+private, so ingestion refuses unless the config says `data_permission: own` (your own workspace)
+or `synthetic`.
+
+```yaml
+data_permission: own
+sources:
+  - type: linear
+    workspace: acme              # the URL key: linear.app/acme
+    teams: [ENG, OPS]            # team keys; empty means every team the key can see
+people:
+  aliases: { "Sam P.": "sam" }   # Linear display name -> login, when it differs from the GitHub login
+```
+
+Put a personal API key in `.env` as `LINEAR_API_KEY` (Linear: Settings, Security and access,
+Personal API keys). Fetch checks that the key belongs to `workspace` before it pulls anything.
+People are identified by their Linear display name; use `people.aliases` to map a name to the
+login the GitHub source uses, so one person stays one node. Pull requests become links
+(`MENTIONS`) only when the attachment URL matches a pull request from the GitHub source. That
+match is made against items already in the graph, so on a first build list the code source
+(`github` or `canonical_jsonl`) before `linear` under `sources:`, or run `make sync` twice.
+
+A ticket that is archived or deleted in Linear, or moved to a team outside `teams`, is marked
+`canceled` with state "Removed from Linear" (no assignees, no blockers) on the next sync.
+Changing `teams` makes the next fetch start over for the whole window.
+
+## Synthetic tickets in a real Linear workspace
+
+`companies/synthetic_linear.yaml` is the synthetic company with its tickets read from a real
+Linear workspace instead of the offline JSONL (`companies/synthetic.yaml`). It is a second slug
+on purpose: offline and live uids differ, so one company with both would hold every ticket twice.
+
+1. Create a free Linear workspace and set `workspace:` in `companies/synthetic_linear.yaml` to
+   its URL key.
+2. Create the teams Identity (`IDN`) and Payments (`PAY`).
+3. Invite four accounts you control. Set their display names to `alice`, `bob`, `carol` and
+   `erin`, and add them to the teams (alice and carol: IDN; bob and erin: PAY).
+4. Put a personal API key in `.env` as `LINEAR_API_KEY`.
+5. Fill the workspace. Without `CONFIRM=1` this only prints the plan:
+
+   ```bash
+   make linear-seed SLUG=synthetic_linear              # plan: workspace and counts, writes nothing
+   make linear-seed SLUG=synthetic_linear CONFIRM=1    # creates 10 tickets, 4 blocks, 4 PR links
+   ```
+
+   The command refuses a company that is not `synthetic`, checks that the workspace, teams and
+   users exist before it writes anything, and records progress in
+   `data/raw/synthetic_linear/linear/<workspace>/seed_state.json`. A stopped run resumes where
+   it stopped; a finished one creates nothing when run again.
+6. Build the graph and compare with the offline one:
+
+   ```bash
+   make schema SLUG=synthetic_linear && make sync SLUG=synthetic_linear
+   make query SLUG=synthetic_linear TOOL=blocked_on P="login=carol"
+   ```
+
+## Jira (planned)
+
+There is no Jira adapter yet. It would produce the same canonical tickets: Jira statuses map to
+`status_category` through the status category key, priorities to urgent/high/medium/low, "Blocks"
+links to `BLOCKS`, and accounts to logins through `people.aliases`. The full field mapping is in
+[section 6 of the Linear adapter design](superpowers/specs/2026-10-16-linear-adapter-design.md).

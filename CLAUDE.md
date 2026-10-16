@@ -32,6 +32,7 @@ make eval-drafts SLUG=x        # thumbs-down answers as draft eval cases (WRITE=
 make agents                    # list the agent roles, their jobs and read tools
 make sim SLUG=synthetic SCENARIO=sprint OFFLINE=1   # run the agents (sprint, race, regression)
 make reset SLUG=x CONFIRM=1    # delete brain_x, agent_x, its build history and Ask traces (frees the slug)
+make linear-seed SLUG=synthetic_linear CONFIRM=1   # copy the synthetic tickets into a real Linear workspace
 make brain ARGS="..."          # any `brain` CLI command
 make api                       # HTTP API on 127.0.0.1:$API_PORT (default 8000), auto-reload
 make dev                       # API + frontend dev server together
@@ -82,6 +83,13 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   `data_permission: own`), `transform.py` (cache → records; only completed runs are read),
   GraphQL documents in `queries/*.graphql`. Tests use recorded pages in
   `tests/fixtures/github/`.
+- **`adapters/runs.py`**: the resumable, incremental paging into a raw cache that GitHub and
+  Linear share (`fetch_paged`, `completed_pages`).
+- **`adapters/linear/`** (`LINEAR_API_KEY`; `own`/`synthetic` data only): `client.py`, `fetch.py`,
+  `transform.py`, `seed.py` (`make linear-seed`, the only writer to Linear). Issues become
+  WorkItem `kind: ticket`; ASSIGNED_TO is replaced on every load, BLOCKS edges of the source
+  missing from a load are pruned (`origin`), attachment URLs become MENTIONS resolved by url.
+  Tests use the hand-written cache in `tests/fixtures/linear/`.
 - **`loader.py`** batches rows (`UNWIND $rows`, 500 per query) into `queries/load/*.cypher`. All
   writes are `MERGE` on uid then `SET`, so loads are idempotent. Nodes are written before
   relationships; relationship queries `MATCH` both ends, so dangling links are dropped and counted.

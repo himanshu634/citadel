@@ -3,12 +3,13 @@
 Why: adapters return what the source says; the company config says how to read it. This
 module applies the config so the loader can stay dumb:
 - file path -> System name (first matching rule wins, then fallback, ignore list),
-- bot detection and login aliases,
+- bot detection and login aliases (author and ticket assignees),
 - conventional-commit prefix -> Change.kind,
 - email addresses scrubbed from every text field (people are identified by login only),
 - the ingest window: activity before `window.since` is dropped. A work item counts when it was
   created, closed or merged in the window, or got a comment or review in it; a bare
-  `updated_at` bump (bulk relabels, bot sweeps) is not activity,
+  `updated_at` bump (bulk relabels, bot sweeps) is not activity. An open ticket is kept
+  whatever its dates: it is still work to do,
 - make sure every referenced person, team and system exists as a record.
 All functions are pure: same input, same output, no network, no database.
 """
@@ -192,6 +193,7 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
         return w.model_copy(
             update={
                 "author_login": login(w.author_login),
+                "assignees": None if w.assignees is None else [login(a) for a in w.assignees],
                 "title": scrub_emails(w.title),
                 "body": scrub_emails(w.body),
             }
@@ -242,7 +244,8 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
             )
         elif isinstance(rec, WorkItem):
             own_dates = (rec.created_at, rec.closed_at, rec.merged_at)
-            if any(d is not None and to_utc(d) >= since for d in own_dates):
+            # open tickets stay visible however old they are
+            if rec.is_open_ticket() or any(d is not None and to_utc(d) >= since for d in own_dates):
                 yield clean_item(rec)
             elif _in_window(to_utc(rec.updated_at), since) and rec.updated_at is not None:
                 maybe_items[rec.uid] = rec  # decided after all comments/reviews are seen
