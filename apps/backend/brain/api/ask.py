@@ -14,8 +14,9 @@ and forwards each event as it comes: `start`, then `step` / `step_done` per tool
   before the `answer` event goes out, so a stopped turn is kept too and a thumbs click
   (`api/traces.py`) always finds it. The event carries its `trace_id`; None when the write failed.
 - Every turn is also kept in the chat history (`agents/history.py`, graph agent_<slug>) as it
-  runs: each event is recorded after it is sent, the answer before it is sent, so a reload
-  right after the answer finds the chat (`api/threads.py`). Each Claude response goes out as an
+  runs: each event is recorded after it is sent, `start` and the answer before, so the chat
+  list has the chat as soon as the page knows its id, and a reload right after the answer finds
+  it done (`api/threads.py`). Each Claude response goes out as an
   `llm` event (its text, thinking and the tools it asked for, MCP calls included).
 """
 
@@ -155,8 +156,12 @@ async def _events(asker: Asker, slug: str, question: str, thread_id: str) -> Asy
                 if event.get("kind") == "step_done":
                     steps.append(dict(event))  # the sender pops "kind" from the original
                 record = dict(event)  # likewise
-                put(event)
-                recorder.on(record)
+                if record["kind"] == "start":
+                    recorder.on(record)  # before the page hears of it, so its chat list has it
+                    put(event)
+                else:
+                    put(event)
+                    recorder.on(record)
         except Exception as exc:
             problem = llm.describe_error(exc)
             if problem is None:

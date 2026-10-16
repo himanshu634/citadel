@@ -7,14 +7,28 @@ tool call at a time, and the steps with the rows each returned. Hovering a citat
 part of the walk that backs it; Replay shows a finished walk again. A thumbs under each answer
 rates it (`AnswerRating`), saved on the answer's trace on the server. `?q=` (from the top bar's ask
 field) asks once on arrival and is then removed from the address, so a reload does not ask again.
+Every chat is kept on the server: the left column lists them (`ChatList`), `?thread=<id>` opens
+one (a reload or a shared link reopens it), and each turn shows how it answered (`TurnTimeline`:
+Claude's responses and every tool call, MCP calls included).
 -->
 <script lang="ts">
 	import { LoaderCircle, RotateCcw, SquarePen } from '@lucide/svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
-	import { AnswerRating, Banner, Button, GraphWalk, Input, WalkAnswer, WalkSteps } from '$lib';
+	import {
+		AnswerRating,
+		Banner,
+		Button,
+		ChatList,
+		GraphWalk,
+		Input,
+		TurnTimeline,
+		WalkAnswer,
+		WalkSteps
+	} from '$lib';
 	import { AskThread } from '$lib/ask.svelte';
+	import { Chats } from '$lib/chats.svelte';
 	import { getCompanies } from '$lib/companies.svelte';
 	import { askFieldOf } from '$lib/topbar';
 	import { highlightFor, mergeWalk, stepSentence } from '$lib/walk';
@@ -24,12 +38,62 @@ field) asks once on arrival and is then removed from the address, so a reload do
 	const company = $derived(companies.byslug(data.slug));
 	const field = $derived(askFieldOf(company));
 
-	// One conversation per company: switching company on the rail starts a fresh one.
-	const thread = $derived(new AskThread(data.slug));
+	// One conversation and one chat list per company: switching company on the rail starts fresh.
+	const slug = $derived(data.slug);
+	const chats = $derived(new Chats(slug));
+	const thread = $derived(
+		new AskThread(
+			slug,
+			(id) => {
+				if (page.url.searchParams.get('thread') !== id) void openUrl(id);
+				void chats.refresh();
+			},
+			() => void chats.refresh()
+		)
+	);
 	$effect(() => {
 		const t = thread;
 		return () => t.dispose();
 	});
+	$effect(() => {
+		void chats.refresh();
+	});
+
+	const wanted = $derived(page.url.searchParams.get('thread'));
+	// The address names the open chat: reopen it when it changes (a link, back, a reload); a bare
+	// address (the Ask link, New chat) means a new chat. A running answer is never cut off.
+	$effect(() => {
+		const id = wanted;
+		untrack(() => {
+			if (thread.running) return;
+			if (id && id !== thread.threadId) void thread.load(id);
+			else if (!id && thread.threadId) thread.reset();
+		});
+	});
+
+	function hrefOf(id: string): string {
+		return `${page.url.pathname}?thread=${encodeURIComponent(id)}`;
+	}
+
+	function openUrl(id: string | null) {
+		const url = new URL(page.url);
+		if (id) url.searchParams.set('thread', id);
+		else url.searchParams.delete('thread');
+		return goto(url, { replaceState: !!id && !wanted, noScroll: true, keepFocus: true });
+	}
+
+	function newChat() {
+		thread.reset();
+		active = pinned = null;
+		open = null;
+		void openUrl(null);
+	}
+
+	async function remove(id: string) {
+		if (await chats.remove(id)) {
+			if (id === thread.threadId) newChat();
+		}
+	}
 
 	let question = $state('');
 	let active = $state<number | null>(null);
@@ -111,15 +175,34 @@ field) asks once on arrival and is then removed from the address, so a reload do
 <svelte:head><title>Ask · {company?.name ?? data.slug}</title></svelte:head>
 
 <div class="ask">
+	<aside class="history">
+		<Button size="sm" onclick={newChat} disabled={!thread.turns.length && !thread.threadId}
+			><SquarePen aria-hidden="true" />New chat</Button
+		>
+		<ChatList
+			threads={chats.threads}
+			current={thread.threadId}
+			{hrefOf}
+			loading={chats.loading}
+			error={chats.error}
+			more={chats.next !== null}
+			deleting={chats.deleting}
+			onmore={() => chats.more()}
+			ondelete={remove}
+		/>
+	</aside>
+
 	<section class="thread" aria-labelledby="ask-title">
 		<header class="head">
 			<h1 id="ask-title">Ask {company?.name ?? data.slug}</h1>
-			{#if thread.turns.length}
-				<Button size="sm" onclick={() => thread.reset()}><SquarePen aria-hidden="true" />New chat</Button>
-			{/if}
 		</header>
 
-		{#if thread.turns.length === 0}
+		{#if thread.loadError}
+			<Banner tone="danger" title="This chat could not be opened">{thread.loadError}</Banner>
+		{/if}
+		{#if thread.loading}
+			<p class="meta" role="status"><LoaderCircle class="spin" aria-hidden="true" />Opening the chat</p>
+		{:else if thread.turns.length === 0}
 			<div class="intro">
 				<p>
 					Ask about people, systems or decisions. Each answer shows the walk the agent took through the graph and
@@ -137,6 +220,7 @@ field) asks once on arrival and is then removed from the address, so a reload do
 			{@const selected = i === thread.selected}
 			<article class={['turn', { selected }]} aria-current={selected && thread.turns.length > 1 ? 'true' : undefined}>
 				<h2 class="question">{t.question}</h2>
+				<TurnTimeline calls={t.calls} steps={t.steps} running={t.status === 'running'} />
 				{#if t.status === 'running'}
 					{@const now = live(t)}
 					<div class="live" role="status">
@@ -230,9 +314,19 @@ field) asks once on arrival and is then removed from the address, so a reload do
 <style>
 	.ask {
 		display: grid;
-		grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+		grid-template-columns: var(--sidebar-width) minmax(0, 5fr) minmax(0, 7fr);
 		gap: var(--space-6);
 		align-items: start;
+	}
+	.history {
+		position: sticky;
+		top: calc(var(--topbar-height) + var(--space-4));
+		display: flex;
+		flex-direction: column;
+		align-items: stretch;
+		gap: var(--space-3);
+		max-height: calc(100dvh - var(--topbar-height) - var(--space-8));
+		overflow-y: auto;
 	}
 	.thread {
 		display: flex;
@@ -351,9 +445,27 @@ field) asks once on arrival and is then removed from the address, so a reload do
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+	@media (max-width: 1400px) {
+		.ask {
+			grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+		}
+		.history {
+			position: static;
+			grid-column: 1 / -1;
+			flex-direction: row;
+			align-items: flex-start;
+			max-height: 14rem;
+		}
+		.history :global(.chats) {
+			flex: 1;
+		}
+	}
 	@media (max-width: 1100px) {
 		.ask {
 			grid-template-columns: minmax(0, 1fr);
+		}
+		.history {
+			flex-direction: column;
 		}
 		.thread {
 			min-height: 0;

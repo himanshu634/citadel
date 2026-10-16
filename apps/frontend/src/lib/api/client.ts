@@ -21,6 +21,9 @@ import type {
 	Overview,
 	Rating,
 	RepoLookup,
+	Thread,
+	ThreadPage,
+	ThreadSummary,
 	ValidateResult
 } from '../types';
 
@@ -69,6 +72,17 @@ export const api = {
 			rating,
 			note: note ?? null
 		}),
+	/** The chat list, most recently active first; pass the page's `next` as `before` for more. */
+	threads: (slug: string, before?: number | null) =>
+		request<ThreadPage>('GET', `${company(slug)}/threads${before ? `?before=${before}` : ''}`),
+	/** One chat with every turn, Claude response and tool call. 404: no such chat. */
+	thread: (slug: string, id: string) => request<Thread>('GET', `${company(slug)}/threads/${encodeURIComponent(id)}`),
+	/** Delete a chat and its checkpoints. 409 while it is answering. */
+	deleteThread: (slug: string, id: string) =>
+		request<void>('DELETE', `${company(slug)}/threads/${encodeURIComponent(id)}`),
+	/** The chats that touched or cited one node of the company graph. */
+	refThreads: (slug: string, uid: string) =>
+		request<ThreadSummary[]>('GET', `${company(slug)}/refs/${encodeURIComponent(uid)}/threads`),
 	company: (slug: string) => request<CompanyDetail>('GET', company(slug)),
 	/** Check a draft on every form change; writes nothing. */
 	validate: (draft: CompanyConfig) => request<ValidateResult>('POST', '/companies/validate', draft),
