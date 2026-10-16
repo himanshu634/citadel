@@ -16,6 +16,7 @@ the errors under the fields, the Continue button and the YAML preview. Nothing i
 	import {
 		SECTIONS,
 		SECTION_KEYS,
+		WIZARD_STEPS,
 		cleanDraft,
 		continueGate,
 		debounce,
@@ -194,12 +195,7 @@ the errors under the fields, the Continue button and the YAML preview. Nothing i
 
 	<Stepper
 		label="Steps"
-		steps={[
-			{ label: 'Company' },
-			{ label: 'Sources' },
-			{ label: 'Systems and people', hint: 'Optional' },
-			{ label: 'Build' }
-		]}
+		steps={WIZARD_STEPS}
 		current={saving || started ? 3 : step}
 		done={[0, 1, 2].filter((i) => i < step || (i === step && (saving || !!started)))}
 	/>

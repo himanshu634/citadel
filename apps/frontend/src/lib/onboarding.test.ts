@@ -125,6 +125,17 @@ describe('messageAt and unmatched', () => {
 		expect(messageAt(both, ['name'])).toBe('One. Two');
 	});
 
+	test('one message is shown exactly as it came, including its last character', () => {
+		const taken = [err(['slug'], 'acme is already a company. Pick another name')];
+		expect(messageAt(taken, ['slug'])).toBe('acme is already a company. Pick another name');
+		expect(messageAt([err(['name'], 'Ends with a stop.')], ['name'])).toBe('Ends with a stop.');
+	});
+
+	test('several messages keep their own stops', () => {
+		const two = [err(['name'], 'one.'), err(['name'], 'two')];
+		expect(messageAt(two, ['name'])).toBe('One. Two');
+	});
+
 	test('lists the errors no rendered field shows', () => {
 		const shown = [['sources', 0, 'repo'], ['sources', 0, 'include'], ['sources', 1, 'path']];
 		expect(unmatched(errors, shown)).toEqual([errors[3]]);

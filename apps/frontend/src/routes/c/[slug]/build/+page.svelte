@@ -14,6 +14,7 @@ depends on having been here when the build started. Opened from the add-company 
 	import { BuildFeed } from '$lib/buildFeed.svelte';
 	import { isActive, titleOf } from '$lib/buildProgress';
 	import { getCompanies } from '$lib/companies.svelte';
+	import { WIZARD_STEPS } from '$lib/onboarding';
 
 	let { data } = $props();
 	const companies = getCompanies();
@@ -34,17 +35,23 @@ depends on having been here when the build started. Opened from the add-company 
 		return () => feed.close();
 	});
 
+	// Start / Retry / Build again: busy until the API answers, and repeat clicks are ignored.
+	let starting = $state(false);
+	async function startBuild(full?: boolean) {
+		if (starting) return;
+		starting = true;
+		try {
+			await feed.start(full);
+		} finally {
+			starting = false;
+		}
+	}
+
 	// The feed holds the last company's build until the next read lands: show it only for this slug.
 	const snapshot = $derived(feed.snapshot?.slug === data.slug ? feed.snapshot : null);
 	const active = $derived(snapshot !== null && isActive(snapshot.state));
 	const stopping = $derived(feed.stopping && active);
 	const rebuild = $derived(snapshot?.kind === 'rebuild');
-	const steps = [
-		{ label: 'Company' },
-		{ label: 'Sources' },
-		{ label: 'Systems and people' },
-		{ label: 'Build' }
-	];
 	// Steps of the pipeline, as the "What happens" list explains them.
 	const happens = $derived([
 		...(rebuild
@@ -84,7 +91,7 @@ depends on having been here when the build started. Opened from the add-company 
 	</header>
 
 	{#if fromNew}
-		<Stepper {steps} current={3} done={[0, 1, 2]} label="Add a company" />
+		<Stepper steps={WIZARD_STEPS} current={3} done={[0, 1, 2]} label="Add a company" />
 	{/if}
 
 	{#if feed.error && snapshot}
@@ -109,7 +116,7 @@ depends on having been here when the build started. Opened from the add-company 
 						</Button>
 					{:else}
 						<Button href={companyPath}>Go to {name}</Button>
-						<Button variant="primary" onclick={() => feed.start()}>
+						<Button variant="primary" loading={starting} onclick={() => startBuild()}>
 							<RotateCw aria-hidden="true" />
 							{#if snapshot.state === 'failed'}
 								{rebuild ? 'Retry rebuild' : 'Retry build'}
@@ -140,7 +147,9 @@ depends on having been here when the build started. Opened from the add-company 
 		>
 			{#snippet icon()}<Hammer />{/snippet}
 			{#snippet action()}
-				<Button variant="primary" onclick={() => feed.start(false)}>Start build</Button>
+				<Button variant="primary" loading={starting} onclick={() => startBuild(false)}>
+					Start build
+				</Button>
 			{/snippet}
 		</EmptyState>
 		{#if feed.error}<Banner tone="danger" title="That didn't work">{feed.error}</Banner>{/if}
@@ -150,7 +159,7 @@ depends on having been here when the build started. Opened from the add-company 
 		</EmptyState>
 	{:else}
 		<p class="loading" role="status">
-			<LoaderCircle aria-hidden="true" />Loading build
+			<LoaderCircle class="spin" aria-hidden="true" />Loading build
 		</p>
 	{/if}
 </div>
@@ -225,16 +234,5 @@ depends on having been here when the build started. Opened from the add-company 
 	.loading :global(svg) {
 		width: 1rem;
 		height: 1rem;
-		animation: spin 1s linear infinite;
-	}
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.loading :global(svg) {
-			animation: none;
-		}
 	}
 </style>

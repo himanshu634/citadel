@@ -37,6 +37,17 @@ export function firstSectionWithErrors(errors: FieldError[]): number {
 	return SECTIONS.findIndex((s) => errorsIn(errors, s).length > 0);
 }
 
+/**
+ * The four steps of adding a company, as the Stepper shows them on `/new` and on the build page it
+ * ends at. One list, so the two pages cannot disagree about what is optional.
+ */
+export const WIZARD_STEPS: { label: string; hint?: string }[] = [
+	{ label: 'Company' },
+	{ label: 'Sources' },
+	{ label: 'Systems and people', hint: 'Optional' },
+	{ label: 'Build' }
+];
+
 const SLUG_PATTERN = 'Use lowercase letters, digits and underscores only, like acme_labs';
 
 /**
@@ -57,7 +68,9 @@ const startsWith = (loc: Loc, prefix: Loc) =>
 export function messageAt(errors: FieldError[], prefix: Loc): string | undefined {
 	const found = errors.filter((e) => startsWith(e.loc, prefix)).map(friendly);
 	if (found.length === 0) return undefined;
-	return found.map((m) => m.replace(/\.$/, '')).join('. ');
+	// One message is shown as it came (the slug-taken sentence keeps its own ending); several are
+	// told as sentences, each but the last closed with a full stop.
+	return found.map((m, i) => (i < found.length - 1 ? m.replace(/\.?$/, '.') : m)).join(' ');
 }
 
 /** Errors that none of the rendered fields (`prefixes`) shows. */
