@@ -6,7 +6,7 @@
  * put as new steps arrive, works out what a citation lights up, and turns rows, calls and the
  * answer's Markdown into plain values the components render. Pure: no Svelte, no fetch.
  */
-import type { AskSource, NodeType, WalkNode, WalkRel, WalkStep } from './types';
+import { NODE_LABELS, type AskSource, type NodeType, type WalkNode, type WalkRel, type WalkStep } from './types';
 
 const TYPES: Record<string, NodeType> = {
 	Person: 'person',
@@ -20,6 +20,14 @@ const TYPES: Record<string, NodeType> = {
 /** The UI's node type for a graph label (unknown labels draw as documents: grey). */
 export function nodeType(label: string | null | undefined): NodeType {
 	return (label && TYPES[label]) || 'document';
+}
+
+/**
+ * What kind of source an answer cites: a graph node's label, or "MCP result" for what a tool on
+ * an outside MCP server returned (uid `mcp:<server>/<tool>`, label `MCP`; not in the walk).
+ */
+export function sourceKind(label: string | null | undefined): string {
+	return label === 'MCP' ? 'MCP result' : NODE_LABELS[nodeType(label)];
 }
 
 export const relKey = (r: Pick<WalkRel, 'from' | 'to' | 'type'>) => `${r.from}|${r.type}|${r.to}`;

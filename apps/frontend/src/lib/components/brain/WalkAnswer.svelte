@@ -7,8 +7,8 @@ clicked again (`onpin`). With no answer it says why (refused, stopped, too many 
 Only a small set of Markdown is understood, and never as HTML (`answerBlocks` in walk.ts).
 -->
 <script lang="ts">
-	import { NODE_LABELS, type AskAnswer } from '$lib/types';
-	import { answerBlocks, nodeType, type Inline } from '$lib/walk';
+	import type { AskAnswer } from '$lib/types';
+	import { answerBlocks, sourceKind, type Inline } from '$lib/walk';
 
 	type Props = {
 		answer: AskAnswer;
@@ -96,7 +96,7 @@ Only a small set of Markdown is understood, and never as HTML (`answerBlocks` in
 							<span class="title">{src.title ?? src.uid}</span>
 						{/if}
 						<small>
-							{NODE_LABELS[nodeType(src.label)]}{#if src.step !== null}&ensp;·&ensp;found in step {src.step}{/if}
+							{sourceKind(src.label)}{#if src.step !== null}&ensp;·&ensp;found in step {src.step}{/if}
 						</small>
 					</div>
 				</li>

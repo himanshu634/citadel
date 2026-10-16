@@ -10,6 +10,7 @@ import {
 	relKey,
 	rowViews,
 	shortUid,
+	sourceKind,
 	stepCall,
 	stepSentence
 } from './walk';
@@ -262,5 +263,23 @@ describe('answerBlocks', () => {
 			},
 			{ kind: 'ol', items: [[{ kind: 'text', text: 'one' }], [{ kind: 'text', text: 'two' }]] }
 		]);
+	});
+});
+
+describe('sourceKind', () => {
+	test('graph labels read as node kinds, an MCP result as itself', () => {
+		expect(sourceKind('WorkItem')).toBe('Work item');
+		expect(sourceKind('MCP')).toBe('MCP result');
+		expect(sourceKind(null)).toBe('Document');
+	});
+
+	test('a cited MCP result lights nothing in the walk', () => {
+		const steps: WalkStep[] = [
+			{ id: 't1', n: 1, tool: 'related_work_items', input: {}, status: 'done',
+				nodes: [{ uid: 'pr:1', label: 'WorkItem', title: 'JWT' }], rels: [] }
+		] as unknown as WalkStep[];
+		const h = highlightFor({ uid: 'mcp:handbook/search_docs', step: null }, steps);
+		expect([...h.nodes]).toEqual(['mcp:handbook/search_docs']);
+		expect(h.rels.size).toBe(0);
 	});
 });

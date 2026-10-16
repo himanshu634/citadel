@@ -1,7 +1,8 @@
 """Test doubles for the agents, shared by the agents tests and the API tests.
 
-- A scripted Claude (`FakeClient` plays back `reply(...)`s) and a one-tool `TOOLSET`, for the
-  brain loop without network or database. `settings` pins the Claude settings; import it into a
+- A scripted Claude (`FakeClient` plays back `reply(...)`s; `mcp_call` and `mcp_listing` make
+  the blocks of the MCP connector) and a one-tool `TOOLSET`, for the brain loop without network
+  or database. `settings` pins the Claude settings; import it into a
   test module to make it autouse there.
 - A small fake brain (`fake_brain`): canned rows for the graph tools the roles read. Shaped like
   the synthetic company (brain's tests/test_graph.py has the real thing): four systems, a fix PR
@@ -18,7 +19,14 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from anthropic.types.beta import BetaTextBlock, BetaToolUseBlock, BetaUsage
+from anthropic.types.beta import (
+    BetaMCPToolListingBlock,
+    BetaMCPToolResultBlock,
+    BetaMCPToolUseBlock,
+    BetaTextBlock,
+    BetaToolUseBlock,
+    BetaUsage,
+)
 from brain.config import get_settings
 from pydantic import BaseModel, Field
 
@@ -82,6 +90,25 @@ def tool_use(id_: str, name: str, inp: dict) -> BetaToolUseBlock:
 
 def text(t: str) -> BetaTextBlock:
     return BetaTextBlock(type="text", text=t)
+
+
+def mcp_call(id_: str, server: str, tool: str, result: str, *, is_error: bool = False):
+    """One call on an MCP server as the API returns it: the use and its result."""
+    return (
+        BetaMCPToolUseBlock(type="mcp_tool_use", id=id_, name=tool, server_name=server,
+                            input={"q": "sessions"}),
+        BetaMCPToolResultBlock(type="mcp_tool_result", tool_use_id=id_, is_error=is_error,
+                               content=[BetaTextBlock(type="text", text=result)]),
+    )  # fmt: skip
+
+
+def mcp_listing(server: str, *tools: str) -> BetaMCPToolListingBlock:
+    """The tool list the API fetched from an MCP server (mcp-client-2026-09-15)."""
+    return BetaMCPToolListingBlock.model_validate({
+        "type": "mcp_tool_listing", "mcp_server_name": server,
+        "tools": [{"name": t, "description": f"{t} docs", "input_schema": {"type": "object"}}
+                  for t in tools],
+    })  # fmt: skip
 
 
 def reply(*blocks, stop="tool_use", details=None):

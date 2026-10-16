@@ -192,7 +192,8 @@ def assemble(
             )
         )
     by_turn_steps: dict[str, list[ChatStep]] = {}
-    order = lambda s: (s["call"] or 0, s["kind"] == "submit", s["n"] or 0)  # noqa: E731
+    # MCP and server calls have no step number `n` (the Ask page numbers graph steps only).
+    order = lambda s: (s.get("call") or 0, s.get("kind") == "submit", s.get("n") or 0)  # noqa: E731
     for s in sorted(steps, key=order):
         by_turn_steps.setdefault(s["turn"], []).append(
             ChatStep(
