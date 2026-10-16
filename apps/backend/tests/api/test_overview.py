@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pytest
+from backend.api import create_app
+from backend.api.companies import status_of
 from brain import db, schema, tools
-from brain.api import create_app
-from brain.api.companies import status_of
-from conftest import falkordb_up, needs_graph
+from brain.testing import falkordb_up, needs_graph
 from fastapi.testclient import TestClient
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError

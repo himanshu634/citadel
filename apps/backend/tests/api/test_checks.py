@@ -7,9 +7,9 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from backend.api import checks
 from brain.adapters.github import client as gh
 from brain.adapters.github.client import GithubError, GithubRateLimited
-from brain.api import checks
 
 
 def test_token_check_without_token(client, monkeypatch):

@@ -1,5 +1,5 @@
 // The synthetic company's graph view, bots shown, for the gallery: a fresh load of
-// apps/backend/examples/synthetic_company read through brain.graph_view (bots=True).
+// apps/brain/examples/synthetic_company read through brain.graph_view (bots=True).
 import type { GraphView } from '$lib/types';
 
 export const syntheticGraph: GraphView = {

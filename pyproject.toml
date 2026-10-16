@@ -3,16 +3,22 @@ name = "citadel"
 version = "0.1.0"
 description = "Company Brain monorepo root (uv workspace). Apps live under apps/."
 requires-python = ">=3.12,<3.13"
-dependencies = ["brain"]
+dependencies = ["agents", "backend", "brain"]
 
 [tool.uv]
 package = false
 
 [tool.uv.workspace]
-members = ["apps/backend"]
+members = ["apps/agents", "apps/backend", "apps/brain"]
 
 [tool.uv.sources]
+agents = { workspace = true }
+backend = { workspace = true }
 brain = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["apps/brain/tests", "apps/agents/tests", "apps/backend/tests"]
+addopts = ["-p", "brain.testing"]  # shared FalkorDB fixtures, one per session for every package
 
 [tool.ruff]
 line-length = 100
