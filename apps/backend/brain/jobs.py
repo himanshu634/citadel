@@ -19,7 +19,6 @@ import os
 import re
 import tempfile
 import threading
-from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -68,6 +67,11 @@ class BuildSummary(BaseModel):
     state: State
     stage: Stage | None
     started_at: str
+
+    @classmethod
+    def of(cls, snap: BuildSnapshot) -> BuildSummary:
+        stage = snap.events[-1].stage if snap.events else None
+        return cls(state=snap.state, stage=stage, started_at=snap.started_at)
 
 
 class JobRunning(Exception):
@@ -244,24 +248,21 @@ class JobRunner:
 
     def summary(self, slug: str) -> BuildSummary | None:
         snap = self.current(slug)
-        if snap is None:
-            return None
-        stage = snap.events[-1].stage if snap.events else None
-        return BuildSummary(state=snap.state, stage=stage, started_at=snap.started_at)
+        return BuildSummary.of(snap) if snap is not None else None
 
-    def subscribe(self, slug: str | None) -> AsyncIterator[BuildEvent]:
+    def subscribe(self, slug: str | None) -> Subscription:
         """Events of one company (or all, for None) from now on; nothing historical.
 
         Call it from the event loop that will iterate it. The queue is registered here, not on
         the first iteration, so no event emitted between this call and the first `anext` is
-        lost. Iterate it (or `aclose` it after starting) so that it unregisters.
+        lost. `aclose` it when done (iterated or not) so that it unregisters.
         """
         if slug is not None:
             self._path(slug)
         sub = _Subscriber(slug, asyncio.get_running_loop(), asyncio.Queue())
         with self._lock:
             self._subscribers.add(sub)
-        return self._drain(sub)
+        return Subscription(self, sub)
 
     def recover(self) -> None:
         """On startup: a snapshot still `queued`/`running` belonged to a process that is gone."""
@@ -368,6 +369,10 @@ class JobRunner:
             self._persist(snap)
             if event is not None:
                 self._publish(event)
+            elif snap.events:
+                # The stage already reported its failure (pipeline.fetch does) before the state
+                # changed. Subscribers read the state on each event, so send that one again.
+                self._publish(snap.events[-1])
 
     def _publish(self, event: BuildEvent) -> None:
         for sub in list(self._subscribers):
@@ -378,13 +383,9 @@ class JobRunner:
             except RuntimeError:  # its event loop is closed: nobody is listening any more
                 self._subscribers.discard(sub)
 
-    async def _drain(self, sub: _Subscriber) -> AsyncIterator[BuildEvent]:
-        try:
-            while True:
-                yield await sub.queue.get()
-        finally:
-            with self._lock:
-                self._subscribers.discard(sub)
+    def _unsubscribe(self, sub: _Subscriber) -> None:
+        with self._lock:
+            self._subscribers.discard(sub)
 
     def _persist(self, snap: BuildSnapshot) -> None:
         """Replace data/jobs/<slug>.json atomically. A failed write is logged, not raised: the
@@ -407,6 +408,25 @@ class JobRunner:
         if not re.fullmatch(config.SLUG_RE, slug):  # also keeps "../x" out of the folder
             raise ValueError(f"invalid company slug: {slug!r}")
         return self.jobs_dir / f"{slug}.json"
+
+
+class Subscription:
+    """What `subscribe` returns: an endless async iterator of events. Not an async generator,
+    because a generator that never started skips its `finally` on `aclose()`, which would
+    leave the subscriber registered for good."""
+
+    def __init__(self, runner: JobRunner, sub: _Subscriber):
+        self._runner = runner
+        self._sub = sub
+
+    def __aiter__(self) -> Subscription:
+        return self
+
+    async def __anext__(self) -> BuildEvent:
+        return await self._sub.queue.get()
+
+    async def aclose(self) -> None:
+        self._runner._unsubscribe(self._sub)
 
 
 def _read(path: Path) -> BuildSnapshot | None:

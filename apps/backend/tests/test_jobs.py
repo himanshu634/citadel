@@ -11,9 +11,7 @@ import pytest
 from brain import config, db, registry
 from brain.events import BuildEvent
 from brain.jobs import BuildSnapshot, JobRunner, JobRunning, PipelineSteps
-from brain.loader import LoadReport
-from brain.pipeline import IngestReport
-from conftest import needs_graph, synthetic_company
+from conftest import SRC, FakeSteps, needs_graph, synthetic_company
 
 TERMINAL = {"done", "failed", "stopped"}
 
@@ -34,74 +32,6 @@ RUNNING_SNAPSHOT = {
     ],
     "error": None,
 }
-
-
-SRC = "github:acme/widgets"
-
-# The events each fake step emits, in the order the real pipeline emits them.
-STEP_EVENTS = {
-    "prepare": [("prepare", "running", None), ("prepare", "done", None)],
-    "fetch": [("fetch", "running", SRC), ("fetch", "done", SRC)],
-    "ingest": [
-        ("records", "running", SRC),
-        ("records", "done", SRC),
-        ("normalize", "done", SRC),
-        ("load", "running", SRC),
-        ("load", "done", SRC),
-    ],
-}
-
-
-class FakeSteps:
-    """Records calls and emits the real pipeline's events. `gate` (when given) blocks `prepare`
-    after `gate_at` of its events until the test sets it. `fail_on` makes that step raise after
-    `fail_after` of its events (default: before its last one)."""
-
-    def __init__(
-        self,
-        gate: threading.Event | None = None,
-        gate_at: int = 1,
-        fail_on: str | None = None,
-        fail_after: int | None = None,
-    ):
-        self.gate = gate
-        self.gate_at = gate_at
-        self.fail_on = fail_on
-        self.fail_after = fail_after
-        self.calls: list[str] = []
-
-    def _step(self, name, slug, on_event):
-        events = STEP_EVENTS[name]
-        fail_at = len(events) - 1 if self.fail_after is None else self.fail_after
-        for i, (stage, status, source) in enumerate(events):
-            if name == self.fail_on and i == fail_at:
-                raise RuntimeError("boom")
-            if name == "prepare" and self.gate is not None and i == self.gate_at:
-                assert self.gate.wait(5), "test never opened the gate"
-            on_event(BuildEvent(slug, stage, status, source))
-        if name == "prepare" and self.gate is not None and self.gate_at == len(events):
-            assert self.gate.wait(5), "test never opened the gate"
-
-    def reset(self, slug):
-        self.calls.append("reset")
-        if self.fail_on == "reset":
-            raise RuntimeError("boom")
-
-    def prepare(self, slug, on_event):
-        self.calls.append("prepare")
-        self._step("prepare", slug, on_event)
-
-    def fetch(self, slug, keys, on_event):
-        self.calls.append(f"fetch({sorted(keys) if keys is not None else None})")
-        self._step("fetch", slug, on_event)
-
-    def ingest(self, slug, full, on_event):
-        self.calls.append(f"ingest(full={full})")
-        self._step("ingest", slug, on_event)
-        report = IngestReport()
-        report.load = LoadReport()
-        report.load.written["load/person"] = 3
-        return report
 
 
 def pairs(snap: BuildSnapshot, n: int) -> list[tuple]:
@@ -432,6 +362,39 @@ async def test_subscribe_all_and_other_slug(runner, gate):
     await every.aclose()
     await other.aclose()
     assert not runner._subscribers  # closed iterators unregister
+
+
+@pytest.mark.anyio
+async def test_subscription_closed_before_iterating_unregisters(runner):
+    it = runner.subscribe("a")
+    await it.aclose()  # e.g. an SSE client that left before the first event
+    assert not runner._subscribers
+
+
+class FetchReportsItsFailure(FakeSteps):
+    """Like pipeline.fetch: emit the source's `failed` event, then raise."""
+
+    def fetch(self, slug, keys, on_event):
+        on_event(BuildEvent(slug, "fetch", "failed", SRC, message="boom"))
+        raise RuntimeError("boom")
+
+
+def test_failure_already_reported_is_published_again_after_the_state_change(tmp_path):
+    r = JobRunner(steps=FetchReportsItsFailure(), jobs_dir=tmp_path)
+    published: list[tuple[str, str, str]] = []
+    publish = r._publish
+
+    def record(event):
+        published.append((event.stage, event.status, r._jobs["a"].snapshot.state))
+        publish(event)
+
+    r._publish = record
+    r.start("a")
+    snap = wait_done(r, "a")
+    assert snap.state == "failed" and pairs(snap, 1) == [("fetch", "failed", SRC)]
+    # Subscribers recompute status on each event, so the last one must see the final state.
+    assert published[-1] == ("fetch", "failed", "failed")
+    assert len(snap.events) == len(published) - 1  # re-published, not stored twice
 
 
 # --- real pipeline steps on a throwaway company ------------------------------------------------
