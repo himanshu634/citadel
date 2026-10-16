@@ -6,18 +6,20 @@ depends on having been here when the build started. Opened from the add-company 
 (`?from=new`) it shows that flow's steps with "Build" current.
 -->
 <script lang="ts">
-	import { ArrowRight, Hammer, LoaderCircle, RotateCw } from '@lucide/svelte';
+	import { ArrowRight, Hammer, LoaderCircle, Plus, RotateCw } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { Banner, BuildProgress, Button, EmptyState, Stepper } from '$lib';
 	import { BuildFeed } from '$lib/buildFeed.svelte';
 	import { isActive, titleOf } from '$lib/buildProgress';
+	import { getAddCompany } from '$lib/addCompany.svelte';
 	import { getCompanies } from '$lib/companies.svelte';
 	import { WIZARD_STEPS } from '$lib/onboarding';
 
 	let { data } = $props();
 	const companies = getCompanies();
+	const adding = getAddCompany();
 	const feed = new BuildFeed();
 
 	const company = $derived(companies.byslug(data.slug));
@@ -92,6 +94,17 @@ depends on having been here when the build started. Opened from the add-company 
 
 	{#if fromNew}
 		<Stepper steps={WIZARD_STEPS} current={3} done={[0, 1, 2]} label="Add a company" />
+	{/if}
+
+	{#if active && !fromNew}
+		<Banner tone="neutral" title="Next company?">
+			Each brain builds on its own, up to two at a time.
+			{#snippet action()}
+				<Button size="sm" aria-haspopup="dialog" onclick={() => adding.show()}>
+					<Plus aria-hidden="true" />Add another
+				</Button>
+			{/snippet}
+		</Banner>
 	{/if}
 
 	{#if feed.error && snapshot}

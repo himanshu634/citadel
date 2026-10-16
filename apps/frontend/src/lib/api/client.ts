@@ -13,7 +13,10 @@ import type {
 	ConfigChange,
 	GithubRepoCheck,
 	GithubTokenCheck,
+	OnboardRequest,
+	OnboardResult,
 	Overview,
+	RepoLookup,
 	ValidateResult
 } from '../types';
 
@@ -88,7 +91,18 @@ export const api = {
 		request<GithubRepoCheck>(
 			'GET',
 			`/checks/github/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
-		)
+		),
+	/** The add-a-company dialog's lookup. 424 without a token, 429 rate limited, 502 GitHub failed. */
+	lookupRepo: (owner: string, name: string) =>
+		request<RepoLookup>(
+			'GET',
+			`/onboard/github/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
+		),
+	/**
+	 * Create a company from one public repo and start its first build. 422 `{code: 'private_repo' |
+	 * 'not_found'}` or FieldError[]; 409 `{code: 'repo_taken', slug, name}` or `{code: 'slug_taken'}`.
+	 */
+	onboard: (body: OnboardRequest) => request<OnboardResult>('POST', '/onboard/github', body)
 };
 
 /** Said when nothing answers at `/api`: the API is not running, or the dev proxy has no one behind it. */
