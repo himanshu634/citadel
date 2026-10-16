@@ -92,13 +92,15 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
 - **`db.py`** is the only place that opens a connection and selects the graph (`brain_<slug>`);
   all queries go through `db.run()` so nothing can hit the wrong company's graph.
 - **API** (`brain/api`, FastAPI; `brain.api:app`, run with `make api`): the frontend's only way in.
-  Routes sit under `/api/companies/{slug}/...` (overview, builds, tools); the slug is resolved
+  Routes sit under `/api/companies/{slug}/...` (overview, builds, tools, ask); the slug is resolved
   only by `deps.company_slug`, which 404s unless `companies/<slug>.yaml` exists. Behind it:
   `registry.py` (`companies/*.yaml` is the registry; a bad file is reported, not fatal; edits
   round-trip so hand-written comments survive; writes are atomic), `config_diff.py` (says if a
   saved change needs a graph rebuild or a new download), and `jobs.py` (one build per company,
   at most two at once, progress as SSE events, last build kept in `data/jobs/<slug>.json`, a
-  build cut off by a restart is marked `stopped`).
+  build cut off by a restart is marked `stopped`). `api/ask.py`: POST `.../ask` answers one
+  question as SSE (`start`, `step` / `step_done` per tool call, `answer` or `error`) from a
+  worker thread; one run per thread_id; closing the stream stops the run at its next step.
 
 ### Agents (`brain/agents`)
 
@@ -115,6 +117,10 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
   models). It may cite only uids seen in tool results; anything else is sent back as an error.
 - Keep `agents/system_prompt.md` and the tool list static (no dates, sorted tools) so the prompt
   prefix stays cacheable. Threads are checkpointed in graph `agent_<slug>` (`db.checkpointer`).
+- `ask.ask_events` streams a run for the Ask page (`ask()` is its last item): each tool call is
+  timed and recorded in the append-only `trace` channel with the subgraph it touched
+  (`agents/walk.py` turns any tool's rows into nodes + relationships; links the rows only imply
+  are `inferred`). A stop is honoured only between saved steps, so the thread stays valid.
 - Tests use a scripted fake client (`tests/test_agent.py`); nothing in `make test` calls the API.
   `agents/offline.py` is the same idea for `brain chat --offline`.
 
