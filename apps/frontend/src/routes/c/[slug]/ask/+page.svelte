@@ -201,7 +201,7 @@ Claude's responses and every tool call, MCP calls included).
 			<Banner tone="danger" title="This chat could not be opened">{thread.loadError}</Banner>
 		{/if}
 		{#if thread.loading}
-			<p class="meta" role="status"><LoaderCircle class="spin" aria-hidden="true" />Opening the chat</p>
+			<p class="meta opening" role="status"><LoaderCircle class="spin" aria-hidden="true" />Opening the chat</p>
 		{:else if thread.turns.length === 0}
 			<div class="intro">
 				<p>
@@ -410,6 +410,15 @@ Claude's responses and every tool call, MCP calls included).
 	.meta {
 		color: var(--color-text-muted);
 		font-size: var(--text-sm);
+	}
+	.opening {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+	.opening :global(svg) {
+		width: 1rem;
+		height: 1rem;
 	}
 	.composer {
 		position: sticky;

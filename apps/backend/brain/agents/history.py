@@ -529,8 +529,11 @@ class Recorder:
             },
         )
 
-    def answer(self, payload: dict[str, Any], model: str | None = None) -> None:
-        """Close the turn with the `answer` event (`ask.answer_out`) the Ask page got."""
+    def answer(
+        self, payload: dict[str, Any], model: str | None = None, ms: int | None = None
+    ) -> None:
+        """Close the turn with the `answer` event (`ask.answer_out`) the Ask page got. `ms`
+        overrides the measured duration (the backfill knows it from the trace)."""
         body = {k: v for k, v in payload.items() if k != "kind"}
         status = "stopped" if body.get("stop") == "stopped" else "done"
         cited = body.get("sources") or []
@@ -542,16 +545,18 @@ class Recorder:
             trace_id=body.get("trace_id"),
             answer_json=_json(body),
             cited=[{k: s.get(k) for k in ("uid", "label", "title", "url")} for s in cited],
+            ms=ms,
         )
 
-    def fail(self, problem: str, trace_id: str | None = None) -> None:
+    def fail(self, problem: str, trace_id: str | None = None, ms: int | None = None) -> None:
         self._close("failed", error=problem, stop="error", model=None, trace_id=trace_id,
-                    answer_json=None, cited=[])  # fmt: skip
+                    answer_json=None, cited=[], ms=ms)  # fmt: skip
 
-    def _close(self, status: Status, **kw: Any) -> None:
+    def _close(self, status: Status, ms: int | None = None, **kw: Any) -> None:
         if self.turn is None or self.closed:
             return
         self.closed = True
+        measured = round((time.perf_counter() - self.started) * 1000)
         self._try(
             "finish_turn",
             {
@@ -559,7 +564,7 @@ class Recorder:
                 "turn": self.turn,
                 "status": status,
                 "at": self.clock(),
-                "ms": round((time.perf_counter() - self.started) * 1000),
+                "ms": measured if ms is None else ms,
                 **kw,
             },
         )

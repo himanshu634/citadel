@@ -235,6 +235,22 @@ def ask(
     typer.secho(f"follow up with --thread {answer.thread_id}", dim=True)
 
 
+@app.command("chats-backfill")
+def chats_backfill(slug: str) -> None:
+    """Write the chat history (the Ask page's chat list) for threads asked before it existed,
+    from their checkpoints in agent_<slug> and data/traces/<slug>.jsonl. Safe to re-run."""
+    from brain.agents.backfill import backfill
+    from brain.agents.history import GraphChatStore
+    from brain.agents.traces import TraceStore
+
+    _company(slug)
+    _connected()
+    report = backfill(slug, GraphChatStore(slug), db.checkpointer(slug), TraceStore(slug))
+    typer.echo(f"{len(report.threads)} chats ({report.turns} questions) written to the history")
+    if report.skipped:
+        typer.echo(f"skipped (no question in the checkpoint): {', '.join(report.skipped)}")
+
+
 @app.command("traces")
 def traces_cmd(
     slug: str,
