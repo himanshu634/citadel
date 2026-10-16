@@ -10,6 +10,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from brain.registry import FieldError
+
 Status = Literal["ready", "building", "failed", "empty", "invalid"]
 
 
@@ -25,3 +27,10 @@ class CompanyOut(BaseModel):
 
 class CompanyDetail(CompanyOut):
     config: dict[str, Any]
+
+
+class ValidateOut(BaseModel):
+    ok: bool
+    errors: list[FieldError]
+    yaml: str | None = None  # the file Save would write; only when the draft is valid
+    slug_taken: bool = False  # true whenever the draft's slug is valid and already a company

@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from brain.api import companies
+from brain.api import checks, companies
 
 DEV_ORIGIN = "http://localhost:5173"
 
@@ -25,6 +25,7 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=503, content={"detail": "FalkorDB is not reachable"})
 
     app.include_router(companies.router, prefix="/api")
+    app.include_router(checks.router, prefix="/api")
     return app
 
 

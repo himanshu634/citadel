@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import pytest
-from brain import db, loader
+from brain import config, db, loader
 from brain.api.companies import status_of
 from conftest import needs_graph
 
 from .conftest import write
+
+VALID_DRAFT = {
+    "slug": "acme_labs",
+    "name": "Acme Labs",
+    "data_permission": "own",
+    "window": {"since": "2026-04-15"},
+    "sources": [{"type": "github", "repo": "acme/widgets"}],
+}
 
 
 def test_list_is_sorted_by_name_and_includes_invalid(client, api_root):
@@ -67,3 +75,59 @@ def test_status_from_graph(api_root, synthetic_graph):
         assert status == "ready" and last_synced_at
     finally:
         db.delete_graph(slug)
+
+
+def test_validate_returns_yaml_and_writes_nothing(client, api_root):
+    r = client.post("/api/companies/validate", json=VALID_DRAFT).json()
+    assert r["ok"] and r["errors"] == [] and r["yaml"].startswith("slug: acme_labs")
+    assert r["slug_taken"] is False
+    assert not (api_root / "companies" / "acme_labs.yaml").exists()
+
+
+def test_validate_reports_field_errors_without_yaml(client, api_root):
+    bad = {**VALID_DRAFT, "sources": [{"type": "github", "repo": "x"}]}
+    r = client.post("/api/companies/validate", json=bad).json()
+    assert not r["ok"] and r["yaml"] is None
+    assert r["errors"][0]["loc"] == ["sources", 0, "repo"]
+
+
+def test_validate_reports_slug_taken(client, api_root):
+    write(api_root, "acme_labs", name="Acme Labs")
+    assert client.post("/api/companies/validate", json=VALID_DRAFT).json()["slug_taken"]
+
+
+def test_validate_slug_taken_even_when_other_fields_are_wrong(client, api_root):
+    write(api_root, "acme_labs", name="Acme Labs")
+    r = client.post("/api/companies/validate", json={**VALID_DRAFT, "sources": "nope"}).json()
+    assert not r["ok"] and r["slug_taken"]
+
+
+@pytest.mark.parametrize("slug", ["Acme-Labs", "../x", 7, None])
+def test_validate_bad_slug_is_not_taken(client, api_root, slug):
+    r = client.post("/api/companies/validate", json={**VALID_DRAFT, "slug": slug}).json()
+    assert not r["ok"] and r["slug_taken"] is False
+
+
+def test_create_writes_file(client, api_root):
+    r = client.post("/api/companies", json=VALID_DRAFT)
+    assert r.status_code == 201
+    assert r.json()["slug"] == "acme_labs" and r.json()["config"]["name"] == "Acme Labs"
+    assert config.load_company("acme_labs").name == "Acme Labs"
+
+
+def test_create_twice_is_409(client, api_root):
+    client.post("/api/companies", json=VALID_DRAFT)
+    r = client.post("/api/companies", json=VALID_DRAFT)
+    assert r.status_code == 409 and "already a company" in r.json()["detail"]
+    assert r.json()["detail"] == "acme_labs is already a company. Pick another name"
+
+
+def test_create_invalid_is_422_with_field_paths(client, api_root):
+    bad = {**VALID_DRAFT, "sources": [{"type": "github", "repo": "x"}]}
+    r = client.post("/api/companies", json=bad)
+    assert r.status_code == 422 and r.json()["detail"][0]["loc"] == ["sources", 0, "repo"]
+    assert not (api_root / "companies" / "acme_labs.yaml").exists()
+
+
+def test_create_non_object_body_is_422(client, api_root):
+    assert client.post("/api/companies", json=["not", "an", "object"]).status_code == 422
