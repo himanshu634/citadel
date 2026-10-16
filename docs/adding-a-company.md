@@ -100,6 +100,22 @@ Rules for adapters: never emit email addresses (identify people by login or hand
 `SourceUnavailable` when there is nothing to read yet, and enforce `data_permission` if the
 source can tell public from private data.
 
+## (c) A synthetic company for demos
+
+`companies/synthetic.yaml` points at
+[`apps/backend/examples/synthetic_company/`](../apps/backend/examples/synthetic_company/): 5
+people and a bot, 2 teams, 4 systems, 15 work items, with known answers built in (one system
+whose declared owners are not the people doing the work, a bot that must not count as an
+expert, two systems that change together).
+
+```bash
+make synthetic                        # regenerate the JSONL, create the schema, full ingest
+make query SLUG=synthetic TOOL=owners_vs_experts
+```
+
+Copy `generate.py` to make your own demo company: edit the Python data at the top, run it, and
+point a new `companies/<slug>.yaml` at the output folder.
+
 ## (d) Linear
 
 Tickets, their assignees and blockers, and the pull requests attached to them. Linear data is
@@ -120,7 +136,13 @@ Put a personal API key in `.env` as `LINEAR_API_KEY` (Linear: Settings, Security
 Personal API keys). Fetch checks that the key belongs to `workspace` before it pulls anything.
 People are identified by their Linear display name; use `people.aliases` to map a name to the
 login the GitHub source uses, so one person stays one node. Pull requests become links
-(`MENTIONS`) only when the attachment URL matches a pull request from the GitHub source.
+(`MENTIONS`) only when the attachment URL matches a pull request from the GitHub source. That
+match is made against items already in the graph, so on a first build list the code source
+(`github` or `canonical_jsonl`) before `linear` under `sources:`, or run `make sync` twice.
+
+A ticket that is archived or deleted in Linear, or moved to a team outside `teams`, is marked
+`canceled` with state "Removed from Linear" (no assignees, no blockers) on the next sync.
+Changing `teams` makes the next fetch start over for the whole window.
 
 ## Synthetic tickets in a real Linear workspace
 
@@ -158,19 +180,3 @@ There is no Jira adapter yet. It would produce the same canonical tickets: Jira 
 `status_category` through the status category key, priorities to urgent/high/medium/low, "Blocks"
 links to `BLOCKS`, and accounts to logins through `people.aliases`. The full field mapping is in
 [section 6 of the Linear adapter design](superpowers/specs/2026-10-16-linear-adapter-design.md).
-
-## (c) A synthetic company for demos
-
-`companies/synthetic.yaml` points at
-[`apps/backend/examples/synthetic_company/`](../apps/backend/examples/synthetic_company/): 5
-people and a bot, 2 teams, 4 systems, 15 work items, with known answers built in (one system
-whose declared owners are not the people doing the work, a bot that must not count as an
-expert, two systems that change together).
-
-```bash
-make synthetic                        # regenerate the JSONL, create the schema, full ingest
-make query SLUG=synthetic TOOL=owners_vs_experts
-```
-
-Copy `generate.py` to make your own demo company: edit the Python data at the top, run it, and
-point a new `companies/<slug>.yaml` at the output folder.

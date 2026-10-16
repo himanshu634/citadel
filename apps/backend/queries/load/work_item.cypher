@@ -5,7 +5,7 @@
 //          updated_at, closed_at, closed_ts, merged_at, labels, container, source, url,
 //          key, status_category, priority, priority_rank, due_date, due_ts}]
 //          (the ticket fields are null for GitHub PRs and issues; due_ts is the due date at
-//          00:00 UTC, priority_rank is 1 urgent .. 4 low, 5 none)
+//          00:00 UTC, priority_rank is 1 urgent .. 4 low, 5 none, null without a status)
 // returns: n (rows written)
 // example: loader.load("falkordb", [WorkItem(uid="github:FalkorDB/FalkorDB:pr:3330", ...)])
 UNWIND $rows AS row

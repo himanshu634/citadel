@@ -12,7 +12,8 @@ State file, data/raw/<slug>/linear/<workspace>/seed_state.json:
      "attachments": ["PAY-3 <url>"]}
 
 A crash between a mutation and its state write can still leave one duplicate in Linear; delete
-it by hand.
+it by hand. So can a retry: LinearClient retries 5xx, so a 502/504 that came back after Linear had
+already committed an issueCreate creates the ticket a second time.
 """
 
 from __future__ import annotations

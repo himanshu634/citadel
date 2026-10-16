@@ -27,6 +27,7 @@ make query TOOL=impact_of P="system=CI"   # run one (SLUG=..., JSON=1 for raw ro
 make ask SLUG=synthetic Q="who knows Auth?"   # Claude answers from the graph (THREAD=<id> follows up)
 make chat SLUG=synthetic OFFLINE=1   # one scripted turn, no API key: router + tools + checkpointer
 make reset SLUG=x CONFIRM=1    # delete brain_x, agent_x and its build history (frees the slug)
+make linear-seed SLUG=synthetic_linear CONFIRM=1   # copy the synthetic tickets into a real Linear workspace
 make brain ARGS="..."          # any `brain` CLI command
 make api                       # HTTP API on 127.0.0.1:$API_PORT (default 8000), auto-reload
 make dev                       # API + frontend dev server together
@@ -77,6 +78,13 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   `data_permission: own`), `transform.py` (cache → records; only completed runs are read),
   GraphQL documents in `queries/*.graphql`. Tests use recorded pages in
   `tests/fixtures/github/`.
+- **`adapters/runs.py`**: the resumable, incremental paging into a raw cache that GitHub and
+  Linear share (`fetch_paged`, `completed_pages`).
+- **`adapters/linear/`** (`LINEAR_API_KEY`; `own`/`synthetic` data only): `client.py`, `fetch.py`,
+  `transform.py`, `seed.py` (`make linear-seed`, the only writer to Linear). Issues become
+  WorkItem `kind: ticket`; ASSIGNED_TO is replaced on every load, BLOCKS edges of the source
+  missing from a load are pruned (`origin`), attachment URLs become MENTIONS resolved by url.
+  Tests use the hand-written cache in `tests/fixtures/linear/`.
 - **`loader.py`** batches rows (`UNWIND $rows`, 500 per query) into `queries/load/*.cypher`. All
   writes are `MERGE` on uid then `SET`, so loads are idempotent. Nodes are written before
   relationships; relationship queries `MATCH` both ends, so dangling links are dropped and counted.

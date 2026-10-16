@@ -3,7 +3,7 @@ BLOCKS pruned by origin, and links resolved by url."""
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 from brain import db, loader, schema
@@ -16,6 +16,7 @@ from brain.canonical import (
     person_uid,
     url_ref,
 )
+from brain.pipeline import select_new
 from conftest import needs_graph
 
 SLUG = "test_tickets"
@@ -77,29 +78,39 @@ def test_ticket_properties_written(graph):
         [
             ticket("t:1", key="ENG-1", priority="urgent", due_date=date(2026, 11, 6)),
             ticket("t:2"),
+            WorkItem(
+                uid="t:pr",
+                kind="pull_request",
+                title="A PR",
+                state="open",
+                created_at="2026-10-01T00:00:00Z",
+            ),
         ],
     )
-    one, two = (
+    one, two, pr = (
         rows(
             "MATCH (w:WorkItem {uid: $uid}) RETURN w.key AS key, w.status_category AS cat, "
             "w.priority AS priority, w.priority_rank AS rank, w.due_date AS due, "
             "w.due_ts AS due_ts",
             uid=uid,
         )[0]
-        for uid in ("t:1", "t:2")
+        for uid in ("t:1", "t:2", "t:pr")
     )
     assert one["key"] == "ENG-1" and one["cat"] == "todo" and one["priority"] == "urgent"
     assert one["rank"] == 1
     assert one["due"] == "2026-11-06" and one["due_ts"] == 1793923200
     assert two["priority"] is None and two["rank"] == 5 and two["due"] is None
+    assert pr["cat"] is None and pr["rank"] is None  # no status: not a ticket, no rank
 
 
 @needs_graph
 def test_reassigning_replaces_assignee(graph):
     people = [Person(login="alice"), Person(login="bob")]
     loader.load(SLUG, [*people, ticket("t:1", assignees=["alice"])])
-    loader.load(SLUG, [*people, ticket("t:1", assignees=["bob"])])
+    loader.load(SLUG, [*people, ticket("t:1", source="linear", assignees=["bob"])])
     assert assignees("t:1") == [person_uid("bob")]
+    found = rows("MATCH (:Person)-[r:ASSIGNED_TO]->(:WorkItem {uid: 't:1'}) RETURN r.source AS s")
+    assert found == [{"s": "linear"}]  # the edge carries the work item's source
 
 
 @needs_graph
@@ -150,6 +161,35 @@ def test_load_without_origin_never_prunes(graph):
     items = [ticket(u) for u in ("t:a", "t:b")]
     loader.load(SLUG, [*items, blocks("t:a", "t:b")], origin=ORIGIN)
     loader.load(SLUG, items)
+    assert blocking() == {("t:a", "t:b")}
+
+
+@needs_graph
+def test_incremental_ingest_keeps_unchanged_blocks(graph):
+    """A second ingest with a cursor skips the unchanged tickets but still gets every BLOCKS
+    link (links have no arrival time), so their edges survive the prune; a relation that left
+    the cache is pruned."""
+    old = {"updated_at": "2026-10-01T00:00:00Z"}
+    first = [
+        ticket("t:a", **old),
+        ticket("t:b", **old),
+        ticket("t:c", **old),
+        blocks("t:a", "t:b"),
+        blocks("t:b", "t:c"),
+    ]
+    loader.load(SLUG, select_new(first, None), origin=ORIGIN)
+    assert blocking() == {("t:a", "t:b"), ("t:b", "t:c")}
+
+    cursor = datetime(2026, 10, 10, tzinfo=UTC)
+    second = [  # t:c changed and is no longer blocked by t:b
+        ticket("t:a", **old),
+        ticket("t:b", **old),
+        ticket("t:c", updated_at="2026-10-12T00:00:00Z"),
+        blocks("t:a", "t:b"),
+    ]
+    selected = select_new(second, cursor)
+    assert {r.uid for r in selected if isinstance(r, WorkItem)} == {"t:c"}
+    loader.load(SLUG, selected, origin=ORIGIN)
     assert blocking() == {("t:a", "t:b")}
 
 

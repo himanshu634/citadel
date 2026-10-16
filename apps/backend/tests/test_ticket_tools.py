@@ -169,3 +169,50 @@ def test_done_blocker_breaks_chain():
         assert tools.waiting_on(slug, "bob") == []  # bob's C blocks only a done ticket
     finally:
         db.delete_graph(slug)
+
+
+@needs_graph
+def test_blocks_cycle_is_not_its_own_blocker():
+    """A blocks B and B blocks A: B's assignee is waiting on A once, never on B itself."""
+    slug = "test_ticket_cycle"
+    db.delete_graph(slug)
+    schema.apply_schema(slug)
+
+    def ticket(key: str, assignee: str) -> c.WorkItem:
+        return c.WorkItem(
+            uid=f"t:{key}",
+            kind="ticket",
+            key=key,
+            title=key,
+            state="Todo",
+            status_category="todo",
+            created_at="2026-10-01T00:00:00Z",
+            assignees=[assignee],
+        )
+
+    def blocks(a: str, b: str) -> c.Link:
+        return c.Link(
+            rel="BLOCKS",
+            from_uid=f"t:{a}",
+            from_label="WorkItem",
+            to_uid=f"t:{b}",
+            to_label="WorkItem",
+            source="test",
+        )
+
+    try:
+        loader.load(
+            slug,
+            [
+                c.Person(login="alice"),
+                c.Person(login="bob"),
+                ticket("A", "alice"),
+                ticket("B", "bob"),
+                blocks("A", "B"),
+                blocks("B", "A"),
+            ],
+        )
+        rows = tools.blocked_on(slug, "bob")
+        assert [(r.ticket.key, r.blocker.key, r.depth) for r in rows] == [("B", "A", 1)]
+    finally:
+        db.delete_graph(slug)

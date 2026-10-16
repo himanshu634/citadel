@@ -1,6 +1,7 @@
 // purpose: What is a person waiting on? For each open ticket assigned to them, every open
 //          blocker up to three BLOCKS hops away (shortest depth per pair). Every ticket on the
-//          chain must be open, so a done or canceled ticket ends it. `via` is the key of the
+//          chain must be open, so a done or canceled ticket ends it. In a BLOCKS cycle a ticket
+//          is never listed as its own blocker. `via` is the key of the
 //          next ticket on the way (null when the blocker is direct). Blockers come with their
 //          assignees and the PRs/issues they mention (anything that is not a ticket).
 // params:  $person_uid ("person:<login>"), $limit (int, rows)
@@ -11,7 +12,8 @@
 MATCH (p:Person {uid: $person_uid})-[:ASSIGNED_TO]->(t:WorkItem {kind: 'ticket'})
 WHERE t.status_category IS NOT NULL AND NOT t.status_category IN ['done', 'canceled']
 MATCH path = (b:WorkItem {kind: 'ticket'})-[:BLOCKS*1..3]->(t)
-WHERE ALL(n IN nodes(path) WHERE n.status_category IS NOT NULL
+WHERE b <> t
+  AND ALL(n IN nodes(path) WHERE n.status_category IS NOT NULL
                                  AND NOT n.status_category IN ['done', 'canceled'])
 WITH p, t, b, path
 ORDER BY length(path), nodes(path)[1].key

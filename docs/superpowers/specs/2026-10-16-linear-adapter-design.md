@@ -41,7 +41,7 @@ first ticket source. Jira gets a written mapping (§6) and no code.
 | `key` | string, range index | `identifier` (`IDN-2`) |
 | `status_category` | `backlog`/`todo`/`in_progress`/`done`/`canceled` | `state.type`: triage, backlog → backlog; unstarted → todo; started → in_progress; completed → done; canceled → canceled; any other value → todo |
 | `priority` | `urgent`/`high`/`medium`/`low` or null | `priority`: 1 → urgent, 2 → high, 3 → medium, 4 → low, 0 → null |
-| `priority_rank` | int, 1–4, 5 = none | derived by the loader, for sorting |
+| `priority_rank` | int, 1–4, 5 = none; null when there is no `status_category` | derived by the loader, for sorting |
 | `due_date` / `due_ts` | ISO date / epoch | `dueDate` |
 
 New range index: `WorkItem.url` (for D7). Existing fields: `number` = Linear `number`; `state` =
@@ -52,7 +52,7 @@ New range index: `WorkItem.url` (for D7). Existing fields: `number` = Linear `nu
 
 | Relationship | Load query | Write rule |
 |---|---|---|
-| `(Person)-[:ASSIGNED_TO]->(WorkItem)` | `load/assigned_to` | For each loaded item with `assignees` not null: delete its ASSIGNED_TO edges, then MERGE one for each assignee. `assignees: []` means unassigned. `None` means the source does not track assignees, so edges are left as they are. |
+| `(Person)-[:ASSIGNED_TO]->(WorkItem)` | `load/assigned_to` | For each loaded item with `assignees` not null: delete its ASSIGNED_TO edges, then MERGE one for each assignee (edge `source` = the item's source). `assignees: []` means unassigned. `None` means the source does not track assignees, so edges are left as they are. |
 | `(WorkItem)-[:BLOCKS {source, origin, uid}]->(WorkItem)` | `load/link_blocks` | MERGE. `origin` = the adapter key, for example `linear:synthetic-co`. Then `load/prune_blocks` deletes edges with that origin whose uid is not in this load. |
 | `(WorkItem)-[:MENTIONS]->(WorkItem)` by url | `load/link_mentions_workitem_workitem_by_url` | MATCH the target by `url`. Used when `to_uid` starts with `url:`. |
 
@@ -70,7 +70,8 @@ sources:
 
 - Key: `linear:<workspace>`. `LINEAR_API_KEY` in `.env`, sent as `Authorization: <key>` (no `Bearer`).
 - Cache: `data/raw/<slug>/linear/<workspace>/`:
-  - `meta.json`: org `urlKey`/name, fetched_at
+  - `meta.json`: org `urlKey`/name, fetched_at, `issue_teams` (the team keys of the issue runs;
+    when the team set changes, `issues/` is cleared and the next run covers the whole window)
   - `teams.json`: teams with members: id, key, name, `displayName`, `name`, `active`
   - `issues/`: resumable runs, the same `fetch_paged` as GitHub
 - Issue query: `first: 25`, nested connections `first: 25`. This stays under the 10,000-point
@@ -82,6 +83,12 @@ sources:
 - Records: `Person`, `Team`, `MEMBER_OF` links, ticket `WorkItem`s, `Comment`s, BLOCKS links
   (from both `relations` and `inverseRelations` of type `blocks`), MENTIONS links (`related`
   relations, and attachment URLs through `url_ref`). Relation type `duplicate` is ignored.
+  Cached issues of teams outside `teams` are skipped.
+- Removed tickets: every run returns every open issue of the configured teams, so an issue whose
+  latest cached copy is open but that is missing from the newest completed run was archived,
+  deleted or moved out of scope. On the next sync it is marked `canceled` with state
+  "Removed from Linear", no assignees and no links, dated at that run's start.
+- Linear display names that contain "@" are skipped (no person, assignee, author or comment).
 - Known limit: an issue with more than 25 comments, relations or attachments has only the first 25
   read.
 

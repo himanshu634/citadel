@@ -95,6 +95,13 @@ def day_epoch(d: date | None) -> int | None:
     return int(datetime(d.year, d.month, d.day, tzinfo=UTC).timestamp()) if d else None
 
 
+def _priority_rank(w: WorkItem) -> int | None:
+    """Sort rank for tickets (anything with a status category); None for PRs and issues."""
+    if w.status_category is None:
+        return None
+    return PRIORITY_RANK.get(w.priority or "", NO_PRIORITY_RANK)
+
+
 def _base(r: CanonicalRecord) -> dict[str, Any]:
     return {"uid": r.uid, "source": r.source, "url": r.url}
 
@@ -171,7 +178,7 @@ def load(slug: str, records: Iterable[CanonicalRecord], origin: str | None = Non
                 "key": w.key,
                 "status_category": w.status_category,
                 "priority": w.priority,
-                "priority_rank": PRIORITY_RANK.get(w.priority or "", NO_PRIORITY_RANK),
+                "priority_rank": _priority_rank(w),
                 "due_date": w.due_date.isoformat() if w.due_date else None,
                 "due_ts": day_epoch(w.due_date),
             }
@@ -233,7 +240,11 @@ def load(slug: str, records: Iterable[CanonicalRecord], origin: str | None = Non
         slug,
         "load/assigned_to",
         [
-            {"work_item_uid": w.uid, "person_uids": [person_uid(a) for a in w.assignees]}
+            {
+                "work_item_uid": w.uid,
+                "person_uids": [person_uid(a) for a in w.assignees],
+                "source": w.source,
+            }
             for w in of(WorkItem)
             if w.assignees is not None
         ],
