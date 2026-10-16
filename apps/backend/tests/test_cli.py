@@ -1,10 +1,11 @@
-"""The `brain` CLI against a real FalkorDB: reset frees a slug for a new company."""
+"""The `backend` CLI against a real FalkorDB: reset frees a slug for a new company."""
 
 from __future__ import annotations
 
-from agents import checkpoint
-from brain import cli, config, db
-from conftest import needs_graph
+from agents import checkpoint, graphs
+from backend import cli
+from brain import config, db
+from brain.testing import needs_graph
 from typer.testing import CliRunner
 
 pytestmark = needs_graph
@@ -17,7 +18,7 @@ def test_reset_deletes_both_graphs_and_the_build_history_but_keeps_the_raw_cache
 ):
     monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
     db.graph(SLUG).query("CREATE (:Probe)")
-    db.client().select_graph(checkpoint.agent_graph_name(SLUG)).query("CREATE (:Probe)")
+    db.client().select_graph(graphs.agent_graph_name(SLUG)).query("CREATE (:Probe)")
     jobs = tmp_path / "data" / "jobs" / f"{SLUG}.json"
     raw = tmp_path / "data" / "raw" / SLUG / "github" / "page.json"
     for path in (jobs, raw):

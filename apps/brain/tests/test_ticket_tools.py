@@ -8,7 +8,7 @@ from pathlib import Path
 from brain import canonical as c
 from brain import db, loader, schema, tools
 from brain.adapters.canonical_jsonl import CanonicalJsonlAdapter
-from conftest import SYNTHETIC, needs_graph, synthetic_company
+from brain.testing import SYNTHETIC, needs_graph, synthetic_company
 
 TICKETS = SYNTHETIC / "tickets"
 

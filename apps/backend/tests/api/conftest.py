@@ -9,10 +9,12 @@ from __future__ import annotations
 import threading
 
 import pytest
-from brain import config, registry
-from brain.api import create_app
-from brain.jobs import JobRunner
-from conftest import FakeSteps, synthetic_company
+from backend import registry
+from backend.api import create_app
+from backend.jobs import JobRunner
+from backend.testing import FakeSteps
+from brain import config
+from brain.testing import synthetic_company
 from fastapi.testclient import TestClient
 
 
@@ -27,7 +29,7 @@ def api_root(tmp_path, monkeypatch):
 def no_graph(monkeypatch):
     """Unit tests must not need FalkorDB: every company reads as never built, and no slug has
     graphs left behind."""
-    monkeypatch.setattr("brain.api.companies.status_of", lambda slug: ("empty", None))
+    monkeypatch.setattr("backend.api.companies.status_of", lambda slug: ("empty", None))
     monkeypatch.setattr("agents.checkpoint.company_graphs", lambda slug: [])
 
 

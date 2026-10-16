@@ -13,8 +13,8 @@ from agents import cli
 from agents.evals import cases, drafts
 from agents.testing import TOOLSET, FakeClient, reply, settings, submit, text, tool_use  # noqa: F401
 from agents.traces import Feedback, Trace, TraceStore, new_trace, summarize, window
-from brain import config, registry
-from brain.testing import synthetic_company
+from brain import config
+from brain.testing import synthetic_company, write_company
 from langgraph.checkpoint.memory import InMemorySaver
 from typer.testing import CliRunner
 
@@ -26,7 +26,7 @@ def root(tmp_path, monkeypatch):
     """A throwaway repo root holding companies/synthetic.yaml; traces land in its data/."""
     monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
     (tmp_path / "companies").mkdir()
-    registry.write_new(synthetic_company("synthetic"))
+    write_company(synthetic_company("synthetic"))
     return tmp_path
 
 

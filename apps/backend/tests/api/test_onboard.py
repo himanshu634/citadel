@@ -6,9 +6,9 @@ from datetime import date
 
 import httpx
 import pytest
-from brain import onboard, registry
+from backend import onboard, registry
+from backend.api import checks
 from brain.adapters.github.client import GithubError, GithubRateLimited
-from brain.api import checks
 from brain.config import CompanyConfig
 
 from .conftest import write

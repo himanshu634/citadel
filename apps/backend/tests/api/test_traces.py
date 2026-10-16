@@ -6,8 +6,9 @@ from __future__ import annotations
 import pytest
 from agents.testing import FakeClient, reply, settings, submit, tool_use  # noqa: F401
 from agents.traces import TraceStore
-from tests.api.conftest import write
-from tests.api.test_ask import frames, make_client
+
+from .conftest import write
+from .test_ask import frames, make_client
 
 
 @pytest.fixture

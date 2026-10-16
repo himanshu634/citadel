@@ -17,7 +17,7 @@ from brain.canonical import (
     url_ref,
 )
 from brain.pipeline import select_new
-from conftest import needs_graph
+from brain.testing import needs_graph
 
 SLUG = "test_tickets"
 ORIGIN = "linear:x"

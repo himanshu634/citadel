@@ -5,9 +5,9 @@ from __future__ import annotations
 import inspect
 
 import pytest
-from brain import adapters, config, db, pipeline, registry, schema
+from brain import adapters, config, db, pipeline, schema
 from brain.events import BuildEvent, BuildStopped
-from conftest import needs_graph, synthetic_company
+from brain.testing import needs_graph, synthetic_company, write_company
 
 SLUG = "test_events"
 
@@ -21,7 +21,7 @@ def tmp_root(tmp_path, monkeypatch):
 
 @pytest.fixture
 def events_company(tmp_root):
-    registry.write_new(synthetic_company(SLUG))
+    write_company(synthetic_company(SLUG))
     yield SLUG
     db.delete_graph(SLUG)
 
@@ -30,7 +30,7 @@ def events_company(tmp_root):
 def events_company_missing_folder(tmp_root):
     cfg = synthetic_company(SLUG)
     cfg.sources[0].path = tmp_root / "no_such_folder"
-    registry.write_new(cfg)
+    write_company(cfg)
     yield SLUG
     db.delete_graph(SLUG)
 
@@ -46,7 +46,7 @@ def two_source_company(tmp_root):
             {"type": "canonical_jsonl", "path": "export"}
         ),
     ]
-    registry.write_new(cfg)
+    write_company(cfg)
     return SLUG
 
 

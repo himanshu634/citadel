@@ -1,12 +1,12 @@
-"""brain.onboard: the pure parts of adding a company from one GitHub repository."""
+"""backend.onboard: the pure parts of adding a company from one GitHub repository."""
 
 from __future__ import annotations
 
 from datetime import date
 
 import pytest
-from brain import onboard
-from brain.registry import validate_draft
+from backend import onboard
+from backend.registry import validate_draft
 
 
 @pytest.mark.parametrize(

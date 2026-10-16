@@ -6,11 +6,12 @@ import time
 
 import pytest
 from agents import checkpoint
+from backend.api import create_app
+from backend.api.companies import status_of
+from backend.jobs import JobRunner
+from backend.testing import FakeSteps
 from brain import config, db, loader
-from brain.api import create_app
-from brain.api.companies import status_of
-from brain.jobs import JobRunner
-from conftest import FakeSteps, needs_graph
+from brain.testing import needs_graph
 from fastapi.testclient import TestClient
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -210,7 +211,7 @@ def graph_down(request, monkeypatch):
         asked.append(slug)
         raise request.param("unreachable")
 
-    monkeypatch.setattr("brain.api.companies.status_of", down)
+    monkeypatch.setattr("backend.api.companies.status_of", down)
     return asked
 
 

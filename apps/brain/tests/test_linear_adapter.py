@@ -14,7 +14,7 @@ from brain.adapters.linear import LinearAdapter, LinearSource
 from brain.adapters.linear.transform import PRIORITY_MAP, STATUS_MAP, issue_uid, records
 from brain.canonical import Comment, Link, Person, Team, WorkItem, url_ref
 from brain.config import CompanyConfig
-from conftest import needs_graph
+from brain.testing import needs_graph
 
 FIXTURE = Path(__file__).parent / "fixtures" / "linear" / "synthetic-co"
 

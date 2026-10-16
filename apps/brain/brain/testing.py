@@ -11,9 +11,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from brain import db, loader, schema
+from brain import config, db, loader, schema
 from brain.adapters.canonical_jsonl import CanonicalJsonlAdapter, CanonicalJsonlSource
 from brain.config import CompanyConfig
 from brain.normalize import normalize
@@ -59,6 +60,15 @@ def synthetic_company(
             "people": {"bots": ["ci-bot"]},
         }
     )
+
+
+def write_company(cfg: CompanyConfig) -> Path:
+    """Write cfg as companies/<slug>.yaml under the current repo root (tests point
+    `config.REPO_ROOT` at a temp folder first)."""
+    path = config.companies_dir() / f"{cfg.slug}.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(cfg.model_dump(mode="json"), sort_keys=False))
+    return path
 
 
 def load_company(cfg: CompanyConfig) -> None:

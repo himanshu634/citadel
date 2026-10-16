@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from brain import db, tools
-from conftest import load_company, needs_graph, synthetic_company
+from brain.testing import load_company, needs_graph, synthetic_company
 from redis.exceptions import ResponseError
 
 pytestmark = needs_graph
