@@ -102,13 +102,18 @@ the field invalid. Put an icon in `leading` (for example a search glass).
 	input::placeholder {
 		color: var(--color-text-faint);
 	}
-	input:hover {
+	input:hover:not(:disabled) {
 		border-color: var(--color-text-muted);
 	}
 	input:focus-visible {
 		outline: none;
 		border-color: var(--color-focus);
 		box-shadow: 0 0 0 1px var(--color-focus);
+	}
+	input:disabled {
+		background: var(--color-surface-sunken);
+		color: var(--color-text-muted);
+		cursor: not-allowed;
 	}
 	.invalid input {
 		border-color: var(--color-danger);

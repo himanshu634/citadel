@@ -4,13 +4,18 @@ export { default as Badge } from './components/ui/Badge.svelte';
 export { default as Banner } from './components/ui/Banner.svelte';
 export { default as Button } from './components/ui/Button.svelte';
 export { default as Card } from './components/ui/Card.svelte';
+export { default as Checkbox } from './components/ui/Checkbox.svelte';
+export { default as ChoiceCard } from './components/ui/ChoiceCard.svelte';
 export { default as Dialog } from './components/ui/Dialog.svelte';
 export { default as EmptyState } from './components/ui/EmptyState.svelte';
 export { default as Input } from './components/ui/Input.svelte';
 export { default as Menu } from './components/ui/Menu.svelte';
 export { default as NodeChip } from './components/ui/NodeChip.svelte';
+export { default as Select } from './components/ui/Select.svelte';
 export { default as Stat } from './components/ui/Stat.svelte';
+export { default as Stepper } from './components/ui/Stepper.svelte';
 export { default as Tabs } from './components/ui/Tabs.svelte';
+export { default as TagInput } from './components/ui/TagInput.svelte';
 export { default as Tooltip } from './components/ui/Tooltip.svelte';
 
 export { default as ActivityBars } from './components/brain/ActivityBars.svelte';

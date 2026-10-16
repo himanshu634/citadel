@@ -8,6 +8,8 @@
 		Banner,
 		Button,
 		Card,
+		Checkbox,
+		ChoiceCard,
 		CitedAnswer,
 		CompanyRail,
 		Dialog,
@@ -17,8 +19,11 @@
 		Input,
 		Menu,
 		NodeChip,
+		Select,
 		Stat,
+		Stepper,
 		Tabs,
+		TagInput,
 		Tooltip,
 		WorkItemRow
 	} from '$lib';
@@ -111,6 +116,31 @@
 	let sort = $state('recent');
 	let name = $state('');
 	let tab = $state('answer');
+
+	let permission = $state('public');
+	let permissionDisabled = $state('own');
+	let agree = $state(true);
+	let agreeOff = $state(false);
+	let level = $state('engineer');
+	let levelEmpty = $state('');
+	let levelLong = $state('long');
+	let globs = $state<string[]>(['apps/web/**', 'services/billing/**']);
+	let logins = $state<string[]>([]);
+	let aliases = $state<string[]>([
+		'dependabot[bot]',
+		'a-very-long-login-that-would-not-fit-on-one-line-without-wrapping-inside-the-field-xyz'
+	]);
+	const steps = [
+		{ label: 'Company', hint: 'Name and slug' },
+		{ label: 'Sources', hint: 'Where to read' },
+		{ label: 'Rules', hint: 'Systems and bots' },
+		{ label: 'Build' }
+	];
+	const levels = [
+		{ value: 'engineer', label: 'Engineer' },
+		{ value: 'lead', label: 'Engineering lead' },
+		{ value: 'long', label: 'A very long option label that has to wrap in the list and truncate on the closed field' }
+	];
 
 	const swatches = [
 		['--color-ground', 'Ground'],
@@ -286,6 +316,82 @@
 		</Card>
 	</div>
 
+	<Card title="Stepper">
+		<p class="note">
+			The steps of a flow. The current step is the one solid accent block; finished steps show
+			a check in an ink circle and say "done" to screen readers.
+		</p>
+		<div class="stack">
+			<Stepper {steps} current={0} done={[]} />
+			<Stepper {steps} current={2} done={[0, 1]} />
+			<Stepper
+				steps={[
+					{ label: 'A step with a long name that wraps instead of overflowing', hint: 'And a long hint too' },
+					{ label: 'Next' }
+				]}
+				current={1}
+				done={[0]}
+			/>
+		</div>
+	</Card>
+
+	<div class="two">
+		<Card title="Select">
+			<div class="stack">
+				<Select label="Role" bind:value={level} options={levels} hint="Hover, focus, or open it and use the arrow keys" />
+				<Select label="Nothing chosen" bind:value={levelEmpty} options={levels} placeholder="Choose a role" />
+				<Select label="Role" value="lead" options={levels} disabled hint="Disabled" />
+				<Select label="Role" value="" options={levels} error="Pick a role to continue" />
+				<Select label="Long option" bind:value={levelLong} options={levels} />
+			</div>
+		</Card>
+
+		<Card title="Tag input">
+			<div class="stack">
+				<TagInput
+					label="Paths"
+					bind:values={globs}
+					mono
+					placeholder="apps/web/**"
+					hint="Enter or a comma adds. Paste a, b to add both."
+				/>
+				<TagInput label="Logins" bind:values={logins} placeholder="Type a login" />
+				<TagInput label="Bot aliases" bind:values={aliases} mono />
+				<TagInput label="Paths" values={['docs/**']} disabled hint="Disabled" />
+				<TagInput label="Paths" values={[]} error="Add at least one path" mono />
+			</div>
+		</Card>
+	</div>
+
+	<div class="two">
+		<Card title="Choice card">
+			<fieldset class="choices">
+				<legend>Data permission</legend>
+				<ChoiceCard name="gallery-permission" value="public" bind:group={permission} title="Public data" description="Read public repositories only." />
+				<ChoiceCard name="gallery-permission" value="own" bind:group={permission} title="Our own data" description="Private repositories and tickets we own." />
+				<ChoiceCard name="gallery-permission" value="long" bind:group={permission} title="A title that is long enough to wrap onto a second line in a narrow card" description="And a description with a-very-long-unbroken-token-that-must-wrap-instead-of-overflowing-the-card." />
+			</fieldset>
+			<fieldset class="choices">
+				<legend>Disabled</legend>
+				<ChoiceCard name="gallery-permission-off" value="public" bind:group={permissionDisabled} title="Public data" description="Not available." disabled />
+				<ChoiceCard name="gallery-permission-off" value="own" bind:group={permissionDisabled} title="Our own data" description="Selected and locked." disabled />
+			</fieldset>
+		</Card>
+
+		<Card title="Checkbox">
+			<div class="stack">
+				<Checkbox label="Include closed pull requests" bind:checked={agree} />
+				<Checkbox label="Unchecked" bind:checked={agreeOff} />
+				<Checkbox label="Disabled and checked" checked disabled />
+				<Checkbox label="Disabled" checked={false} disabled />
+				<Checkbox
+					label="A long label that has to wrap onto several lines without pushing the box out of line or scrolling the page sideways, even with-a-very-long-unbroken-token"
+					checked={false}
+				/>
+			</div>
+		</Card>
+	</div>
+
 	<Card title="Company rail">
 		<p class="note">
 			One tile per company. The current one is ink with a bar on its edge; building, failed,
@@ -432,6 +538,21 @@
 		flex-wrap: wrap;
 		align-items: center;
 		gap: var(--space-3);
+	}
+	.choices {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+		gap: var(--space-3);
+		margin: 0 0 var(--space-4);
+		padding: 0;
+		border: 0;
+	}
+	.choices legend {
+		padding: 0;
+		margin-bottom: var(--space-2);
+		font-size: var(--text-sm);
+		font-weight: var(--weight-semibold);
+		font-variation-settings: 'wdth' var(--width-label);
 	}
 	.stats {
 		gap: var(--space-8);

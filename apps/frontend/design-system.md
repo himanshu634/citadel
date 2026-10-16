@@ -126,7 +126,7 @@ Rules:
 ## 7. Components
 
 Import from `$lib` (`import { Button, Card } from '$lib'`). Interactive primitives with focus
-management (Tabs, Tooltip, Dialog, Menu) are built on **bits-ui** and styled with our tokens. Do
+management (Tabs, Tooltip, Dialog, Menu, Select) are built on **bits-ui** and styled with our tokens. Do
 not add another component library.
 
 | Component    | Rule                                                                                           |
@@ -137,7 +137,12 @@ not add another component library.
 | `NodeChip`   | A graph node reference: type dot plus label. Type is in the accessible name.                   |
 | `Avatar`     | Initials on the node colour of what it stands for. Always next to the name.                    |
 | `Card`       | A titled panel. Title in wide type, optional description and actions. No nesting, no shadow.   |
-| `Input`      | Always has a label (`hideLabel` keeps it for screen readers). `hint` explains; `error` says what is wrong and how to fix it. |
+| `Input`      | Always has a label (`hideLabel` keeps it for screen readers). `hint` explains; `error` says what is wrong and how to fix it. Disabled: sunken fill, muted text, no hover change, `not-allowed` cursor. |
+| `Select`     | Pick one of a short list (bits-ui). Label always visible; `hint` explains, `error` says what to fix. Two or three options that need explaining are `ChoiceCard`s instead. |
+| `ChoiceCard` | One option of a few that need a sentence each. A real radio in a label: selected = accent border, `--color-accent-soft` fill and a filled dot. Wrap the set in a `fieldset` with a `legend`. |
+| `Checkbox`   | One yes/no with its label beside it. Checked is an ink box with a check, never accent, so it does not compete with the one accent block. |
+| `TagInput`   | Several short values in one field. Enter or comma adds, paste splits, Backspace on empty removes the last; each tag has "Remove <tag>". `mono` for paths and ids. Rules live in `src/lib/tags.ts`. |
+| `Stepper`    | The steps of a flow. The current step is the one solid accent block with square corners; done steps show a check in an ink circle, later steps their number. |
 | `Tabs`       | The selected tab is the solid accent block with square corners.                                |
 | `Menu`       | Pick one of a set or run a command. Selected item shows a check.                               |
 | `Tooltip`    | Extra hint only. Never the only place information lives. `detail` adds a mono second line (an id).                                       |
