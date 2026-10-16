@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import pytest
+from agents.history import Recorder
+from agents.testing import FakeClient, reply, settings, submit, text, tool_use  # noqa: F401
 from langgraph.checkpoint.memory import InMemorySaver
-from tests.api.conftest import write
-from tests.api.test_ask import frames, make_client
-from tests.test_agent import FakeClient, reply, settings, submit, text, tool_use  # noqa: F401
+
+from .conftest import write
+from .test_ask import frames, make_client
 
 
 @pytest.fixture
@@ -57,6 +59,8 @@ def test_an_asked_chat_is_listed_and_reopens_with_everything(company, runner, cl
 
     touched = client.get(f"/api/companies/{company}/refs/pr:1/threads").json()
     assert [t["id"] for t in touched] == [thread_id]
+    doc = client.get(f"/api/companies/{company}/refs/doc:docs%2Fauth.md/threads")
+    assert doc.status_code == 200 and doc.json() == []  # a uid with a slash still routes
 
 
 def test_the_list_pages(company, runner):
@@ -81,8 +85,6 @@ def test_a_thumbs_shows_on_the_reopened_answer(company, runner, claude):
 
 
 def test_a_turn_no_run_will_finish_shows_as_stopped(company, runner, history):
-    from brain.agents.history import Recorder
-
     Recorder(history, "Cut off?").on({"kind": "start", "thread_id": "abc123"})
     client = make_client(runner, FakeClient())
     [chat] = client.get(f"/api/companies/{company}/threads").json()["threads"]
@@ -108,8 +110,6 @@ def test_delete_removes_the_chat(company, runner, claude, history):
 
 
 def test_a_chat_that_is_answering_cannot_be_deleted(company, runner, history):
-    from brain.agents.history import Recorder
-
     Recorder(history, "Busy?").on({"kind": "start", "thread_id": "abc123"})
     client = make_client(runner, FakeClient())
     client.app.state.asker.claim("abc123")

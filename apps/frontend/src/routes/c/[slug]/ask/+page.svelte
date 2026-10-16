@@ -61,11 +61,12 @@ Claude's responses and every tool call, MCP calls included).
 
 	const wanted = $derived(page.url.searchParams.get('thread'));
 	// The address names the open chat: reopen it when it changes (a link, back, a reload); a bare
-	// address (the Ask link, New chat) means a new chat. A running answer is never cut off.
+	// address (the Ask link, New chat) means a new chat. A running answer is never cut off: a chat
+	// picked meanwhile opens when it ends (the effect reads `running` for that).
 	$effect(() => {
 		const id = wanted;
+		if (thread.running) return;
 		untrack(() => {
-			if (thread.running) return;
 			if (id && id !== thread.threadId) void thread.load(id);
 			else if (!id && thread.threadId) thread.reset();
 		});

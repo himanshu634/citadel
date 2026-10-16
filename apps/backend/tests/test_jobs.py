@@ -8,11 +8,13 @@ import threading
 import time
 
 import pytest
-from brain import config, db, registry
+from backend import registry
+from backend.jobs import BuildSnapshot, JobRunner, JobRunning, PipelineSteps
+from backend.testing import SECOND, SRC, FakeSteps
+from brain import config, db
 from brain.adapters.canonical_jsonl import CanonicalJsonlSource
 from brain.events import BuildEvent
-from brain.jobs import BuildSnapshot, JobRunner, JobRunning, PipelineSteps
-from conftest import SECOND, SRC, FakeSteps, needs_graph, synthetic_company
+from brain.testing import needs_graph, synthetic_company
 
 TERMINAL = {"done", "failed", "stopped"}
 

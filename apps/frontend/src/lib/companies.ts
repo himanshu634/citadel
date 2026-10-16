@@ -8,7 +8,7 @@
 
 import type { CompanyStatus } from './types';
 
-/** Same pattern as the backend's SLUG_RE (apps/backend/brain/config.py). */
+/** Same pattern as the backend's SLUG_RE (apps/brain/brain/config.py). */
 const SLUG = /^[a-z0-9][a-z0-9_]*$/;
 
 function base(name: string): string {

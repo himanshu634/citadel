@@ -8,10 +8,11 @@ import json
 import time
 
 import pytest
-from brain import config, config_diff
-from brain.api import builds, create_app
-from brain.jobs import BuildSnapshot, JobRunner
-from conftest import FakeSteps
+from backend import config_diff
+from backend.api import builds, create_app
+from backend.jobs import BuildSnapshot, JobRunner
+from backend.testing import FakeSteps
+from brain import config
 from fastapi.testclient import TestClient
 from redis.exceptions import ConnectionError as RedisConnectionError
 
@@ -264,7 +265,7 @@ async def test_status_stream_survives_the_graph_going_down(company, runner, gate
     def down(slug):
         raise RedisConnectionError("down")
 
-    monkeypatch.setattr("brain.api.companies.status_of", down)
+    monkeypatch.setattr("backend.api.companies.status_of", down)
     out = await statuses_until_idle(runner, gate)
     assert out[0]["status"] == "building" and out[0]["graph_reachable"] is False
     assert out[-1]["status"] == "unknown" and out[-1]["build"]["state"] == "done"

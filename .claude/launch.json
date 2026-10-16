@@ -20,7 +20,7 @@
       "runtimeArgs": [
         "run",
         "uvicorn",
-        "brain.api:app",
+        "backend.api:app",
         "--host",
         "127.0.0.1",
         "--port",

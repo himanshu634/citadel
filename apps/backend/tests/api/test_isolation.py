@@ -6,10 +6,12 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from brain import registry, tools
-from brain.api import create_app
-from brain.api.companies import status_of
-from conftest import needs_graph, second_company, synthetic_company
+from backend import registry
+from backend.api import create_app
+from backend.api.companies import status_of
+from backend.testing import second_company
+from brain import tools
+from brain.testing import needs_graph, synthetic_company
 from fastapi.testclient import TestClient
 
 pytestmark = needs_graph
@@ -83,7 +85,7 @@ def responses(client: TestClient, slug: str, args: dict[str, str]) -> dict[str, 
 def test_every_company_route_answers_only_for_its_company(
     api_root, runner, gate, monkeypatch, synthetic_graph, second_graph
 ):
-    monkeypatch.setattr("brain.api.companies.status_of", status_of)  # the real graph status
+    monkeypatch.setattr("backend.api.companies.status_of", status_of)  # the real graph status
     registry.write_new(synthetic_company(synthetic_graph))
     registry.write_new(second_company(second_graph))
     client = TestClient(create_app(runner))

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from backend.config_diff import diff
 from brain.adapters.github import GithubSource
 from brain.adapters.local_docs import LocalDocsSource
 from brain.config import CompanyConfig
-from brain.config_diff import diff
 
 GITHUB = GithubSource(type="github", repo="acme-labs/platform")
 DOCS = LocalDocsSource(type="local_docs", path="data/inbox/acme_labs/docs")

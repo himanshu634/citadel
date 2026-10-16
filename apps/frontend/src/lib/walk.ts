@@ -1,7 +1,7 @@
 /**
  * The agent's walk through the graph, as the Ask page draws it (design direction D).
  *
- * Why: each tool call arrives with the nodes and relationships it touched (brain/agents/walk.py).
+ * Why: each tool call arrives with the nodes and relationships it touched (agents/walk.py).
  * This module merges the steps of one answer into one picture, lays it out so earlier nodes stay
  * put as new steps arrive, works out what a citation lights up, and turns rows, calls and the
  * answer's Markdown into plain values the components render. Pure: no Svelte, no fetch.

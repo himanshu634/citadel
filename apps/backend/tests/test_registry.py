@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import shutil
-from pathlib import Path
 
 import pytest
-from brain import config, registry
-from conftest import synthetic_company
+from backend import registry
+from brain import config
+from brain.testing import synthetic_company
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = config.REPO_ROOT
 
 VALID_DRAFT = {
     "slug": "acme_labs",

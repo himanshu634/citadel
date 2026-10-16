@@ -1,4 +1,4 @@
-/** Shapes the UI renders. They mirror the brain's graph labels (apps/backend/brain/canonical.py). */
+/** Shapes the UI renders. They mirror the brain's graph labels (apps/brain/brain/canonical.py). */
 
 export type NodeType = 'person' | 'team' | 'system' | 'work-item' | 'change' | 'document';
 
@@ -71,8 +71,9 @@ export interface MenuItem {
 }
 
 // --- Companies and builds (the HTTP API) --------------------------------------------------------
-// Written by hand to match apps/backend/brain/api/models.py, jobs.py, events.py, config_diff.py and
-// the row models in tools.py. Field names are the backend's (snake_case), not renamed.
+// Written by hand to match apps/backend/backend/api/models.py, jobs.py, config_diff.py,
+// apps/brain/brain/events.py and the row models in apps/brain/brain/tools.py. Field names are the
+// backend's (snake_case), not renamed.
 
 /** `unknown`: FalkorDB did not answer and no build says otherwise (`graph_reachable` is false). */
 export type CompanyStatus = 'ready' | 'building' | 'failed' | 'empty' | 'invalid' | 'unknown';
@@ -149,7 +150,7 @@ export interface SourceConfig {
 	[field: string]: unknown;
 }
 
-/** The company YAML as the API reads and writes it (apps/backend/brain/config.py CompanyConfig). */
+/** The company YAML as the API reads and writes it (apps/brain/brain/config.py CompanyConfig). */
 export interface CompanyConfig {
 	slug: string;
 	name: string;
@@ -297,7 +298,7 @@ export const LABEL_TYPES: Record<GraphLabel, NodeType> = {
 	Document: 'document'
 };
 
-/** One node of `GET /api/companies/<slug>/graph` (apps/backend/brain/graph_view.py). */
+/** One node of `GET /api/companies/<slug>/graph` (apps/brain/brain/graph_view.py). */
 export interface GraphNode {
 	uid: string;
 	label: GraphLabel;
@@ -358,7 +359,7 @@ export interface Entity {
 	neighbour_count: number;
 }
 
-// --- Ask (POST /api/companies/{slug}/ask, Server-Sent Events; brain/api/models.py Ask*) -------
+// --- Ask (POST /api/companies/{slug}/ask, Server-Sent Events; backend/api/models.py Ask*) -------
 
 /** A node one step touched. `label` is the graph label (Person, Team, System, WorkItem ...). */
 export interface WalkNode {

@@ -1,5 +1,5 @@
 /**
- * The HTTP client for the brain API (apps/backend/brain/api), called through `/api`.
+ * The HTTP client for the brain API (apps/backend/backend/api), called through `/api`.
  *
  * Why: one place knows the routes, the query flags and how errors look, so pages and stores deal
  * in typed values and `ApiError`. In dev, vite proxies `/api` to `make api`. The live event
