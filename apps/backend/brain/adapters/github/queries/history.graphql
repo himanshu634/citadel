@@ -1,0 +1,17 @@
+# Default-branch commits since $since: maps each commit to its GitHub login (git itself only
+# knows names and emails, and we never store emails). File lists come from the local git clone.
+query History($owner: String!, $name: String!, $after: String, $since: GitTimestamp) {
+  rateLimit { remaining resetAt cost }
+  repository(owner: $owner, name: $name) {
+    defaultBranchRef {
+      target {
+        ... on Commit {
+          history(first: 100, after: $after, since: $since) {
+            pageInfo { hasNextPage endCursor }
+            nodes { oid committedDate messageHeadline url author { name user { login } } }
+          }
+        }
+      }
+    }
+  }
+}

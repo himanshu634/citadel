@@ -9,10 +9,11 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 from brain.adapters.base import SourceUnavailable
 from brain.canonical import CanonicalRecord, Document
-from brain.config import CompanyConfig, LocalDocsSource
+from brain.config import CompanyConfig, PathSource
 
 SUFFIXES = {".md", ".markdown", ".txt"}
 
@@ -25,8 +26,13 @@ def doc_title(path: Path, body: str) -> str:
     return path.stem.replace("-", " ").replace("_", " ")
 
 
+class LocalDocsSource(PathSource):
+    type: Literal["local_docs"]
+
+
 class LocalDocsAdapter:
     name = "local_docs"
+    source_model = LocalDocsSource
 
     def key(self, source: LocalDocsSource) -> str:
         return f"{self.name}:{source.path.as_posix()}"

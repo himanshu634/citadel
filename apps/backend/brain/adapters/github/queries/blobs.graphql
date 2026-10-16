@@ -1,0 +1,8 @@
+# Text of up to 50 files at one revision, as aliased fields f0..f49. The fetcher builds the
+# `expression` list ("main:docs/x.md") and reads each alias back. Used for docs and CODEOWNERS.
+query Blobs($owner: String!, $name: String!) {
+  rateLimit { remaining resetAt cost }
+  repository(owner: $owner, name: $name) {
+    __BLOB_FIELDS__
+  }
+}

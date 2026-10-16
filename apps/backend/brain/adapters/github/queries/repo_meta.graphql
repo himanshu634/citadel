@@ -1,0 +1,11 @@
+# Repository facts needed before fetching: visibility (private repos need data_permission: own),
+# default branch, and which CODEOWNERS location exists.
+query RepoMeta($owner: String!, $name: String!) {
+  rateLimit { remaining resetAt cost }
+  repository(owner: $owner, name: $name) {
+    nameWithOwner
+    url
+    isPrivate
+    defaultBranchRef { name }
+  }
+}

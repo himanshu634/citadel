@@ -17,7 +17,7 @@ import re
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -83,35 +83,19 @@ class Window(_Strict):
     since: date
 
 
-class GithubSource(_Strict):
-    type: Literal["github"]
-    repo: str  # "owner/name"
-    include: list[
-        Literal["commits", "pull_requests", "issues", "reviews", "codeowners", "repo_docs"]
-    ] = ["commits", "pull_requests", "issues", "reviews", "codeowners", "repo_docs"]
+class SourceConfig(BaseModel):
+    """Base for one entry under `sources:`. Each adapter defines its own subclass (with a
+    `type: Literal[...]` and its settings) next to its code, so adding a source type needs no
+    change here. CompanyConfig validates every entry against the registered adapter's model."""
 
-    @field_validator("repo")
-    @classmethod
-    def _owner_slash_name(cls, v: str) -> str:
-        if not re.fullmatch(r"[\w.-]+/[\w.-]+", v):
-            raise ValueError("repo must look like 'owner/name'")
-        return v
+    model_config = ConfigDict(extra="forbid")
+    type: str
 
 
-class LocalDocsSource(_Strict):
-    type: Literal["local_docs"]
+class PathSource(SourceConfig):
+    """A source that reads a local folder (path is repo-root relative)."""
+
     path: Path
-
-
-class CanonicalJsonlSource(_Strict):
-    type: Literal["canonical_jsonl"]
-    path: Path
-
-
-# A new adapter adds its source model here. `type` picks the model while parsing.
-Source = Annotated[
-    GithubSource | LocalDocsSource | CanonicalJsonlSource, Field(discriminator="type")
-]
 
 
 class SystemRule(_Strict):
@@ -135,9 +119,24 @@ class CompanyConfig(_Strict):
     name: str
     data_permission: Literal["public", "synthetic", "own"]
     window: Window
-    sources: list[Source]
+    sources: list[Any]  # each entry becomes its adapter's SourceConfig subclass, see below
     systems: Systems = Systems()
     people: People = People()
+
+    @field_validator("sources")
+    @classmethod
+    def _sources_via_registry(cls, entries: list[Any]) -> list[SourceConfig]:
+        from brain.adapters import REGISTRY  # late import: adapters import this module
+
+        out = []
+        for i, entry in enumerate(entries):
+            kind = entry.get("type") if isinstance(entry, dict) else None
+            adapter = REGISTRY.get(kind)
+            if adapter is None:
+                known = ", ".join(sorted(REGISTRY))
+                raise ValueError(f"sources[{i}]: unknown type {kind!r} (registered: {known})")
+            out.append(adapter.source_model.model_validate(entry))
+        return out
 
     @property
     def graph_name(self) -> str:

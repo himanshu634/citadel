@@ -1,17 +1,19 @@
 """Adapter registry: source `type` (as written in companies/<slug>.yaml) -> adapter.
 
-Adding a new source = one new module in this folder + one line here
-(+ its source model in config.Source). See _template.py.
+Adding a new source = one new module in this folder (adapter + its SourceConfig model) + one
+line here. See _template.py.
 """
 
 from __future__ import annotations
 
 from brain.adapters.base import Adapter, SourceUnavailable
 from brain.adapters.canonical_jsonl import CanonicalJsonlAdapter
+from brain.adapters.github import GithubAdapter
 from brain.adapters.local_docs import LocalDocsAdapter
 
 REGISTRY: dict[str, Adapter] = {
     "canonical_jsonl": CanonicalJsonlAdapter(),
+    "github": GithubAdapter(),
     "local_docs": LocalDocsAdapter(),
 }
 

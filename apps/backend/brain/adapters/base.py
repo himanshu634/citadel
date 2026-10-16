@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from brain.canonical import CanonicalRecord
-from brain.config import CompanyConfig
+from brain.config import CompanyConfig, SourceConfig
 
 
 class SourceUnavailable(Exception):
@@ -24,6 +24,7 @@ class SourceUnavailable(Exception):
 
 class Adapter(Protocol):
     name: str  # the `type` used in companies/<slug>.yaml
+    source_model: type[SourceConfig]  # validates that source's entry in the company YAML
 
     def key(self, source: Any) -> str:
         """Stable id of one configured source, e.g. 'github:FalkorDB/FalkorDB'. Keys SyncState."""

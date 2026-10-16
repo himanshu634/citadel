@@ -54,14 +54,21 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   people/teams/systems use source-free uids (`person:<login>`, `team:<name>`, `system:<name>`) so
   the same entity from two sources becomes one node. No email addresses anywhere: people are
   identified by login. `WorkItem.kind` covers PRs, issues, tickets and chat threads.
-- **`adapters/`**: one module per source type plus a line in `adapters/__init__.py`'s `REGISTRY`
-  and a source model in `config.Source`. Copy `adapters/_template.py`. `fetch` does all network
+- **`adapters/`**: one module (or package) per source type, defining the adapter and its
+  `SourceConfig` subclass, plus one line in `adapters/__init__.py`'s `REGISTRY`; `CompanyConfig`
+  validates each `sources:` entry through the registry. Copy `adapters/_template.py`. `fetch` does all network
   I/O into the cache; `records` must read only the cache or local files, so re-ingest costs no API
   calls. Raise `SourceUnavailable` to make ingest skip a source.
 - **`normalize.py`** applies the company YAML: path → System rules (first match wins, then
   `fallback`, `ignore`), bot detection and login aliases, conventional-commit prefix →
-  `Change.kind`, email scrubbing, the `window.since` cutoff, and synthesising any referenced
-  person/team/system that has no record. Keep it pure.
+  `Change.kind`, email scrubbing, the `window.since` cutoff (a work item needs real activity in
+  the window: created/closed/merged, or a comment/review; a bare `updated_at` bump does not
+  count), and synthesising any referenced person/team/system that has no record. Keep it pure.
+- **`adapters/github/`**: `fetch.py` (GraphQL pages in resumable "runs" + a blob-less partial
+  clone for commit file lists + CODEOWNERS/doc texts; refuses private repos unless
+  `data_permission: own`), `transform.py` (cache → records; only completed runs are read),
+  GraphQL documents in `queries/*.graphql`. Tests use recorded pages in
+  `tests/fixtures/github/`.
 - **`loader.py`** batches rows (`UNWIND $rows`, 500 per query) into `queries/load/*.cypher`. All
   writes are `MERGE` on uid then `SET`, so loads are idempotent. Nodes are written before
   relationships; relationship queries `MATCH` both ends, so dangling links are dropped and counted.

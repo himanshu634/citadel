@@ -1,0 +1,115 @@
+[
+ {
+  "number": 2539,
+  "title": "[Rust] Exceeding the attribute-id cap silently drops every property on the node and still reports success",
+  "body": "## Summary\n\nWhen a `CREATE` introduces more distinct attribute names than the graph's attribute-id space can hold, the Rust engine (`falkordb/falkordb:edge`) reports **success** and creates the node with **zero properties** \u2014 not just the overflowing ones, *all* of them. The C engine returns a clean error and creates nothing.\n\nFound while triaging #2331 against Rust. The security substance of #233",
+  "url": "https://github.com/FalkorDB/FalkorDB/issues/2539",
+  "state": "CLOSED",
+  "createdAt": "2026-08-17T07:20:15Z",
+  "updatedAt": "2026-10-15T14:10:45Z",
+  "closedAt": "2026-10-15T14:10:45Z",
+  "author": {
+   "login": "gkorland",
+   "__typename": "User"
+  },
+  "labels": {
+   "nodes": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "rust"
+    }
+   ]
+  },
+  "comments": {
+   "nodes": [
+    {
+     "id": "IC_kwDOJ9smgc8AAAABPN0EsQ",
+     "author": {
+      "login": "gkorland",
+      "__typename": "User"
+     },
+     "body": "Re-verified independently. **Confirmed real, and the report is accurate.** Reproduced both engines' behaviour, including the incidental C crash.\n\n**Rust `edge`** \u2014 bisected the threshold on a fresh gr",
+     "createdAt": "2026-08-17T12:33:24Z",
+     "url": "https://github.com/FalkorDB/FalkorDB/issues/2539#issuecomment-5316084913"
+    },
+    {
+     "id": "IC_kwDOJ9smgc8AAAABRp0L7w",
+     "author": {
+      "login": "gkorland",
+      "__typename": "User"
+     },
+     "body": "## Triage: Rust silent data loss on attribute-id exhaustion - C rejects cleanly\n\n**Status:** Confirmed Rust engine defect with data loss\n\n**Verification:**\n- **C 4.20.3:** Clean error on attribute cap",
+     "createdAt": "2026-08-31T14:16:59Z",
+     "url": "https://github.com/FalkorDB/FalkorDB/issues/2539#issuecomment-5479664623"
+    },
+    {
+     "id": "IC_kwDOJ9smgc8AAAABW1EFiQ",
+     "author": {
+      "login": "AviAvni",
+      "__typename": "User"
+     },
+     "body": "Root cause of the \"*all* properties vanish\" part, verified on `main` @ 55204c94b.\n\n`Slot.len` is a `u16` written as `n as u16` (`graph/src/graph/attribute_store.rs:598`, `:609-610`). Once the dictiona",
+     "createdAt": "2026-09-25T04:57:38Z",
+     "url": "https://github.com/FalkorDB/FalkorDB/issues/2539#issuecomment-5827003785"
+    }
+   ]
+  }
+ },
+ {
+  "number": 8,
+  "title": "Nested JSON on nodes?",
+  "body": "Hi. \r\nI intend to implement FalkorDB as a replacement for RedisGraph as soon as I get through my current backlog! ;-) \r\n\r\nI know RedisGraph doesn't support nested json objects on graph nodes because Cypher doesn't support it (as I understand).\r\n\r\nI am in the process of working up a way to use RedisJson (which of course does support nested json) in conjunction with RedisGraph / FalkorDB. I am just ",
+  "url": "https://github.com/FalkorDB/FalkorDB/issues/8",
+  "state": "OPEN",
+  "createdAt": "2023-08-08T01:06:22Z",
+  "updatedAt": "2026-08-03T21:52:24Z",
+  "closedAt": null,
+  "author": {
+   "login": "flowt-au",
+   "__typename": "User"
+  },
+  "labels": {
+   "nodes": [
+    {
+     "name": "enhancement"
+    }
+   ]
+  },
+  "comments": {
+   "nodes": [
+    {
+     "id": "IC_kwDOJ9smgc5jlsqy",
+     "author": {
+      "login": "swilly22",
+      "__typename": "User"
+     },
+     "body": "Hi @flowt-au thank you for opening an issue.\r\n\r\nIndeed the decision against allowing nested Map objects as attribute values was for compatibility reasons,\r\nbut let us reconsider, I'll update on our de",
+     "createdAt": "2023-08-09T07:37:58Z",
+     "url": "https://github.com/FalkorDB/FalkorDB/issues/8#issuecomment-1670826674"
+    },
+    {
+     "id": "IC_kwDOJ9smgc5jlxMP",
+     "author": {
+      "login": "flowt-au",
+      "__typename": "User"
+     },
+     "body": "Thanks! I have coded up a solution that takes the nested objects (in my case a map of arrays) and for each key in the map makes a \"sub node\" of the node owning the map. It seems to be a good solution ",
+     "createdAt": "2023-08-09T07:52:30Z",
+     "url": "https://github.com/FalkorDB/FalkorDB/issues/8#issuecomment-1670845199"
+    },
+    {
+     "id": "IC_kwDOJ9smgc5jlzhC",
+     "author": {
+      "login": "flowt-au",
+      "__typename": "User"
+     },
+     "body": "One other requirement I have that might be pushing the envelope way too far is that I need to be able to search the items in the nested map of arrays so I can get a list of nodes having specific items",
+     "createdAt": "2023-08-09T07:59:31Z",
+     "url": "https://github.com/FalkorDB/FalkorDB/issues/8#issuecomment-1670854722"
+    }
+   ]
+  }
+ }
+]

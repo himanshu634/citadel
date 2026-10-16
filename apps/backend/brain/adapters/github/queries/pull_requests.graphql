@@ -1,0 +1,21 @@
+# Pull requests, newest update first (the connection has no `since` filter, so the fetcher stops
+# paging once updatedAt falls before the window). Nested lists are capped; that is enough for
+# authorship, reviews, discussion and commit links.
+query PullRequests($owner: String!, $name: String!, $after: String) {
+  rateLimit { remaining resetAt cost }
+  repository(owner: $owner, name: $name) {
+    pullRequests(first: 25, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number title body url state createdAt updatedAt closedAt mergedAt
+        author { login __typename }
+        labels(first: 20) { nodes { name } }
+        mergeCommit { oid }
+        closingIssuesReferences(first: 10) { nodes { number repository { nameWithOwner } } }
+        commits(first: 100) { nodes { commit { oid } } }
+        reviews(first: 50) { nodes { id author { login __typename } state submittedAt url } }
+        comments(first: 50) { nodes { id author { login __typename } body createdAt url } }
+      }
+    }
+  }
+}

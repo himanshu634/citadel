@@ -1,0 +1,16 @@
+# Issues updated since $since, oldest update first. The `issues` connection excludes PRs.
+query Issues($owner: String!, $name: String!, $after: String, $since: DateTime) {
+  rateLimit { remaining resetAt cost }
+  repository(owner: $owner, name: $name) {
+    issues(first: 50, after: $after, orderBy: {field: UPDATED_AT, direction: ASC},
+           filterBy: {since: $since}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number title body url state createdAt updatedAt closedAt
+        author { login __typename }
+        labels(first: 20) { nodes { name } }
+        comments(first: 50) { nodes { id author { login __typename } body createdAt url } }
+      }
+    }
+  }
+}

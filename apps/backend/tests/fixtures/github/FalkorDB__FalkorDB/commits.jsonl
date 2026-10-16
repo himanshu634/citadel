@@ -1,0 +1,2 @@
+{"sha": "0f45a8685aa8d542f026b4f5f6bcaa0fbb43c1c9", "author_name": "Avi Avni", "committed_at": "2026-10-15T13:51:48Z", "subject": "fix: bulk-imported attribute spans never overflow Slot::len (#2539) (#3063)", "files": ["graph/src/graph/attribute_store.rs"]}
+{"sha": "13e849935c53279cf4fb56422cec34fcb760f494", "author_name": "Avi Avni", "committed_at": "2026-10-15T11:21:06Z", "subject": "fix: a deleted edge no longer keeps its type after a constraint registers a new type (#3277)", "files": ["graph/src/graph/graph.rs", "tests/flow/test_effects_ddl.py"]}

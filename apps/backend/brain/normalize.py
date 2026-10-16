@@ -6,7 +6,9 @@ module applies the config so the loader can stay dumb:
 - bot detection and login aliases,
 - conventional-commit prefix -> Change.kind,
 - email addresses scrubbed from every text field (people are identified by login only),
-- the ingest window (drop activity before `window.since`),
+- the ingest window: activity before `window.since` is dropped. A work item counts when it was
+  created, closed or merged in the window, or got a comment or review in it; a bare
+  `updated_at` bump (bulk relabels, bot sweeps) is not activity,
 - make sure every referenced person, team and system exists as a record.
 All functions are pure: same input, same output, no network, no database.
 """
@@ -31,6 +33,7 @@ from brain.canonical import (
     Team,
     WorkItem,
     team_uid,
+    to_utc,
 )
 from brain.config import CompanyConfig, People, Systems
 
@@ -177,6 +180,22 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
     referenced_teams: set[str] = set()
     defined_systems: set[str] = set()
     referenced_systems: dict[str, str | None] = {}  # name -> path rule
+    maybe_items: dict[str, WorkItem] = {}  # only updated in the window; kept if active
+    active_items: set[str] = set()  # work items with a comment or review in the window
+
+    def ref_system(name: str, rule: str | None) -> None:
+        """Remember a referenced system; a real path rule beats an earlier None."""
+        if referenced_systems.get(name) is None:
+            referenced_systems[name] = rule
+
+    def clean_item(w: WorkItem) -> WorkItem:
+        return w.model_copy(
+            update={
+                "author_login": login(w.author_login),
+                "title": scrub_emails(w.title),
+                "body": scrub_emails(w.body),
+            }
+        )
 
     def login(value: str | None) -> str | None:
         if value is None:
@@ -210,9 +229,9 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
             for f in rec.files:
                 if hit := system_for_path(f, systems):
                     touches.setdefault(hit[0], []).append(_clean_path(f))
-                    referenced_systems.setdefault(hit[0], hit[1])
+                    ref_system(hit[0], hit[1])
             for name in rec.systems:
-                referenced_systems.setdefault(name, None)
+                ref_system(name, None)
             yield rec.model_copy(
                 update={
                     "author_login": login(rec.author_login),
@@ -222,20 +241,18 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
                 }
             )
         elif isinstance(rec, WorkItem):
-            if not _in_window(rec.changed_at(), since):
-                continue
-            yield rec.model_copy(
-                update={
-                    "author_login": login(rec.author_login),
-                    "title": scrub_emails(rec.title),
-                    "body": scrub_emails(rec.body),
-                }
-            )
+            own_dates = (rec.created_at, rec.closed_at, rec.merged_at)
+            if any(d is not None and to_utc(d) >= since for d in own_dates):
+                yield clean_item(rec)
+            elif _in_window(to_utc(rec.updated_at), since) and rec.updated_at is not None:
+                maybe_items[rec.uid] = rec  # decided after all comments/reviews are seen
         elif isinstance(rec, Review):
             if _in_window(rec.changed_at(), since):
+                active_items.add(rec.work_item_uid)
                 yield rec.model_copy(update={"reviewer_login": login(rec.reviewer_login)})
         elif isinstance(rec, Comment):
             if _in_window(rec.changed_at(), since):
+                active_items.add(rec.work_item_uid)
                 yield rec.model_copy(
                     update={"author_login": login(rec.author_login), "body": scrub_emails(rec.body)}
                 )
@@ -254,7 +271,7 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
                 else systems_for_pattern(rec.pattern, systems)
             )
             for name, rule in mapped:
-                referenced_systems.setdefault(name, rule)
+                ref_system(name, rule)
             owner = login(rec.owner) if rec.owner_kind == "person" else rec.owner
             if rec.owner_kind == "team":
                 referenced_teams.add(rec.owner)
@@ -262,9 +279,15 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
         elif isinstance(rec, Link):
             if rec.to_label == "Team":
                 referenced_teams.add(rec.to_uid.removeprefix("team:"))
+            if rec.to_label == "System":  # e.g. a doc mentioning src/index/
+                ref_system(rec.to_uid.removeprefix("system:"), None)
             yield rec
         else:  # pragma: no cover - a new record type must be handled above
             raise TypeError(f"normalize does not know {type(rec).__name__}")
+
+    for uid, item in maybe_items.items():
+        if uid in active_items:
+            yield clean_item(item)
 
     for name in sorted(referenced_people - defined_people):
         yield Person(login=name, is_bot=is_bot(name, people), source="derived")

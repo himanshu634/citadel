@@ -113,3 +113,51 @@ def test_normalize_scrubs_text_aliases_bots_and_window():
     assert out["person:copilot"].is_bot is True
     assert out["person:alice"].is_bot is False
     assert out["system:Indexing"].path_rule == "src/index/**"
+
+
+def test_work_item_needs_real_activity_in_window():
+    def issue(uid, **dates):
+        return WorkItem(
+            uid=uid,
+            kind="issue",
+            title=uid,
+            state="open",
+            created_at="2026-01-01T00:00:00Z",
+            **dates,
+        )
+
+    touched = "2026-08-03T00:00:00Z"
+    records = [
+        issue("bulk_touched", updated_at=touched),  # relabelled by a bot: not activity
+        issue("commented", updated_at=touched),
+        issue("closed", updated_at=touched, closed_at="2026-05-01T00:00:00Z"),
+        Comment(
+            uid="c",
+            work_item_uid="commented",
+            author_login="bob",
+            created_at="2026-06-01T00:00:00Z",
+            body="still broken",
+        ),
+    ]
+    uids = {r.uid for r in normalize(records, company())}
+    assert "bulk_touched" not in uids
+    assert {"commented", "closed"} <= uids
+
+
+def test_system_path_rule_survives_an_earlier_mention():
+    from brain.canonical import Link
+
+    records = [
+        Link(
+            rel="MENTIONS",
+            from_uid="w",
+            from_label="WorkItem",
+            to_uid="system:Indexing",
+            to_label="System",
+        ),
+        Change(
+            uid="ch", sha="1", date="2026-05-01T00:00:00Z", subject="x", files=["src/index/a.c"]
+        ),
+    ]
+    out = {r.uid: r for r in normalize(records, company())}
+    assert out["system:Indexing"].path_rule == "src/index/**"
