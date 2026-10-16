@@ -334,6 +334,8 @@ export interface AskSource {
 }
 
 export interface AskAnswer {
+	/** This turn's trace on the server, for a thumbs; null when it was not kept (hide the thumbs). */
+	trace_id?: string | null;
 	thread_id: string;
 	/** Markdown with [n] markers; null when there is no answer (see stop). */
 	text: string | null;
@@ -353,4 +355,13 @@ export interface WalkStep extends AskStepEvent {
 	rows?: unknown[];
 	nodes?: WalkNode[];
 	rels?: WalkRel[];
+}
+
+/** A thumbs on one answer (POST .../traces/{trace_id}/feedback); null takes it back. */
+export type Rating = 'up' | 'down';
+
+export interface Feedback {
+	trace_id: string;
+	rating: Rating | null;
+	note: string | null;
 }

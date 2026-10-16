@@ -5,11 +5,12 @@
  * seconds: each tool call is asked for, then done, then the answer comes. This class turns those
  * events into turns the page draws, keeps the thread id so follow-ups join the same conversation,
  * and owns Stop (aborting the request; the server then stops the run at its next step) and Replay
- * (showing a finished walk again, one step at a time).
+ * (showing a finished walk again, one step at a time). A thumbs up or down on an answer is saved on
+ * its trace (`rate`); thumbs-down answers become draft eval cases on the server.
  */
 import { postEvents } from './api/ask';
-import { describeError } from './api/client';
-import type { AskAnswer, AskStepDoneEvent, AskStepEvent, WalkStep } from './types';
+import { api, describeError } from './api/client';
+import type { AskAnswer, AskStepDoneEvent, AskStepEvent, Rating, WalkStep } from './types';
 
 export const REPLAY_STEP_MS = 700;
 
@@ -19,6 +20,12 @@ export interface Turn {
 	answer: AskAnswer | null;
 	error: string | null;
 	status: 'running' | 'done' | 'failed' | 'stopped';
+	/** The thumbs on the answer, as saved (or being saved). */
+	rating: Rating | null;
+	/** What was wrong, sent with a thumbs down. */
+	note: string | null;
+	/** The last save: `failed` keeps the rating that was there before. */
+	rated: 'idle' | 'saving' | 'saved' | 'failed';
 }
 
 const EXAMPLES = [
@@ -61,7 +68,16 @@ export class AskThread {
 		const text = question.trim();
 		if (!text || this.running) return;
 		this.#stopReplay();
-		this.turns.push({ question: text, steps: [], answer: null, error: null, status: 'running' });
+		this.turns.push({
+			question: text,
+			steps: [],
+			answer: null,
+			error: null,
+			status: 'running',
+			rating: null,
+			note: null,
+			rated: 'idle'
+		});
 		const index = this.turns.length - 1;
 		const turn = this.turns[index];
 		this.selected = index;
@@ -111,6 +127,30 @@ export class AskThread {
 		} else if (event === 'error') {
 			turn.error = (data as { detail: string }).detail;
 			turn.status = 'failed';
+		}
+	}
+
+	/**
+	 * Rate a turn's answer (null takes the thumbs back). The thumbs moves at once; a failed save
+	 * puts the previous one back and says so. Answers without a trace cannot be rated.
+	 */
+	async rate(index: number, rating: Rating | null, note?: string): Promise<void> {
+		const turn = this.turns[index];
+		const traceId = turn?.answer?.trace_id;
+		if (!turn || !traceId || turn.rated === 'saving') return;
+		const before = { rating: turn.rating, note: turn.note };
+		turn.rating = rating;
+		if (note !== undefined) turn.note = note.trim() || null;
+		turn.rated = 'saving';
+		try {
+			const saved = await api.feedback(this.slug, traceId, rating, rating === 'down' ? (turn.note ?? undefined) : undefined);
+			turn.rating = saved.rating;
+			turn.note = saved.note;
+			turn.rated = 'saved';
+		} catch {
+			turn.rating = before.rating;
+			turn.note = before.note;
+			turn.rated = 'failed';
 		}
 	}
 
