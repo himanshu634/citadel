@@ -5,7 +5,7 @@ from __future__ import annotations
 from backend.config_diff import diff
 from brain.adapters.github import GithubSource
 from brain.adapters.local_docs import LocalDocsSource
-from brain.config import CompanyConfig
+from brain.config import CompanyConfig, McpServer
 
 GITHUB = GithubSource(type="github", repo="acme-labs/platform")
 DOCS = LocalDocsSource(type="local_docs", path="data/inbox/acme_labs/docs")
@@ -99,3 +99,10 @@ def test_refetch_follows_new_config_order():
 def test_reasons_are_plain_sentences():
     d = diff(BASE, with_since(with_sources(BASE, BASE.sources + [DOCS]), "2026-01-01"))
     assert d.reasons and all(r.endswith(".") and r[0].isupper() for r in d.reasons)
+
+
+def test_mcp_servers_change_needs_no_rebuild():
+    server = McpServer(name="handbook", url="https://handbook.example/mcp")
+    d = diff(BASE, BASE.model_copy(update={"mcp_servers": [server]}))
+    assert (d.changed, d.rebuild, d.refetch) == (True, False, [])
+    assert d.reasons and "MCP servers changed" in d.reasons[0]

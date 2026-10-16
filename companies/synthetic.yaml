@@ -20,3 +20,10 @@ systems:
 people:
   bots: ["ci-bot"]
   aliases: {}
+# Outside sources the Ask agent may call through the MCP connector (agents/mcp.py). Optional;
+# a change needs no rebuild. Anthropic connects to the server, so it must be public HTTPS.
+# mcp_servers:
+#   - name: handbook                          # cited as mcp:handbook/<tool>
+#     url: https://handbook.example.com/mcp
+#     token_env: HANDBOOK_MCP_TOKEN           # the env var (or .env key) holding the token
+#     allowed_tools: [search_docs]            # omit to allow every tool the server lists

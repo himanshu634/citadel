@@ -2,9 +2,9 @@
 
 Why: the Settings save route must tell the user, before anything runs, whether the change needs
 a graph rebuild and which sources must be downloaded again. Only the rules below touch the
-graph; renaming a company or changing its data permission does not. A rebuild reads the cache,
-so it costs no API calls; a source only needs a new download when the cache lacks its data (a
-new or changed source, or a window that now starts earlier).
+graph; renaming a company or changing its data permission or MCP servers does not. A rebuild
+reads the cache, so it costs no API calls; a source only needs a new download when the cache
+lacks its data (a new or changed source, or a window that now starts earlier).
 """
 
 from __future__ import annotations
@@ -65,6 +65,11 @@ def diff(old: CompanyConfig, new: CompanyConfig) -> ConfigDiff:
     if new.people != old.people:
         rebuild = True
         reasons.append("The people settings changed, so the graph is rebuilt from the cache.")
+    if new.mcp_servers != old.mcp_servers:
+        reasons.append(
+            "The MCP servers changed. New chats use them; no rebuild is needed. Chats started "
+            "before may fail on a follow-up, so start a new chat."
+        )
 
     return ConfigDiff(
         changed=old.model_dump() != new.model_dump(),

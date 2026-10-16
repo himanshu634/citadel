@@ -14,6 +14,8 @@ from typing import Any
 import anthropic
 from brain.config import get_settings
 
+from agents.mcp import McpTokenMissing
+
 # Server-side fallback: when a safety classifier declines a request, the API re-runs it on the
 # model Anthropic recommends for that refusal category, inside the same call.
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -38,6 +40,8 @@ def client() -> anthropic.Anthropic:
 
 def describe_error(exc: BaseException) -> str | None:
     """A sentence for a failed Claude call that says what to do, or None when `exc` is not one."""
+    if isinstance(exc, McpTokenMissing):
+        return str(exc)
     if isinstance(exc, anthropic.AuthenticationError):
         return "Anthropic rejected the credentials. Check ANTHROPIC_API_KEY in .env."
     if isinstance(exc, TypeError) and "authentication" in str(exc):

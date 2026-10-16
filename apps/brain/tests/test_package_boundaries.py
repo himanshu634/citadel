@@ -41,6 +41,7 @@ TESTING_MODULES = {f"{name}.testing" for name in PACKAGES}
 # Import name -> distribution name, where they differ.
 DISTRIBUTION = {
     "yaml": "pyyaml",
+    "dotenv": "python-dotenv",
     "ruamel": "ruamel-yaml",
     "sse_starlette": "sse-starlette",
     "pydantic_settings": "pydantic-settings",

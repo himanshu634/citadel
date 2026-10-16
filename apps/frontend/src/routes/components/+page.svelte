@@ -796,6 +796,10 @@
 				<figcaption>Answer: hover a chip or a source</figcaption>
 			</figure>
 			<figure>
+				<WalkAnswer answer={walks.withMcp} />
+				<figcaption>Answer citing an MCP result next to a graph node</figcaption>
+			</figure>
+			<figure>
 				<WalkSteps steps={walks.rough} />
 				<GraphWalk steps={[]} />
 				<WalkAnswer answer={walks.stopped} />
