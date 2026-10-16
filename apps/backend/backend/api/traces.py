@@ -15,9 +15,9 @@ from typing import Annotated
 from agents.traces import TraceSummary, summarize, window
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
-from brain.api.ask import Asker, get_asker
-from brain.api.deps import company_slug
-from brain.api.models import FeedbackIn, FeedbackOut
+from backend.api.ask import Asker, get_asker
+from backend.api.deps import company_slug
+from backend.api.models import FeedbackIn, FeedbackOut
 
 router = APIRouter(prefix="/companies/{slug}/traces", tags=["traces"])
 Slug = Annotated[str, Depends(company_slug)]

@@ -10,10 +10,11 @@ from __future__ import annotations
 import re
 import threading
 
+from brain import config
 from fastapi import HTTPException, Request
 
-from brain import config, registry
-from brain.jobs import JobRunner
+from backend import registry
+from backend.jobs import JobRunner
 
 
 def company_slug(slug: str) -> str:

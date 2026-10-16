@@ -30,13 +30,13 @@ from agents import checkpoint, llm
 from agents.ask import Answer, answer_out, run_events
 from agents.toolset import Toolset, graph_toolset
 from agents.traces import TraceStore, new_trace
+from brain import db
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
-from brain import db
-from brain.api.deps import company_slug
-from brain.api.models import AskAnswer, AskError, AskIn, AskStart, AskStep, AskStepDone
+from backend.api.deps import company_slug
+from backend.api.models import AskAnswer, AskError, AskIn, AskStart, AskStep, AskStepDone
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["ask"])

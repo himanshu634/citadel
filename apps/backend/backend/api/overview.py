@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
+from brain import db, tools
 from fastapi import APIRouter, Depends
 
-from brain import db, tools
-from brain.api.companies import read_config
-from brain.api.deps import company_slug
-from brain.api.models import Overview
+from backend.api.companies import read_config
+from backend.api.deps import company_slug
+from backend.api.models import Overview
 
 router = APIRouter(prefix="/companies/{slug}", tags=["overview"])
 

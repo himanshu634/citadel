@@ -1,4 +1,4 @@
-"""HTTP API for the frontend: `app` is what uvicorn serves (`brain.api:app`).
+"""HTTP API for the frontend: `app` is what uvicorn serves (`backend.api:app`).
 
 Why: the frontend never reads FalkorDB or the YAML files directly. Routes sit under /api and
 are scoped by company slug; CORS opens only the Vite dev server. The app owns one job runner;
@@ -17,9 +17,9 @@ from fastapi.responses import JSONResponse
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from brain.api import ask, builds, checks, companies, graph, onboard, overview, tools, traces
-from brain.api.ask import Asker
-from brain.jobs import JobRunner
+from backend.api import ask, builds, checks, companies, graph, onboard, overview, tools, traces
+from backend.api.ask import Asker
+from backend.jobs import JobRunner
 
 DEV_ORIGIN = "http://localhost:5173"
 

@@ -16,16 +16,17 @@ from typing import Annotated, NamedTuple
 
 import yaml
 from agents import checkpoint
+from brain import config, db
+from brain.config import CompanyConfig
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from brain import config, config_diff, db, registry
-from brain.api.deps import company_slug, get_runner, start_lock
-from brain.api.models import CompanyDetail, CompanyOut, ConfigChange, Status, ValidateOut
-from brain.config import CompanyConfig
-from brain.jobs import ACTIVE, BuildSnapshot, BuildSummary, JobRunner, JobRunning
+from backend import config_diff, registry
+from backend.api.deps import company_slug, get_runner, start_lock
+from backend.api.models import CompanyDetail, CompanyOut, ConfigChange, Status, ValidateOut
+from backend.jobs import ACTIVE, BuildSnapshot, BuildSummary, JobRunner, JobRunning
 
 log = logging.getLogger(__name__)
 

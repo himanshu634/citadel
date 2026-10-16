@@ -1,6 +1,6 @@
 # Company Brain: one entry point for day-to-day commands.
-# Each target wraps `uv run brain ...`, `uv run agents ...` or `docker compose ...`, so you never
-# type uv directly.
+# Each target wraps `uv run brain ...`, `uv run agents ...`, `uv run backend ...` or
+# `docker compose ...`, so you never type uv directly.
 # Most targets act on one company: pass SLUG=<slug> (default: falkordb).
 #
 #   make help                      list targets
@@ -10,6 +10,7 @@ SLUG ?= falkordb
 API_PORT ?= 8000
 BRAIN := uv run brain
 AGENTS := uv run agents
+BACKEND := uv run backend
 
 .DEFAULT_GOAL := help
 .PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask chat eval eval-drafts traces reset linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
@@ -100,7 +101,7 @@ eval-drafts: ## Thumbs-down answers of $(SLUG) as draft eval cases (printed; WRI
 		$(if $(filter 1 yes,$(WRITE)),--write)
 
 reset: ## Delete graphs brain_/agent_$(SLUG), its build history and Ask traces; needs CONFIRM=1
-	$(BRAIN) reset $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)
+	$(BACKEND) reset $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)
 
 linear-seed: ## Fill the Linear workspace of $(SLUG) with the synthetic tickets (CONFIRM=1)
 	$(BRAIN) linear-seed $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)
@@ -111,7 +112,7 @@ brain: ## Run any brain command: make brain ARGS="query falkordb graph_stats"
 # --- API ---------------------------------------------------------------------------------------
 
 api: ## API on http://127.0.0.1:$(API_PORT) (auto-reload)
-	uv run uvicorn brain.api:app --host 127.0.0.1 --port $(API_PORT) --reload
+	uv run uvicorn backend.api:app --host 127.0.0.1 --port $(API_PORT) --reload
 
 dev: ## API + frontend dev server together
 	$(MAKE) -j2 api fe-dev

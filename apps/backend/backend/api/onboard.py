@@ -1,7 +1,7 @@
 """Add a company from one public GitHub repository: the lookup the dialog shows while you type,
 and the create that writes the company and starts its first build in one request.
 
-Why: the dialog asks for a repository and nothing else (`brain.onboard` derives the rest).
+Why: the dialog asks for a repository and nothing else (`backend.onboard` derives the rest).
 Visibility is checked again on create, because the dialog's lookup is only advice: a private
 repository is refused here (422 `private_repo`) instead of minutes later by the fetch. The file
 is written and the build started under the same lock as the Settings save. A company whose
@@ -13,13 +13,13 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
+from brain.config import CompanyConfig
 from fastapi import APIRouter, HTTPException
 
-from brain import onboard, registry
-from brain.api import checks
-from brain.api.companies import Runner, StartLock, _detail, _field_errors, slug_taken
-from brain.api.models import CompanyRef, OnboardIn, OnboardOut, RepoLookup
-from brain.config import CompanyConfig
+from backend import onboard, registry
+from backend.api import checks
+from backend.api.companies import Runner, StartLock, _detail, _field_errors, slug_taken
+from backend.api.models import CompanyRef, OnboardIn, OnboardOut, RepoLookup
 
 log = logging.getLogger(__name__)
 

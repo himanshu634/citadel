@@ -13,8 +13,9 @@ import re
 from collections.abc import Callable
 from datetime import date
 
-from brain import registry
 from brain.config import CompanyConfig
+
+from backend import registry
 
 WINDOW_MONTHS = 12  # the same default as the step-by-step form at /new
 FALLBACK_SLUG = "company"

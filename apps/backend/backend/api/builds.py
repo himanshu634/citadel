@@ -17,16 +17,16 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 
 import anyio
+from brain.events import BuildEvent
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sse_starlette import EventSourceResponse
 
-from brain import registry
-from brain.api import companies
-from brain.api.companies import Runner, StartLock
-from brain.api.deps import company_slug
-from brain.api.models import BuildIn, CompanyOut
-from brain.events import BuildEvent
-from brain.jobs import ACTIVE, BuildSnapshot, JobRunner, JobRunning
+from backend import registry
+from backend.api import companies
+from backend.api.companies import Runner, StartLock
+from backend.api.deps import company_slug
+from backend.api.models import BuildIn, CompanyOut
+from backend.jobs import ACTIVE, BuildSnapshot, JobRunner, JobRunning
 
 router = APIRouter(tags=["builds"])
 

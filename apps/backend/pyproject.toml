@@ -1,0 +1,33 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Company Brain backend: the HTTP API for the frontend, build jobs, the company registry and onboarding."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "agents",
+    "anyio>=4",
+    "brain",
+    "fastapi>=0.115",
+    "httpx>=0.28.1",
+    "pydantic>=2",
+    "pyyaml>=6.0.3",
+    "redis>=7",
+    "ruamel-yaml>=0.18",
+    "sse-starlette>=2.1",
+    "typer>=0.27.3",
+    "uvicorn[standard]>=0.30",
+]
+
+[project.scripts]
+backend = "backend.cli:app"
+
+[tool.uv.sources]
+agents = { workspace = true }
+brain = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend"]

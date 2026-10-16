@@ -11,11 +11,10 @@ import logging
 from typing import Annotated, Any, Literal
 
 import httpx
-from fastapi import APIRouter, HTTPException, Path
-
 from brain.adapters.github import client
 from brain.adapters.github.client import GithubClient, GithubError, GithubRateLimited
 from brain.config import get_settings
+from fastapi import APIRouter, HTTPException, Path
 
 log = logging.getLogger(__name__)
 

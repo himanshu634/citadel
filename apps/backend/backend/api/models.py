@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from brain.tools import PersonActivity, RecentWorkItem, Stat, SystemSummary
 from pydantic import BaseModel, ConfigDict, Field
 
-from brain.config_diff import ConfigDiff
-from brain.jobs import BuildSnapshot, BuildSummary
-from brain.registry import FieldError
-from brain.tools import PersonActivity, RecentWorkItem, Stat, SystemSummary
+from backend.config_diff import ConfigDiff
+from backend.jobs import BuildSnapshot, BuildSummary
+from backend.registry import FieldError
 
 Status = Literal["ready", "building", "failed", "empty", "unknown", "invalid"]
 

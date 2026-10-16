@@ -9,10 +9,9 @@ new or changed source, or a window that now starts earlier).
 
 from __future__ import annotations
 
-from pydantic import BaseModel
-
 from brain.adapters import REGISTRY
 from brain.config import CompanyConfig, SourceConfig
+from pydantic import BaseModel
 
 
 class ConfigDiff(BaseModel):

@@ -71,8 +71,9 @@ export interface MenuItem {
 }
 
 // --- Companies and builds (the HTTP API) --------------------------------------------------------
-// Written by hand to match apps/backend/brain/api/models.py, jobs.py, events.py, config_diff.py and
-// the row models in tools.py. Field names are the backend's (snake_case), not renamed.
+// Written by hand to match apps/backend/backend/api/models.py, jobs.py, config_diff.py,
+// apps/brain/brain/events.py and the row models in apps/brain/brain/tools.py. Field names are the
+// backend's (snake_case), not renamed.
 
 /** `unknown`: FalkorDB did not answer and no build says otherwise (`graph_reachable` is false). */
 export type CompanyStatus = 'ready' | 'building' | 'failed' | 'empty' | 'invalid' | 'unknown';
@@ -358,7 +359,7 @@ export interface Entity {
 	neighbour_count: number;
 }
 
-// --- Ask (POST /api/companies/{slug}/ask, Server-Sent Events; brain/api/models.py Ask*) -------
+// --- Ask (POST /api/companies/{slug}/ask, Server-Sent Events; backend/api/models.py Ask*) -------
 
 /** A node one step touched. `label` is the graph label (Person, Team, System, WorkItem ...). */
 export interface WalkNode {

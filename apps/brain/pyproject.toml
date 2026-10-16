@@ -5,15 +5,13 @@ description = "Company Brain engine: adapters, ingestion, the FalkorDB graph and
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "falkordb>=1.8.0",
-    "fastapi>=0.115",
     "httpx>=0.28.1",
     "pydantic>=2",
     "pydantic-settings>=2.16.0",
     "pyyaml>=6.0.3",
-    "ruamel-yaml>=0.18",
-    "sse-starlette>=2.1",
+    "redis>=7",
+    "rich>=14",
     "typer>=0.27.3",
-    "uvicorn[standard]>=0.30",
 ]
 
 [project.scripts]

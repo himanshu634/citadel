@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
+from brain import db, graph_view
+from brain.graph_view import GraphView
 from fastapi import APIRouter, Depends, Query
 
-from brain import db, graph_view
-from brain.api.deps import company_slug
-from brain.graph_view import GraphView
+from backend.api.deps import company_slug
 
 router = APIRouter(prefix="/companies/{slug}", tags=["graph"])
 

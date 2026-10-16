@@ -21,12 +21,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from brain import config
+from brain.config import CompanyConfig
 from pydantic import BaseModel, ValidationError
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
-
-from brain import config
-from brain.config import CompanyConfig
 
 # Sections whose keys are edited one by one on update; `sources` is replaced as a whole.
 _NESTED = ("window", "systems", "people")

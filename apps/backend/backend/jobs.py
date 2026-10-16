@@ -30,10 +30,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, model_validator
-
 from brain import config, db, pipeline, schema
 from brain.events import BuildEvent, BuildStopped, OnEvent, Stage
+from pydantic import BaseModel, model_validator
 
 log = logging.getLogger(__name__)
 
@@ -330,7 +329,7 @@ class JobRunner:
             return slug in self._jobs or path.exists()
 
     def forget(self, slug: str) -> bool:
-        """Delete the slug's build history (`brain reset`), so a new company can take the slug.
+        """Delete the slug's build history (`backend reset`), so a new company can take the slug.
         Raises JobRunning while it has a queued or running job. False when there was none."""
         path = self._path(slug)
         with self._lock:

@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
+from brain import db, tools
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import ValidationError
 
-from brain import db, tools
-from brain.api.deps import company_slug
-from brain.api.models import ToolInfo, ToolList, ToolResult
+from backend.api.deps import company_slug
+from backend.api.models import ToolInfo, ToolList, ToolResult
 
 router = APIRouter(prefix="/companies/{slug}/tools", tags=["tools"])
 
