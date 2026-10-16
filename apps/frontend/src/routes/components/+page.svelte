@@ -6,6 +6,7 @@
 		Avatar,
 		Badge,
 		Banner,
+		BuildProgress,
 		Button,
 		Card,
 		Checkbox,
@@ -30,6 +31,7 @@
 		WorkItemRow
 	} from '$lib';
 	import { RepoChecks, type RepoResult } from '$lib/repochecks.svelte';
+	import * as builds from './build-samples';
 	import {
 		NODE_LABELS,
 		type CitedAnswer as Answer,
@@ -583,6 +585,44 @@
 			</div>
 		</Card>
 	</div>
+
+	<Card title="Build progress">
+		<p class="note">
+			One build: the step it is on, a meter, a cell per source and stage, and the log. Every
+			cell pairs an icon with a word. The buttons are passed in by the page.
+		</p>
+		<div class="stack">
+			<h3 class="sub">Running</h3>
+			<BuildProgress snapshot={builds.running}>
+				{#snippet actions()}
+					<Button variant="ghost">Stop build</Button>
+					<Button variant="primary">Go to Acme Labs</Button>
+				{/snippet}
+			</BuildProgress>
+			<h3 class="sub">Stopping, queued and a skipped source</h3>
+			<BuildProgress snapshot={builds.running} stopping />
+			<BuildProgress snapshot={builds.queued} />
+			<BuildProgress snapshot={builds.skippedSource} />
+			<h3 class="sub">Rebuild</h3>
+			<BuildProgress snapshot={builds.rebuild} />
+			<h3 class="sub">Done</h3>
+			<BuildProgress snapshot={builds.done}>
+				{#snippet actions()}
+					<span></span>
+					<Button variant="primary">Go to Acme Labs</Button>
+				{/snippet}
+			</BuildProgress>
+			<h3 class="sub">Failed</h3>
+			<BuildProgress snapshot={builds.failed}>
+				{#snippet actions()}
+					<Button>Go to Acme Labs</Button>
+					<Button variant="primary">Retry build</Button>
+				{/snippet}
+			</BuildProgress>
+			<h3 class="sub">Stopped between sources</h3>
+			<BuildProgress snapshot={builds.stopped} />
+		</div>
+	</Card>
 </div>
 
 <style>
