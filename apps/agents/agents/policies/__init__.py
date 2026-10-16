@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agents.policies import builder, critic, developer, devops, pm, qa, reviewer, risk
+from agents.policies import builder, critic, developer, devops, keeper, pm, qa, reviewer, risk
 from agents.policies.base import Policy, Results, ScriptedClient
 
 POLICIES: dict[tuple[str, str], Policy] = {
@@ -16,6 +16,10 @@ POLICIES: dict[tuple[str, str], Policy] = {
     ("critic", "check"): critic.check,
     ("risk", "scan"): risk.scan,
     ("reviewer", "suggest"): reviewer.suggest,
+    ("pm", "consult"): pm.consult,
+    ("pm", "follow_up"): pm.follow_up,
+    ("qa", "consult"): qa.consult,
+    ("keeper", "decide"): keeper.decide,
 }
 
 

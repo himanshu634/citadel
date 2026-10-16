@@ -212,6 +212,18 @@ def _words(text: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 2}
 
 
+def _entity(uid: str) -> list[dict[str, Any]]:
+    """get_entity: the node when the fake brain has it (an item, a system or an expert)."""
+    titles = {u: t for u, _, t, _ in ITEMS}
+    titles |= {s["system_uid"]: s["system"] for s in SYSTEMS}
+    titles |= {f"person:{login}": login for xs in EXPERTS.values() for login, _, _ in xs}
+    if uid not in titles:
+        return []
+    label = "WorkItem" if "pr:" in uid else uid.split(":")[0].title()
+    row = {"uid": uid, "label": label, "title": titles[uid], "body": "", "neighbours": []}
+    return [{**row, "kind": None, "state": None, "url": None, "date": None, "neighbour_count": 0}]
+
+
 def fake_brain(slug: str, name: str, **p: Any) -> list[dict[str, Any]]:
     """A `graph_run`: (slug, tool name, **params) -> rows."""
     if name == "list_systems":
@@ -301,6 +313,8 @@ def fake_brain(slug: str, name: str, **p: Any) -> list[dict[str, Any]]:
             }
         ]
     if name == "get_entity":
+        return _entity(p["uid"])
+    if name == "keeper_notes":
         return []
     raise KeyError(f"fake brain has no tool {name}")
 

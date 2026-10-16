@@ -134,3 +134,28 @@ def test_preview_rows_cuts_rows_and_long_text():
     assert len(out) == walk.PREVIEW_ROWS
     assert len(out[0]["body"]) == walk.PREVIEW_CHARS + 1 and out[0]["body"].endswith("…")
     assert out[0]["nested"][0]["snippet"].endswith("…")
+
+
+def test_keeper_notes_link_the_claim_to_its_node_and_evidence():
+    row = {
+        "uid": "claim:1a2b3c4d5e6f",
+        "kind": "owner",
+        "statement": "Alice owns Auth.",
+        "value": "person:alice",
+        "valid_from": "2026-10-17T10:00:00Z",
+        "approved_by": "auto",
+        "evidence": [
+            {"uid": "synthetic:pr:2", "label": "WorkItem", "title": "fix(auth): race", "url": "u"},
+        ],
+    }
+    nodes, rs = walk.subgraph("keeper_notes", {"uid": "system:Auth"}, [row])
+    assert {n["uid"]: n["label"] for n in nodes} == {
+        "system:Auth": "System",
+        "claim:1a2b3c4d5e6f": "Claim",
+        "synthetic:pr:2": "WorkItem",
+    }
+    assert {n["uid"]: n["title"] for n in nodes}["claim:1a2b3c4d5e6f"] == "Alice owns Auth."
+    assert rels(rs) == {
+        ("claim:1a2b3c4d5e6f", "ABOUT", "system:Auth", False),
+        ("claim:1a2b3c4d5e6f", "EVIDENCE", "synthetic:pr:2", False),
+    }
