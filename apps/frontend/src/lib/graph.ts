@@ -8,7 +8,7 @@
  * nodes are pulled to their territory's centre and kept inside it (which leaves the arcs along a
  * full territory's edge); a seeded random source makes the same graph draw the same map. Pure, so
  * it runs in a worker (`graphLayout.ts`) and in tests. Territories come from the backend
- * (apps/backend/brain/graph_view.py); this file only places them.
+ * (apps/brain/brain/graph_view.py); this file only places them.
  */
 import {
 	forceCollide,

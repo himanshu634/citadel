@@ -65,7 +65,7 @@
 	const walkLit = $derived(highlightFor(walks.answer.sources[walkActive - 1], walks.done));
 	const walkCites = new Map(walks.answer.sources.map((s, i) => [s.uid, [i + 1]]));
 
-	// Example content for the gallery, taken from apps/backend/examples/synthetic_company.
+	// Example content for the gallery, taken from apps/brain/examples/synthetic_company.
 	const featuredAnswer: Answer = {
 		question: 'Why did we replace sessions with JWTs?',
 		parts: [

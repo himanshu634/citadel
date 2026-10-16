@@ -119,7 +119,7 @@ SET node.pagerank = score
 
 ## The agent contract
 
-Every role implements the same small interface (`brain/agents/roles/base.py`):
+Every role implements the same small interface (`apps/agents/agents/roles/base.py`):
 
 ```python
 class Role(Protocol):
@@ -134,7 +134,7 @@ class Role(Protocol):
 ```
 
 `act` reuses the existing brain loop (`agents/loop.py`) with a role prompt
-(`brain/agents/prompts/<role>.md`), the role's read tools, and exactly one submit tool. The
+(`apps/agents/agents/prompts/<role>.md`), the role's read tools, and exactly one submit tool. The
 submit tool's pydantic model is the write query's parameter model, so the LLM cannot write
 fields the query does not take. Every run writes one `Episode`.
 
@@ -394,7 +394,7 @@ company can't lose, systems only one person understands, owners who no longer do
 ### 8. Brain agent (exists: human Q&A)
 
 **Goal:** answer people's questions with citations and graph paths. This is the current
-`brain ask` / `brain chat`.
+`agents ask` / `agents chat`.
 
 - **Tier:** done. Extend in Tier 2 with the new read tools.
 - **DB user:** `citadel_brain`, read-only on `brain_<slug>`, read-write on `agent_<slug>`
@@ -432,7 +432,7 @@ would be the one agent that is pure role-play.
 
 ---
 
-## Orchestrator (`brain/sim/orchestrator.py`, not an LLM)
+## Orchestrator (`apps/agents/agents/sim/orchestrator.py`, not an LLM)
 
 - **Tick loop:**
   1. Expire leases (a `lease_expired` Action is logged).
@@ -498,14 +498,14 @@ Existing tools that respect people leaving (`experts_for_system`, `person_profil
 ## Code layout
 
 ```
-apps/backend/brain/
-  agents/
-    roles/       base.py, pm.py, developer.py, qa.py, devops.py, builder.py, critic.py,
+apps/agents/agents/
+  roles/         base.py, pm.py, developer.py, qa.py, devops.py, builder.py, critic.py,
                  risk.py, reviewer.py
-    prompts/     pm.md, developer.md, qa.md, devops.md, builder.md, critic.md, risk.md
-    policies/    offline deterministic policy per role (tests and --offline)
+  prompts/       pm.md, developer.md, qa.md, devops.md, builder.md, critic.md, risk.md
+  policies/      offline deterministic policy per role (tests and --offline)
+  work/          records, legal task moves, submit models, WorkStore
   sim/           orchestrator.py, scenarios.py, events.py
-  memory.py      per-agent memory graph access (mem_<slug>_<role>)
+  graphs.py      names of the agent_<slug>, mem_<slug>_<role> and sim_<slug> graphs
   acl.py         create and check FalkorDB users
 ```
 
@@ -543,8 +543,8 @@ Every role needs a test with its offline policy and a throwaway graph (the same 
 
 Built in two phases. **Phase 1 (agents)** is done; **phase 2 (connect to the brain)** is next.
 
-**Phase 1: the agents and their contract** (`brain/work`, `brain/agents/roles`,
-`brain/agents/policies`, `brain/agents/prompts`, `brain/sim`):
+**Phase 1: the agents and their contract** (`agents/work`, `agents/roles`,
+`agents/policies`, `agents/prompts`, `agents/sim`, all under `apps/agents/`):
 
 - `work/model.py`: Task, Action, Episode, Decision, Release, Finding, Lesson records and the
   status, gate and action-kind enums.
