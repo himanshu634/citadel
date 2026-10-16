@@ -439,7 +439,9 @@ it), and each lane shows how it answered (`TurnTimeline`, folded under the answe
 		justify-self: center;
 		padding-right: 0;
 	}
+	/* Positioned, so hidden live text deep in a lane is placed (and clipped) in here, not on the page. */
 	.scroller {
+		position: relative;
 		flex: 1;
 		min-height: 0;
 		overflow-x: hidden;

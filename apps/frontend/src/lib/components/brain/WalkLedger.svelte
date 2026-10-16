@@ -98,7 +98,7 @@ and `checkLine` (src/lib/walk.ts).
 			{/if}
 		</li>
 	{:else}
-		<li class="item waiting"><span class="sentence">Reading the question</span></li>
+		{#if !settled}<li class="item waiting"><span class="sentence">Reading the question</span></li>{/if}
 	{/each}
 	{#if checkState}
 		<li class={['item', 'check', checkState.state]}>
