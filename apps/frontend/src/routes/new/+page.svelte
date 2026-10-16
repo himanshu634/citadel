@@ -10,7 +10,7 @@ the errors under the fields, the Continue button and the YAML preview. Nothing i
 	import { onDestroy, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { ApiError, api } from '$lib/api/client';
+	import { ApiError, api, describeError } from '$lib/api/client';
 	import { getCompanies } from '$lib/companies.svelte';
 	import { Banner, Button, Card, CompanyForm, ConfigPreview, Stepper } from '$lib';
 	import {
@@ -49,7 +49,7 @@ the errors under the fields, the Continue button and the YAML preview. Nothing i
 			apiProblem = null;
 		} catch (e) {
 			if (mine !== version) return;
-			apiProblem = e instanceof Error ? e.message : String(e);
+			apiProblem = describeError(e);
 		}
 		validating = false;
 	}, 300);
@@ -142,7 +142,7 @@ the errors under the fields, the Continue button and the YAML preview. Nothing i
 			rejected = { key: key(), errors: list };
 			await go(Math.max(0, firstSectionWithErrors(list)));
 		} else {
-			saveError = e instanceof Error ? e.message : String(e);
+			saveError = describeError(e);
 		}
 	}
 
@@ -153,7 +153,7 @@ the errors under the fields, the Continue button and the YAML preview. Nothing i
 		} catch (e) {
 			// 409: a build for it is already running, which is what was wanted.
 			if (!(e instanceof ApiError && e.status === 409)) {
-				started = { slug, name, problem: e instanceof Error ? e.message : String(e) };
+				started = { slug, name, problem: describeError(e) };
 				await companies.load();
 				return;
 			}

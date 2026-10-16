@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { Company, CompanyStatus } from './types';
 
-vi.mock('./api/client', () => ({ api: { companies: vi.fn() } }));
+vi.mock('./api/client', async (original) => ({
+	...(await original<typeof import('./api/client')>()),
+	api: { companies: vi.fn() }
+}));
 vi.mock('./api/events', () => ({ openEvents: vi.fn() }));
 
 import { api } from './api/client';
@@ -117,7 +120,7 @@ describe('load', () => {
 		companies.mockRejectedValue(new TypeError('Failed to fetch'));
 		const c = new Companies();
 		await expect(c.load()).resolves.toBeUndefined();
-		expect(c.error).toBe('Failed to fetch');
+		expect(c.error).toBe("The Citadel API isn't answering. Start it with make api, then try again.");
 		expect(c.ready).toBe(false);
 		expect(c.list).toEqual([]);
 	});
@@ -128,7 +131,7 @@ describe('load', () => {
 		await c.load();
 		companies.mockRejectedValueOnce(new Error('down'));
 		await c.load();
-		expect(c.error).toBe('down');
+		expect(c.error).toBe("The Citadel API isn't answering. Start it with make api, then try again.");
 		expect(c.list.map((x) => x.slug)).toEqual(['a']);
 		companies.mockResolvedValueOnce([co('a'), co('b')]);
 		await c.load();

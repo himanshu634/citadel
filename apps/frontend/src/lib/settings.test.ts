@@ -108,8 +108,12 @@ describe('classifySaveError', () => {
 
 	test('anything else is a message', () => {
 		expect(classifySaveError(new ApiError(500, 'boom'))).toEqual({ kind: 'other', message: 'boom' });
-		expect(classifySaveError(new Error('offline'))).toEqual({ kind: 'other', message: 'offline' });
-		expect(classifySaveError('odd')).toEqual({ kind: 'other', message: 'odd' });
+		const down = "The Citadel API isn't answering. Start it with make api, then try again.";
+		expect(classifySaveError(new TypeError('Failed to fetch'))).toEqual({
+			kind: 'other',
+			message: down
+		});
+		expect(classifySaveError('odd')).toEqual({ kind: 'other', message: down });
 	});
 });
 

@@ -7,7 +7,7 @@
  * data under another).
  */
 import { createContext } from 'svelte';
-import { api } from './api/client';
+import { api, describeError } from './api/client';
 import { openEvents } from './api/events';
 import type { Company } from './types';
 
@@ -56,7 +56,7 @@ export class Companies {
 			this.error = null;
 		} catch (e) {
 			if (mine !== this.#loads) return;
-			this.error = e instanceof Error ? e.message : String(e);
+			this.error = describeError(e);
 		} finally {
 			if (--this.#inFlight === 0) this.#during = [];
 		}

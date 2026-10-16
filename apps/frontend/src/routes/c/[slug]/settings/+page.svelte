@@ -14,7 +14,7 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 	import { onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { ApiError, api } from '$lib/api/client';
+	import { api, describeError } from '$lib/api/client';
 	import { getCompanies } from '$lib/companies.svelte';
 	import { Banner, Button, Card, CompanyForm, Dialog, EmptyState } from '$lib';
 	import { cleanDraft, debounce, saveGate, visibleErrors, type Gate } from '$lib/onboarding';
@@ -27,6 +27,7 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 		syncLine,
 		type RebuildDialog
 	} from '$lib/settings';
+	import { startSync } from '$lib/sync';
 	import type { CompanyConfig, ConfigChange, FieldError, ValidateResult } from '$lib/types';
 
 	let { data } = $props();
@@ -64,12 +65,6 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 	} | null>(null);
 	let dialogOpen = $state(false);
 
-	function describe(e: unknown): string {
-		if (e instanceof ApiError && typeof e.detail === 'string') return e.detail;
-		if (e instanceof ApiError && e.status < 500) return `The API refused the request (${e.status}).`;
-		return "The Citadel API isn't answering. Start it with make api, then try again.";
-	}
-
 	// --- Load ----------------------------------------------------------------------------------------
 	$effect(() => {
 		const slug = data.slug;
@@ -96,7 +91,7 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 				};
 			},
 			(e) => {
-				if (live && slug === companies.current) loadError = describe(e);
+				if (live && slug === companies.current) loadError = describeError(e);
 			}
 		);
 		return () => {
@@ -113,7 +108,7 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 			apiProblem = null;
 		} catch (e) {
 			if (mine !== version) return;
-			apiProblem = e instanceof Error ? e.message : String(e);
+			apiProblem = describeError(e);
 		}
 		validating = false;
 	}, 300);
@@ -266,17 +261,13 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 		syncing = true;
 		clearMessages();
 		const mine = run;
-		try {
-			await api.startBuild(form.slug);
-			void companies.load();
-			if (mine === run) started = 'sync';
-		} catch (e) {
-			if (mine !== run) return;
-			if (e instanceof ApiError && e.status === 409) running = true;
-			else saveError = describe(e);
-		} finally {
-			if (mine === run) syncing = false;
-		}
+		const outcome = await startSync(form.slug);
+		void companies.load();
+		if (mine !== run) return;
+		if (outcome.kind === 'started') started = 'sync';
+		else if (outcome.kind === 'running') running = true;
+		else saveError = outcome.message;
+		syncing = false;
 	}
 </script>
 

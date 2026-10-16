@@ -6,7 +6,7 @@
  * needed, a build is running, the draft is invalid) must each lead to its own message. Pure
  * functions let vitest cover every case; the page only draws what they return.
  */
-import { ApiError } from './api/client';
+import { ApiError, describeError } from './api/client';
 import { cleanDraft } from './onboarding';
 import type { CompanyConfig, ConfigChange, FieldError } from './types';
 
@@ -84,7 +84,7 @@ export function classifySaveError(error: unknown): SaveProblem {
 			return { kind: 'invalid', errors: detail as FieldError[] };
 		}
 	}
-	return { kind: 'other', message: error instanceof Error ? error.message : String(error) };
+	return { kind: 'other', message: describeError(error) };
 }
 
 /** The line next to the button after a save that needed no rebuild. */

@@ -21,7 +21,7 @@ so a slow answer for the company you just left is never drawn under the one you 
 		Tooltip,
 		WorkItemRow
 	} from '$lib';
-	import { api, ApiError } from '$lib/api/client';
+	import { api, describeError } from '$lib/api/client';
 	import { getCompanies } from '$lib/companies.svelte';
 	import {
 		buildingTitle,
@@ -32,6 +32,7 @@ so a slow answer for the company you just left is never drawn under the one you 
 		viewOf,
 		workItemOf
 	} from '$lib/overview';
+	import { startSync, type SyncOutcome } from '$lib/sync';
 	import type { Overview } from '$lib/types';
 
 	let { data } = $props();
@@ -53,16 +54,6 @@ so a slow answer for the company you just left is never drawn under the one you 
 	const error = $derived(problem?.slug === data.slug ? problem.message : null);
 	const loading = $derived(fetchable && !overview && !error);
 
-	function describe(e: unknown): string {
-		if (e instanceof ApiError) {
-			if (typeof e.detail === 'string') return e.detail;
-			if (e.status === 503) return "FalkorDB isn't answering. Start it with make up, then try again.";
-			if (e.status < 500) return `The API refused the request (${e.status}).`;
-		}
-		// A dev proxy answers 500 with no body when nothing listens behind it.
-		return "The Citadel API isn't answering. Start it with make api, then try again.";
-	}
-
 	$effect(() => {
 		const slug = data.slug;
 		void attempt;
@@ -78,7 +69,7 @@ so a slow answer for the company you just left is never drawn under the one you 
 				problem = null;
 			},
 			(e) => {
-				if (live && slug === companies.current) problem = { slug, message: describe(e) };
+				if (live && slug === companies.current) problem = { slug, message: describeError(e) };
 			}
 		);
 		return () => {
@@ -89,6 +80,32 @@ so a slow answer for the company you just left is never drawn under the one you 
 	function retry() {
 		problem = null;
 		attempt++;
+	}
+
+	// Sync now. `syncing` and `syncFailed` name the slug they belong to, like `problem` above.
+	let syncing = $state<string | null>(null);
+	let syncFailed = $state<{ slug: string; outcome: Exclude<SyncOutcome, { kind: 'started' }> } | null>(
+		null
+	);
+	const syncProblem = $derived(syncFailed?.slug === data.slug ? syncFailed.outcome : null);
+
+	async function syncNow() {
+		const slug = data.slug;
+		if (syncing === slug) return; // set before the first await, so a double click sends one request
+		syncing = slug;
+		syncFailed = null;
+		const outcome = await startSync(slug);
+		if (outcome.kind !== 'started') syncFailed = { slug, outcome };
+		await companies.load(); // the status flips to building, which swaps the buttons for the banner
+		if (syncing === slug) syncing = null;
+	}
+
+	// Tooltip props carry their own click handler; keep it and add ours.
+	function onsync(props: Record<string, unknown>) {
+		return (e: MouseEvent) => {
+			(props.onclick as ((e: MouseEvent) => void) | undefined)?.(e);
+			void syncNow();
+		};
 	}
 
 	const cards = $derived(overview ? statCards(overview.counts) : []);
@@ -121,7 +138,9 @@ so a slow answer for the company you just left is never drawn under the one you 
 				<div class="head-actions">
 					<Tooltip text="Pull new activity from every source">
 						{#snippet trigger(props)}
-							<Button {...props}><RefreshCw aria-hidden="true" />Sync now</Button>
+							<Button {...props} onclick={onsync(props)} loading={syncing === data.slug}>
+								<RefreshCw aria-hidden="true" />Sync now
+							</Button>
 						{/snippet}
 					</Tooltip>
 					<Button variant="primary"><Network aria-hidden="true" />Open graph</Button>
@@ -150,6 +169,14 @@ so a slow answer for the company you just left is never drawn under the one you 
 				description="Counts, recent work and people show up here once Citadel has loaded {company.name}'s activity into the graph."
 			/>
 		{:else}
+			{#if syncProblem?.kind === 'running' && !view.building}
+				<Banner tone="warning" title="A build is running">
+					Wait for it to finish, or stop it from its progress page, then sync again.
+					{#snippet action()}<Button href={buildPath}>See progress</Button>{/snippet}
+				</Banner>
+			{:else if syncProblem?.kind === 'failed'}
+				<Banner tone="danger" title="Could not start the sync">{syncProblem.message}</Banner>
+			{/if}
 			{#if view.building}
 				<Banner tone="warning" title={buildingTitle(company)} icon={LoaderCircle} spin>
 					{#snippet action()}<Button href={buildPath}>See progress</Button>{/snippet}

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { api, ApiError, rebuildRequired } from './client';
+import { api, ApiError, describeError, rebuildRequired } from './client';
 
 function reply(status: number, body?: unknown) {
 	const fetchMock = vi.fn(
@@ -73,4 +73,34 @@ test('rebuildRequired reads the 409 detail of a Settings save', () => {
 	expect(rebuildRequired(new ApiError(409, { rebuild_required: change }))).toEqual(change);
 	expect(rebuildRequired(new ApiError(409, 'A build for acme is already running'))).toBeNull();
 	expect(rebuildRequired(new Error('x'))).toBeNull();
+});
+
+describe('describeError', () => {
+	const down = "The Citadel API isn't answering. Start it with make api, then try again.";
+
+	test("the API's own sentence wins", () => {
+		expect(describeError(new ApiError(409, 'acme is already a company. Pick another name'))).toBe(
+			'acme is already a company. Pick another name'
+		);
+		expect(describeError(new ApiError(500, 'Something broke'))).toBe('Something broke');
+	});
+
+	test('503 without a sentence means FalkorDB is down', () => {
+		expect(describeError(new ApiError(503, undefined))).toBe(
+			"FalkorDB isn't answering. Start it with make up, then try again."
+		);
+	});
+
+	test('a 4xx without a sentence is a refusal', () => {
+		expect(describeError(new ApiError(422, [{ loc: ['name'], msg: 'x' }]))).toBe(
+			'The API refused the request (422).'
+		);
+	});
+
+	test('a network failure or a bodyless proxy 500 means the API is not answering', () => {
+		expect(describeError(new TypeError('Failed to fetch'))).toBe(down);
+		expect(describeError(new ApiError(500, undefined))).toBe(down);
+		expect(describeError(new ApiError(502, ''))).toBe(down);
+		expect(describeError('odd')).toBe(down);
+	});
 });

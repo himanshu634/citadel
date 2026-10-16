@@ -91,6 +91,24 @@ export const api = {
 		)
 };
 
+/** Said when nothing answers at `/api`: the API is not running, or the dev proxy has no one behind it. */
+const API_DOWN = "The Citadel API isn't answering. Start it with make api, then try again.";
+
+/**
+ * One sentence for any failed API call, so every page words "the API is down" the same way.
+ * The API's own text (`detail` as a string) wins; 503 means FalkorDB is down behind a live API;
+ * other 4xx are refusals; anything else (a network `TypeError`, a 5xx with no body from a dev
+ * proxy with nothing behind it) means the API is not answering.
+ */
+export function describeError(e: unknown): string {
+	if (e instanceof ApiError) {
+		if (typeof e.detail === 'string' && e.detail !== '') return e.detail;
+		if (e.status === 503) return "FalkorDB isn't answering. Start it with make up, then try again.";
+		if (e.status >= 400 && e.status < 500) return `The API refused the request (${e.status}).`;
+	}
+	return API_DOWN;
+}
+
 /** The 409 of a Settings save that needs a rebuild first, else null. */
 export function rebuildRequired(error: unknown): ConfigChange | null {
 	if (!(error instanceof ApiError) || error.status !== 409) return null;
