@@ -4,7 +4,8 @@ Ask: a conversation with one company's brain, with the agent's walk through the 
 it (design direction D, "Watch it walk"). Left, the thread: questions, a live line while the agent
 works, answers with citation chips. Right, the stage for the selected turn: the graph growing one
 tool call at a time, and the steps with the rows each returned. Hovering a citation lights the
-part of the walk that backs it; Replay shows a finished walk again. `?q=` (from the top bar's ask
+part of the walk that backs it; Replay shows a finished walk again. A thumbs under each answer
+rates it (`AnswerRating`), saved on the answer's trace on the server. `?q=` (from the top bar's ask
 field) asks once on arrival and is then removed from the address, so a reload does not ask again.
 -->
 <script lang="ts">
@@ -12,7 +13,7 @@ field) asks once on arrival and is then removed from the address, so a reload do
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
-	import { Banner, Button, GraphWalk, Input, WalkAnswer, WalkSteps } from '$lib';
+	import { AnswerRating, Banner, Button, GraphWalk, Input, WalkAnswer, WalkSteps } from '$lib';
 	import { AskThread } from '$lib/ask.svelte';
 	import { getCompanies } from '$lib/companies.svelte';
 	import { askFieldOf } from '$lib/topbar';
@@ -157,6 +158,15 @@ field) asks once on arrival and is then removed from the address, so a reload do
 							pinned = pinned === n ? null : n;
 						}}
 					/>
+					{#if t.answer.trace_id && t.answer.stop !== 'stopped'}
+						<AnswerRating
+							rating={t.rating}
+							note={t.note}
+							status={t.rated}
+							onrate={(r) => thread.rate(i, r)}
+							onnote={(text) => thread.rate(i, 'down', text)}
+						/>
+					{/if}
 				{:else if t.error}
 					<Banner tone="danger" title="This answer failed">{t.error}</Banner>
 				{:else if t.status === 'stopped'}

@@ -125,4 +125,40 @@ describe('AskThread', () => {
 		expect(t.turns).toEqual([]);
 		expect(t.threadId).toBeNull();
 	});
+
+	test('a thumbs is saved on the answer trace, changed, and put back when the save fails', async () => {
+		const traced = run().replace('"thread_id":"t1","text"', '"trace_id":"tr1","thread_id":"t1","text"');
+		const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+			if (!init?.body || !String(_url).includes('/feedback')) return new Response(traced, { status: 200 });
+			const body = JSON.parse(init.body as string);
+			return new Response(JSON.stringify({ trace_id: 'tr1', ...body }), { status: 200 });
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const t = new AskThread('acme');
+		await t.ask('Who is Alice?');
+		expect(t.turns[0].answer?.trace_id).toBe('tr1');
+
+		await t.rate(0, 'down', '  wrong person ');
+		const [url, init] = fetchMock.mock.calls.at(-1) as unknown as [string, RequestInit];
+		expect(url).toBe('/api/companies/acme/traces/tr1/feedback');
+		expect(JSON.parse(init.body as string)).toEqual({ rating: 'down', note: 'wrong person' });
+		expect([t.turns[0].rating, t.turns[0].note, t.turns[0].rated]).toEqual(['down', 'wrong person', 'saved']);
+
+		await t.rate(0, 'up');
+		expect(JSON.parse((fetchMock.mock.calls.at(-1)![1] as RequestInit).body as string)).toEqual({ rating: 'up', note: null });
+		expect(t.turns[0].rating).toBe('up');
+
+		fetchMock.mockImplementationOnce(async () => new Response('{"detail":"nope"}', { status: 503 }));
+		await t.rate(0, null);
+		expect([t.turns[0].rating, t.turns[0].rated]).toEqual(['up', 'failed']);
+	});
+
+	test('an answer without a trace cannot be rated', async () => {
+		const fetchMock = serve(run());
+		const t = new AskThread('acme');
+		await t.ask('Q');
+		await t.rate(0, 'up');
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(t.turns[0].rating).toBeNull();
+	});
 });

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
 
 from evals.cases import Expect
 
@@ -83,16 +82,3 @@ def grade(
 
 def _show(items: list[str], hit: list[str]) -> str:
     return f"{'found' if hit else 'none of'} {items}"
-
-
-def step_summary(steps: list[dict[str, Any]], submit: str) -> dict[str, Any]:
-    """From a turn's `step_done` events: graph tools in order, failed tool calls and rejected
-    submit_answer calls (an uncited or made-up uid, a bad marker)."""
-    tools = [s for s in steps if s.get("tool") != submit]
-    rejected = [s.get("error") for s in steps if s.get("tool") == submit and s.get("error")]
-    return {
-        "tools": [s["tool"] for s in tools],
-        "tool_errors": [f"{s['tool']}: {s['error']}" for s in tools if s.get("error")],
-        "rejected": rejected,
-        "tool_ms": sum(s.get("ms") or 0 for s in tools),
-    }

@@ -18,6 +18,7 @@ export { default as Tabs } from './components/ui/Tabs.svelte';
 export { default as TagInput } from './components/ui/TagInput.svelte';
 export { default as Tooltip } from './components/ui/Tooltip.svelte';
 
+export { default as AnswerRating } from './components/brain/AnswerRating.svelte';
 export { default as ActivityBars } from './components/brain/ActivityBars.svelte';
 export { default as AddCompanyDialog } from './components/brain/AddCompanyDialog.svelte';
 export { default as BuildProgress } from './components/brain/BuildProgress.svelte';

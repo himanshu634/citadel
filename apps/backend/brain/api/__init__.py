@@ -49,6 +49,7 @@ def create_app(runner: JobRunner | None = None, asker: Asker | None = None) -> F
     app.include_router(overview.router, prefix="/api")
     app.include_router(tools.router, prefix="/api")
     app.include_router(ask.router, prefix="/api")
+    app.include_router(traces.router, prefix="/api")
     app.include_router(graph.router, prefix="/api")
     return app
 

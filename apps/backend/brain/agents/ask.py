@@ -50,6 +50,7 @@ class Answer:
     stop_details: dict[str, Any] | None = None
     model: str | None = None
     usage: dict[str, int] = field(default_factory=dict)  # summed over this question's calls
+    nudges: int = 0  # plain-text replies this turn that were asked to call submit_answer
     thread_messages: int = 0  # messages saved in the thread after this turn
 
 
@@ -112,11 +113,28 @@ def ask_events(
         yield answer_out(event) if isinstance(event, Answer) else event
 
 
-def answer_out(answer: Answer) -> dict[str, Any]:
+def run_events(
+    slug: str,
+    question: str,
+    thread_id: str | None = None,
+    *,
+    client: anthropic.Anthropic | None = None,
+    toolset: Toolset | None = None,
+    checkpointer: BaseCheckpointSaver | None = None,
+    stop: threading.Event | None = None,
+) -> Iterator[dict[str, Any] | Answer]:
+    """`ask_events` with the Answer itself as the last item instead of its `answer` event, for
+    a caller that needs what the event leaves out (tokens, nudges): the Ask API, which records
+    a trace (`traces.py`) before it sends the answer."""
+    yield from _run(slug, question, thread_id, client, toolset, checkpointer, stop)
+
+
+def answer_out(answer: Answer, trace_id: str | None = None) -> dict[str, Any]:
     """The `answer` event: the Answer without token counts, each source with the step (n) that
-    first returned it."""
+    first returned it, and the id of its trace (for a thumbs up or down) when one was kept."""
     return {
         "kind": "answer",
+        "trace_id": trace_id,
         "thread_id": answer.thread_id,
         "text": answer.text,
         "sources": [asdict(s) for s in answer.sources],
@@ -247,5 +265,6 @@ def _to_answer(
         stop_details=state.get("stop_details"),
         model=state.get("model"),
         usage=totals,
+        nudges=state.get("nudges") or 0,
         thread_messages=len(state.get("messages") or []),
     )

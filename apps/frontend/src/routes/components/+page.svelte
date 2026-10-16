@@ -2,6 +2,7 @@
 <script lang="ts">
 	import { CloudOff, Inbox, LoaderCircle, Plus, Search, Trash2 } from '@lucide/svelte';
 	import {
+		AnswerRating,
 		ActivityBars,
 		AddCompanyDialog,
 		Avatar,
@@ -58,6 +59,8 @@
 
 	// The Ask walk: citation 1 stays lit unless another is hovered.
 	let walkHover = $state<number | null>(null);
+	let liveRating = $state<'up' | 'down' | null>(null);
+	let liveNote = $state<string | null>(null);
 	const walkActive = $derived(walkHover ?? 1);
 	const walkLit = $derived(highlightFor(walks.answer.sources[walkActive - 1], walks.done));
 	const walkCites = new Map(walks.answer.sources.map((s, i) => [s.uid, [i + 1]]));
@@ -795,6 +798,47 @@
 				<WalkAnswer answer={walks.stopped} />
 				<WalkAnswer answer={walks.refused} />
 				<figcaption>A failed call, an empty call, a rejected check; empty stage; no answer</figcaption>
+			</figure>
+		</div>
+	</Card>
+
+	<Card title="Answer rating (Ask)">
+		<div class="walks">
+			<figure>
+				<AnswerRating
+					rating={liveRating}
+					note={liveNote}
+					onrate={(r) => {
+						liveRating = r;
+						liveNote = null;
+					}}
+					onnote={(text) => (liveNote = text)}
+				/>
+				<figcaption>Live: press a thumb, press it again to take it back; thumbs down asks for a note</figcaption>
+			</figure>
+			<figure>
+				<AnswerRating rating="up" status="saved" />
+				<figcaption>Marked right</figcaption>
+			</figure>
+			<figure>
+				<AnswerRating rating="down" status="saved" />
+				<figcaption>Marked wrong, note not sent yet</figcaption>
+			</figure>
+			<figure>
+				<AnswerRating
+					rating="down"
+					status="saved"
+					note="It named bob, but erin has reviewed every Billing change since March and bob moved to the platform team."
+				/>
+				<figcaption>Marked wrong with a long note</figcaption>
+			</figure>
+			<figure>
+				<AnswerRating rating="up" status="saving" />
+				<figcaption>Saving</figcaption>
+			</figure>
+			<figure>
+				<AnswerRating rating={null} status="failed" />
+				<figcaption>The save failed: the thumbs that was there stays</figcaption>
 			</figure>
 		</div>
 	</Card>

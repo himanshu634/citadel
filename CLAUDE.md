@@ -27,9 +27,11 @@ make query TOOL=impact_of P="system=CI"   # run one (SLUG=..., JSON=1 for raw ro
 make ask SLUG=synthetic Q="who knows Auth?"   # Claude answers from the graph (THREAD=<id> follows up)
 make chat SLUG=synthetic OFFLINE=1   # one scripted turn, no API key: router + tools + checkpointer
 make eval                      # agent evals on brain_synthetic (calls the API): CASE=id|tag REPEAT=3 MODEL=.. EFFORT=.. BASELINE=<file>
+make traces SLUG=x DAYS=7      # live Ask traffic: no-answer/step-limit/nudge/... rates, p50/p95 latency and tokens, thumbs
+make eval-drafts SLUG=x        # thumbs-down answers as draft eval cases (WRITE=1 appends to evals/cases/x.yaml)
 make agents                    # list the agent roles, their jobs and read tools
 make sim SLUG=synthetic SCENARIO=sprint OFFLINE=1   # run the agents (sprint, race, regression)
-make reset SLUG=x CONFIRM=1    # delete brain_x, agent_x and its build history (frees the slug)
+make reset SLUG=x CONFIRM=1    # delete brain_x, agent_x, its build history and Ask traces (frees the slug)
 make brain ARGS="..."          # any `brain` CLI command
 make api                       # HTTP API on 127.0.0.1:$API_PORT (default 8000), auto-reload
 make dev                       # API + frontend dev server together
@@ -131,6 +133,15 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
   are `inferred`). A stop is honoured only between saved steps, so the thread stays valid.
 - Tests use a scripted fake client (`tests/test_agent.py`); nothing in `make test` calls the API.
   `agents/offline.py` is the same idea for `brain chat --offline`.
+- Online traces (`agents/traces.py`): every turn asked from the CLI (`_run_ask`, real Claude only)
+  or the Ask API (its worker, before the `answer` event, which then carries `trace_id`) appends
+  one `Trace` to `data/traces/<slug>.jsonl`: tools, failed tools, rejected submits, nudges, stop
+  (`error` when the run raised), model, tokens (input + cache read + cache write + output),
+  latency, sources, the answer and its cited uids. `ask`, `ask_traced` and evals never record.
+  A thumbs (`POST .../traces/{id}/feedback`) is an appended `feedback` line; reading folds the
+  latest onto its turn. `GET .../traces/summary?days=` (`brain traces`) gives the rates (over all
+  turns; zero-source over answered turns) and nearest-rank p50/p95. `ask.run_events` is
+  `ask_events` with the raw `Answer` last, for callers that need its tokens and nudges.
 
 ### Evals (`apps/backend/evals`)
 
@@ -142,6 +153,10 @@ follow the data. Each case runs `REPEAT` times and reports a pass rate; turns of
 thread. Results: `data/evals/<slug>/<time>-<model>-<effort>.jsonl`; `BASELINE=` diffs pass rates
 against an earlier file. It calls the API, so it is not part of `make test`;
 `tests/test_evals.py` checks the case files and the harness with the scripted client.
+`evals/drafts.py` (`make eval-drafts`) turns thumbs-down traces into cases `fb-<trace id>`: the
+earlier turns of the thread, then the bad one expecting only an answer, with the bad answer in
+comments. They are tagged `draft`, which a plain run skips (`CASE=draft` runs them); write the
+real `expect` and drop the tag.
 
 ### Named Cypher queries
 

@@ -11,6 +11,7 @@ import type {
 	CompanyConfig,
 	CompanyDetail,
 	ConfigChange,
+	Feedback,
 	GithubRepoCheck,
 	GithubTokenCheck,
 	Entity,
@@ -18,6 +19,7 @@ import type {
 	OnboardRequest,
 	OnboardResult,
 	Overview,
+	Rating,
 	RepoLookup,
 	ValidateResult
 } from '../types';
@@ -61,6 +63,12 @@ const company = (slug: string) => `/companies/${encodeURIComponent(slug)}`;
 
 export const api = {
 	companies: () => request<Company[]>('GET', '/companies'),
+	/** A thumbs on one Ask answer (its `trace_id`); `rating` null takes it back. 404: no such answer. */
+	feedback: (slug: string, traceId: string, rating: Rating | null, note?: string) =>
+		request<Feedback>('POST', `${company(slug)}/traces/${encodeURIComponent(traceId)}/feedback`, {
+			rating,
+			note: note ?? null
+		}),
 	company: (slug: string) => request<CompanyDetail>('GET', company(slug)),
 	/** Check a draft on every form change; writes nothing. */
 	validate: (draft: CompanyConfig) => request<ValidateResult>('POST', '/companies/validate', draft),
