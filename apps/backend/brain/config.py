@@ -1,7 +1,7 @@
 """Settings and company config.
 
 Why: two kinds of configuration exist and they must not mix.
-- `Settings` comes from the environment (.env): where FalkorDB is, API tokens, embedding model.
+- `Settings` comes from the environment (.env): where FalkorDB is, API tokens, Claude settings.
   Changing it switches local Docker <-> FalkorDB Cloud without code changes.
 - `CompanyConfig` comes from `companies/<slug>.yaml`: what to ingest for one company and how
   to map file paths to systems. Adding a company means adding one of these files.
@@ -54,9 +54,6 @@ class Settings(BaseSettings):
 
     github_token: str | None = None
 
-    google_cloud_project: str | None = None
-    google_cloud_location: str = "us-central1"
-    embedding_model: str = "text-embedding-005"
     embedding_dim: int = 768
 
     # Claude answers questions over the graph (brain/agents). pydantic-settings reads .env but
