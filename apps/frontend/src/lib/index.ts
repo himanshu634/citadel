@@ -1,0 +1,21 @@
+// Public surface of the design system. Import components from here: `import { Button } from '$lib'`.
+export { default as Avatar } from './components/ui/Avatar.svelte';
+export { default as Badge } from './components/ui/Badge.svelte';
+export { default as Button } from './components/ui/Button.svelte';
+export { default as Card } from './components/ui/Card.svelte';
+export { default as Dialog } from './components/ui/Dialog.svelte';
+export { default as EmptyState } from './components/ui/EmptyState.svelte';
+export { default as Input } from './components/ui/Input.svelte';
+export { default as Menu } from './components/ui/Menu.svelte';
+export { default as NodeChip } from './components/ui/NodeChip.svelte';
+export { default as Stat } from './components/ui/Stat.svelte';
+export { default as Tabs } from './components/ui/Tabs.svelte';
+export { default as Tooltip } from './components/ui/Tooltip.svelte';
+
+export { default as ActivityBars } from './components/brain/ActivityBars.svelte';
+export { default as CitedAnswer } from './components/brain/CitedAnswer.svelte';
+export { default as EntityRow } from './components/brain/EntityRow.svelte';
+export { default as GraphPath } from './components/brain/GraphPath.svelte';
+export { default as WorkItemRow } from './components/brain/WorkItemRow.svelte';
+
+export { default as AppShell } from './components/layout/AppShell.svelte';

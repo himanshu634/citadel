@@ -10,7 +10,7 @@ _Full README (architecture, query table, quick start) lands in step f._
 
 ```
 apps/backend/    Python 3.12 (uv): ingestion, graph schema, named queries, agents. CLI: `brain`
-apps/frontend/   UI (later)
+apps/frontend/   SvelteKit UI and design system (see apps/frontend/design-system.md)
 companies/       one YAML config per company -> graph brain_<slug>
 docs/            graph model, canonical format, adding a company
 data/            gitignored raw API caches and inbox folders
