@@ -3,12 +3,12 @@
 A list of short values typed into one field (path globs, logins, aliases). Enter or a comma adds
 what is typed (a comma inside `{}` stays in the tag, so `*.{ts,tsx}` is one glob); pasting "a, b" adds both; Backspace on an empty field removes the last tag; text
 left in the field is added when focus leaves. Each tag has a button named "Remove <tag>". The rules
-(trim, no empty, no duplicates) are in `$lib/tags`. `mono` sets tags and text in the mono face for
+(trim, no empty, no new duplicates) are in `$lib/tags`; duplicates already in `values` are kept and shown. `mono` sets tags and text in the mono face for
 paths and ids.
 -->
 <script lang="ts">
 	import { X } from '@lucide/svelte';
-	import { addTags, hasSeparator, inOpenBrace, removeTag } from '$lib/tags';
+	import { addTags, hasSeparator, inOpenBrace, removeAt } from '$lib/tags';
 
 	type Props = {
 		label: string;
@@ -44,8 +44,8 @@ paths and ids.
 		text = '';
 	}
 
-	function remove(tag: string) {
-		values = removeTag(values, tag);
+	function remove(index: number) {
+		values = removeAt(values, index);
 		input?.focus();
 	}
 
@@ -73,10 +73,11 @@ paths and ids.
 	<div class="control">
 		{#if values.length > 0}
 			<ul class="tags" aria-label="{label}, {values.length} added">
-				{#each values as tag (tag)}
+				<!-- Keyed by position: a hand-edited config can hold the same tag twice. -->
+				{#each values as tag, i (i)}
 					<li class="tag">
 						<span class="tag-text">{tag}</span>
-						<button type="button" {disabled} aria-label="Remove {tag}" onclick={() => remove(tag)}>
+						<button type="button" {disabled} aria-label="Remove {tag}" onclick={() => remove(i)}>
 							<X aria-hidden="true" />
 						</button>
 					</li>

@@ -348,7 +348,7 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 		<div class="dialog-copy">
 			{#if pending.dialog.reasons.length > 0}
 				<ul>
-					{#each pending.dialog.reasons as reason (reason)}<li>{reason}</li>{/each}
+					{#each pending.dialog.reasons as reason, i (i)}<li>{reason}</li>{/each}
 				</ul>
 			{/if}
 			<p>{pending.dialog.explanation}</p>

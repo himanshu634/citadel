@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { addTags, hasSeparator, inOpenBrace, removeTag } from './tags';
+import { addTags, hasSeparator, inOpenBrace, removeAt } from './tags';
 
 describe('addTags', () => {
 	test('adds one trimmed tag', () => {
@@ -50,14 +50,24 @@ describe('addTags', () => {
 	});
 });
 
-describe('removeTag', () => {
-	test('removes the tag', () => {
-		expect(removeTag(['a', 'b', 'c'], 'b')).toEqual(['a', 'c']);
+describe('removeAt', () => {
+	test('removes the tag at that position', () => {
+		expect(removeAt(['a', 'b', 'c'], 1)).toEqual(['a', 'c']);
 	});
 
-	test('an unknown tag changes nothing', () => {
+	test('a position with no tag changes nothing', () => {
 		const values = ['a'];
-		expect(removeTag(values, 'z')).toBe(values);
+		expect(removeAt(values, 3)).toBe(values);
+		expect(removeAt(values, -1)).toBe(values);
+	});
+
+	test('a tag held twice (a hand-edited config) loses only the one removed', () => {
+		expect(removeAt(['*.md', 'docs/**', '*.md'], 2)).toEqual(['*.md', 'docs/**']);
+		expect(removeAt(['*.md', '*.md'], 0)).toEqual(['*.md']);
+	});
+
+	test('adding keeps duplicates that are already there', () => {
+		expect(addTags(['a', 'a'], 'b')).toEqual(['a', 'a', 'b']);
 	});
 });
 

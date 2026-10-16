@@ -54,7 +54,10 @@ export function addTags(values: string[], text: string): string[] {
 	return next.length === values.length ? values : next;
 }
 
-/** The tags without `tag`; `values` itself when it was not there. */
-export function removeTag(values: string[], tag: string): string[] {
-	return values.includes(tag) ? values.filter((v) => v !== tag) : values;
+/**
+ * The tags without the one at `index`; `values` itself when there is none. By position, not by
+ * value: a hand-edited config can hold the same tag twice, and removing one must leave the other.
+ */
+export function removeAt(values: string[], index: number): string[] {
+	return index >= 0 && index < values.length ? values.filter((_, i) => i !== index) : values;
 }
