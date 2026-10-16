@@ -276,13 +276,14 @@ class RecentWorkItem(_Model):
     state: str
     url: str | None
     author: str | None
-    at: str | None  # latest of created / closed / merged (ISO, as stored)
+    last_at: str | None  # latest of created / closed (ISO, as stored; a merged PR's closed_at)
     systems: list[str]
 
 
 class PersonActivity(_Model):
     login: str
-    name: str | None
+    person_uid: str
+    display_name: str | None
     teams: list[str]
     prs: int
     reviews: int

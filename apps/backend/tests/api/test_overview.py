@@ -42,6 +42,8 @@ def test_overview_is_scoped_to_its_company(api_client_with, synthetic_graph):
     assert full["slug"] == synthetic_graph and none["slug"] == empty
     assert full["since"] == "2026-01-01" and full["name"] == synthetic_graph
     assert len(full["recent"]) == 10 and full["recent"][0]["uid"] == "synthetic:issue:14"
+    assert full["recent"][0]["last_at"].startswith("2026-09-10")
+    assert {"person_uid", "display_name"} <= full["people"][0].keys()
     assert len(full["systems"]) <= 8 and len(full["people"]) <= 8
     assert {c["type"] for c in full["counts"]} >= {"Person", "WorkItem", "System"}
     assert all(c["kind"] == "node" for c in full["counts"])

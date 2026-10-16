@@ -90,21 +90,33 @@ def test_profile_entity_and_systems(synthetic_graph):
 
 def test_recent_work_items_newest_first(synthetic_graph):
     rows = tools.call(synthetic_graph, "recent_work_items", limit=5)
-    assert len(rows) == 5 and rows[0].uid == "synthetic:issue:14"
-    assert [r.at for r in rows] == sorted([r.at for r in rows], reverse=True)
-    assert rows[1].uid == "synthetic:pr:10" and rows[1].at == "2026-09-05T12:00:00Z"
-    assert rows[0].author == "erin" and rows[0].number == 14 and rows[0].state == "open"
-    everything = tools.call(synthetic_graph, "recent_work_items", limit=50)
-    assert "Billing" in next(r for r in everything if r.uid == "synthetic:pr:3").systems
+    assert [r.uid for r in rows] == [
+        "synthetic:issue:14",
+        "synthetic:pr:10",
+        "synthetic:pr:9",
+        "synthetic:slack:thread:eng-2026-07-15",
+        "synthetic:pr:8",
+    ]
+    assert rows[0].last_at.startswith("2026-09-10")
+    assert rows[1].last_at == "2026-09-05T12:00:00Z"  # a merged PR counts from its merge
+    assert [r.last_at for r in rows] == sorted((r.last_at for r in rows), reverse=True)
+    assert (rows[0].author, rows[0].number, rows[0].state) == ("erin", 14, "open")
+    assert rows[1].systems == ["Auth", "Web app"] and rows[0].systems == []
 
 
 def test_people_activity_excludes_bots(synthetic_graph):
     rows = tools.call(synthetic_graph, "people_activity")
     by_login = {r.login: r for r in rows}
     assert "ci-bot" not in by_login and {"alice", "erin"} <= by_login.keys()
-    assert by_login["erin"].prs == 3 and by_login["erin"].teams == ["payments"]
-    assert by_login["alice"].reviews >= 1
-    assert len(tools.call(synthetic_graph, "people_activity", limit=2)) == 2
+    erin = by_login["erin"]
+    assert (erin.prs, erin.reviews, erin.teams) == (3, 2, ["payments"])
+    assert (erin.person_uid, erin.display_name) == ("person:erin", "Erin Novak")
+    assert by_login["alice"].reviews == 3
+    assert by_login["dave"].teams == []
+    assert [r.login for r in tools.call(synthetic_graph, "people_activity", limit=2)] == [
+        "alice",
+        "erin",
+    ]
 
 
 def test_unknown_tool_and_bad_params(synthetic_graph):
