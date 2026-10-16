@@ -261,3 +261,23 @@ def test_thread_follow_up_appends_to_the_same_conversation():
 def test_replayable_drops_declined_model_internals_before_a_fallback(types, kept):
     blocks = [SimpleNamespace(model_dump=lambda t=t, **_: {"type": t}) for t in types]
     assert [b["type"] for b in agent.replayable(blocks)] == kept
+
+
+def test_real_tool_registry_becomes_sorted_tool_definitions():
+    from brain.agents.toolset import graph_toolset
+
+    defs = graph_toolset().definitions()
+    names = [d["name"] for d in defs]
+    assert names == sorted(names) and "related_work_items" in names and "get_entity" in names
+    assert all("title" not in d["input_schema"] and d["description"] for d in defs)
+
+
+def test_rows_keyed_by_person_uid_are_citable_with_a_title():
+    from brain.agents.toolset import _collect_nodes
+
+    seen: dict = {}
+    _collect_nodes(
+        [{"login": "alice", "person_uid": "person:alice", "system_uid": "system:Auth"}], seen
+    )
+    assert seen["person:alice"] == {"uid": "person:alice", "title": "alice"}
+    assert seen["system:Auth"] == {"uid": "system:Auth"}

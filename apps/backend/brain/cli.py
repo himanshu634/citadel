@@ -173,7 +173,11 @@ def ask(
     try:
         answer = run_ask(slug, question, thread_id=thread, checkpointer=db.checkpointer(slug))
     except anthropic.AuthenticationError:
-        _fail("Anthropic rejected the credentials. Set ANTHROPIC_API_KEY in .env.")
+        _fail("Anthropic rejected the credentials. Check ANTHROPIC_API_KEY in .env.")
+    except TypeError as e:  # the SDK raises this when it finds no credentials at all
+        if "authentication" not in str(e):
+            raise
+        _fail("No Anthropic credentials. Set ANTHROPIC_API_KEY in .env.")
     except anthropic.APIConnectionError as e:
         _fail(f"Cannot reach the Anthropic API: {e}")
     except anthropic.APIStatusError as e:

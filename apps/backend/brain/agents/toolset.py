@@ -55,7 +55,10 @@ class Toolset:
             rows = self.run(slug, name, **params.model_dump())
         except Exception as e:  # a failing query is reported to the model, not raised
             return _error(f"{name} failed: {type(e).__name__}: {e}")
-        data = [r.model_dump(mode="json") if isinstance(r, BaseModel) else r for r in rows]
+        data = [
+            r.model_dump(mode="json", by_alias=True) if isinstance(r, BaseModel) else r
+            for r in rows
+        ]
         seen: dict[str, dict[str, Any]] = {}
         _collect_nodes(data, seen)
         text = json.dumps({"rows": data, "count": len(data)}, default=str, ensure_ascii=False)
@@ -85,8 +88,11 @@ _TITLE_KEYS = ("title", "subject", "name", "display_name", "login", "system")
 
 
 def _collect_nodes(value: Any, seen: dict[str, dict[str, Any]]) -> None:
-    """Record every dict that carries a `uid` (rows and nested lists alike), plus bare uids
-    under `*_uid` / `uids` keys, so citations can be checked and shown with a title and url."""
+    """Record every dict that names a node (rows and nested lists alike): by its `uid`, or by
+    its first `*_uid` key when it has no `uid` (the row's subject, e.g. an expert row's
+    `person_uid`). Other `*_uid`
+    and `uids` values are recorded bare. Citations are checked against this, and shown with
+    the title and url found here."""
     if isinstance(value, list):
         for v in value:
             _collect_nodes(v, seen)
@@ -94,6 +100,8 @@ def _collect_nodes(value: Any, seen: dict[str, dict[str, Any]]) -> None:
     if not isinstance(value, dict):
         return
     uid = value.get("uid")
+    if uid is None:
+        uid = next((v for k, v in value.items() if k.endswith("_uid")), None)
     if isinstance(uid, str) and uid:
         node = seen.setdefault(uid, {"uid": uid})
         title = next((value[k] for k in _TITLE_KEYS if isinstance(value.get(k), str)), None)

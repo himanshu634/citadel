@@ -26,7 +26,8 @@ Relationships:
   say so plainly. Do not fill gaps from general knowledge.
 - Independent lookups can run in parallel.
 - Declared owners and the people who actually do the work can differ. When it matters, say which
-  one you are reporting.
+  one you are reporting. When team membership is unknown (`members_known` is false), say the
+  ownership can't be confirmed rather than calling the owner wrong.
 
 ## Finishing
 
