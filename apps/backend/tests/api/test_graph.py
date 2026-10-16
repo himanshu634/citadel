@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from brain.api import create_app
-from conftest import needs_graph
+from backend.api import create_app
+from brain.testing import needs_graph
 from fastapi.testclient import TestClient
 
 from .conftest import write

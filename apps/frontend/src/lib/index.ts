@@ -24,6 +24,7 @@ export { default as AnswerRating } from './components/brain/AnswerRating.svelte'
 export { default as ActivityBars } from './components/brain/ActivityBars.svelte';
 export { default as AddCompanyDialog } from './components/brain/AddCompanyDialog.svelte';
 export { default as BuildProgress } from './components/brain/BuildProgress.svelte';
+export { default as ChatList } from './components/brain/ChatList.svelte';
 export { default as CitedAnswer } from './components/brain/CitedAnswer.svelte';
 export { default as CompanyForm } from './components/brain/CompanyForm.svelte';
 export { default as ConfigPreview } from './components/brain/ConfigPreview.svelte';
@@ -37,6 +38,7 @@ export { default as WalkLedger } from './components/brain/WalkLedger.svelte';
 export { default as WalkSteps } from './components/brain/WalkSteps.svelte';
 export { default as SourceCard } from './components/brain/SourceCard.svelte';
 export { default as TerritoryMap } from './components/brain/TerritoryMap.svelte';
+export { default as TurnTimeline } from './components/brain/TurnTimeline.svelte';
 export { default as WorkItemRow } from './components/brain/WorkItemRow.svelte';
 
 export { default as AppShell } from './components/layout/AppShell.svelte';

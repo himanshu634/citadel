@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { AskThread, NOT_RUN } from './ask.svelte';
+import { AskThread, NOT_RUN, turnFromChat } from './ask.svelte';
+import type { ChatTurn, Thread } from './types';
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -173,5 +174,110 @@ describe('AskThread', () => {
 		await t.rate(0, 'up');
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		expect(t.turns[0].rating).toBeNull();
+	});
+
+	test('each Claude response is kept on its turn with the tools it asked for, and starts and ends are told', async () => {
+		const llm = {
+			seq: 1,
+			text: 'Looking.',
+			thinking: null,
+			model: 'm',
+			stop: 'tool_use',
+			ms: 9,
+			usage: { input: 1, output: 2, cache_read: 0, cache_write: 0 },
+			calls: [{ id: 'a', tool: 'person_profile', kind: 'graph', server: null, input: { login: 'alice' } }]
+		};
+		const body = run().replace('event: step\n', `event: llm\ndata: ${JSON.stringify(llm)}\n\nevent: step\n`);
+		serve(body);
+		const started: string[] = [];
+		const ended: (string | null)[] = [];
+		const t = new AskThread('acme', (id) => started.push(id), (id) => ended.push(id));
+		await t.ask('Who is Alice?');
+		expect(t.turns[0].calls.map((c) => [c.seq, c.text, c.calls[0].id])).toEqual([[1, 'Looking.', 'a']]);
+		expect(started).toEqual(['t1']);
+		expect(ended).toEqual(['t1']);
+	});
+
+	test('load reopens a saved chat; the next question follows it up', async () => {
+		const saved: Thread = {
+			id: 't9',
+			title: 'Who is Alice?',
+			created_at: '2026-10-16T10:00:00Z',
+			updated_at: '2026-10-16T10:01:00Z',
+			last_status: 'done',
+			turns: [chatTurn()]
+		};
+		const fetchMock = vi.fn(async () => new Response(JSON.stringify(saved), { status: 200 }));
+		vi.stubGlobal('fetch', fetchMock);
+		const t = new AskThread('acme');
+		await t.load('t9');
+		expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe('/api/companies/acme/threads/t9');
+		expect(t.threadId).toBe('t9');
+		expect(t.turns).toHaveLength(1);
+		expect(t.turns[0].answer?.text).toBe('Alice [1].');
+
+		const asked = serve(run('t9'));
+		await t.ask('And Bob?');
+		const req = JSON.parse((asked.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+		expect(req).toEqual({ question: 'And Bob?', thread_id: 't9' });
+		expect(t.turns).toHaveLength(2);
+	});
+
+	test('a chat that cannot be opened says why and leaves a new chat', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ detail: 'No chat nope for acme' }), { status: 404 })));
+		const t = new AskThread('acme');
+		await t.load('nope');
+		expect(t.loadError).toBe('No chat nope for acme');
+		expect(t.threadId).toBeNull();
+		expect(t.loading).toBe(false);
+	});
+});
+
+function chatTurn(over: Partial<ChatTurn> = {}): ChatTurn {
+	const step = { ms: 5, count: 1, error: null, rows: [], nodes: [node], rels: [], status: 'done', result: null, server: null };
+	return {
+		n: 1,
+		question: 'Who is Alice?',
+		status: 'done',
+		started_at: '2026-10-16T10:00:00Z',
+		ended_at: '2026-10-16T10:01:00Z',
+		ms: 60000,
+		error: null,
+		answer: { thread_id: 't9', text: 'Alice [1].', sources: [], path: [], stop: 'tool_use', model: 'm', trace_id: 'tr' },
+		calls: [
+			{ seq: 1, at: null, model: 'm', stop: 'tool_use', text: 'Looking.', thinking: 'Profile first.', ms: 9, usage: { input: 1, output: 2, cache_read: 0, cache_write: 0 } },
+			{ seq: 2, at: null, model: 'm', stop: 'tool_use', text: null, thinking: null, ms: 4, usage: { input: 1, output: 2, cache_read: 0, cache_write: 0 } }
+		],
+		steps: [
+			{ ...step, id: 'a', call: 1, n: 1, tool: 'person_profile', kind: 'graph', input: { login: 'alice' } },
+			{ ...step, id: 'm', call: 1, n: null, tool: 'search', kind: 'mcp', server: 'docs', input: { q: 'x' }, result: 'hit' },
+			{ ...step, id: 'z', call: 2, n: null, tool: 'submit_answer', kind: 'submit', input: {}, count: null }
+		],
+		rating: 'up',
+		note: null,
+		...over
+	};
+}
+
+describe('turnFromChat', () => {
+	test('graph steps and checks make the walk; every call hangs off the response that asked', () => {
+		const turn = turnFromChat(chatTurn());
+		expect(turn.steps.map((s) => s.id)).toEqual(['a', 'z']);
+		expect(turn.calls.map((c) => c.calls.map((x) => [x.id, x.kind]))).toEqual([
+			[
+				['a', 'graph'],
+				['m', 'mcp']
+			],
+			[['z', 'submit']]
+		]);
+		expect(turn.calls[0].calls[1]).toMatchObject({ server: 'docs', result: 'hit' });
+		expect(turn.calls[0].thinking).toBe('Profile first.');
+		expect(turn).toMatchObject({ status: 'done', rating: 'up', rated: 'idle' });
+	});
+
+	test('a step a stopped turn never finished is shown as not run', () => {
+		const t = chatTurn({ status: 'stopped' });
+		t.steps[0] = { ...t.steps[0], status: 'running' };
+		expect(turnFromChat(t).steps[0]).toMatchObject({ status: 'done', error: NOT_RUN });
 	});
 });

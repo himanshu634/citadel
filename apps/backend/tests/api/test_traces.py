@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 import pytest
-from brain.agents.traces import TraceStore
-from tests.api.conftest import write
-from tests.api.test_ask import frames, make_client
-from tests.test_agent import FakeClient, reply, settings, submit, tool_use  # noqa: F401
+from agents.testing import FakeClient, reply, settings, submit, tool_use  # noqa: F401
+from agents.traces import TraceStore
+
+from .conftest import write
+from .test_ask import frames, make_client
 
 
 @pytest.fixture

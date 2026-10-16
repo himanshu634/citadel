@@ -9,18 +9,29 @@ question scrolls to the top and the view stays there while the answer grows; "Ju
 appears when the end is out of view. The composer sits under the chat column. At 1100px and
 below everything is one column with each walk under its conversation. `?q=` (from the top bar's
 ask field) asks once on arrival and is then removed from the address, so a reload does not ask
-again.
+again. Every chat is kept on the server: the past chats column (`ChatList`, foldable, kept in
+`citadel-ask-history`) lists them, `?thread=<id>` opens one (a reload or a shared link reopens
+it), and each lane shows how it answered (`TurnTimeline`, folded under the answer).
 -->
 <script lang="ts">
-	import { ArrowDown, PanelRightClose, PanelRightOpen, SquarePen } from '@lucide/svelte';
+	import {
+		ArrowDown,
+		History,
+		LoaderCircle,
+		PanelLeftClose,
+		PanelRightClose,
+		PanelRightOpen,
+		SquarePen
+	} from '@lucide/svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { tick, untrack } from 'svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import { prefersReducedMotion } from 'svelte/motion';
 	import { MediaQuery } from 'svelte/reactivity';
-	import { Button, Input } from '$lib';
+	import { Banner, Button, ChatList, Input } from '$lib';
 	import { AskThread } from '$lib/ask.svelte';
+	import { Chats } from '$lib/chats.svelte';
 	import AskLane from '$lib/components/brain/AskLane.svelte';
 	import Splitter from '$lib/components/ui/Splitter.svelte';
 	import { getCompanies } from '$lib/companies.svelte';
@@ -33,12 +44,81 @@ again.
 	const field = $derived(askFieldOf(company));
 	const name = $derived(company?.name ?? data.slug);
 
-	// One conversation per company: switching company on the rail starts a fresh one.
-	const thread = $derived(new AskThread(data.slug));
+	// One conversation and one chat list per company: switching company on the rail starts fresh.
+	const slug = $derived(data.slug);
+	const chats = $derived(new Chats(slug));
+	const thread = $derived(
+		new AskThread(
+			slug,
+			(id) => {
+				if (page.url.searchParams.get('thread') !== id) void openUrl(id);
+				void chats.refresh();
+			},
+			() => void chats.refresh()
+		)
+	);
 	$effect(() => {
 		const t = thread;
 		return () => t.dispose();
 	});
+	$effect(() => {
+		void chats.refresh();
+	});
+
+	const wanted = $derived(page.url.searchParams.get('thread'));
+	// The address names the open chat: reopen it when it changes (a link, back, a reload); a bare
+	// address (the Ask link, New chat) means a new chat. A running answer is never cut off: a chat
+	// picked meanwhile opens when it ends (the effect reads `running` for that).
+	$effect(() => {
+		const id = wanted;
+		if (thread.running) return;
+		untrack(() => {
+			if (id && id !== thread.threadId) void thread.load(id).then(pinLatest);
+			else if (!id && thread.threadId) thread.reset();
+		});
+	});
+
+	function hrefOf(id: string): string {
+		return `${page.url.pathname}?thread=${encodeURIComponent(id)}`;
+	}
+
+	function openUrl(id: string | null) {
+		const url = new URL(page.url);
+		if (id) url.searchParams.set('thread', id);
+		else url.searchParams.delete('thread');
+		return goto(url, { replaceState: !!id && !wanted, noScroll: true, keepFocus: true });
+	}
+
+	function newChat() {
+		thread.reset();
+		void openUrl(null);
+	}
+
+	async function remove(id: string) {
+		if (await chats.remove(id)) {
+			if (id === thread.threadId) newChat();
+		}
+	}
+
+	// --- the past chats column ----------------------------------------------------------------
+	const HISTORY_KEY = 'citadel-ask-history';
+	let historyOpen = $state(true);
+	// Read once in the browser, like the split: blocked storage keeps it open.
+	$effect(() => {
+		try {
+			historyOpen = localStorage.getItem(HISTORY_KEY) !== 'folded';
+		} catch {
+			// keep it open
+		}
+	});
+	function toggleHistory() {
+		historyOpen = !historyOpen;
+		try {
+			localStorage.setItem(HISTORY_KEY, historyOpen ? 'open' : 'folded');
+		} catch {
+			// not remembered; it still folds for this visit
+		}
+	}
 
 	let question = $state('');
 
@@ -139,6 +219,30 @@ again.
 
 <svelte:head><title>Ask · {name}</title></svelte:head>
 
+<div class={['ask-page', { 'history-open': historyOpen }]}>
+	{#if historyOpen}
+		<aside class="history" aria-label="Past chats">
+			<div class="history-head">
+				<Button size="sm" onclick={newChat} disabled={!thread.turns.length && !thread.threadId}
+					><SquarePen aria-hidden="true" />New chat</Button
+				>
+				<Button size="sm" variant="ghost" iconOnly label="Hide past chats" onclick={toggleHistory}>
+					<PanelLeftClose aria-hidden="true" />
+				</Button>
+			</div>
+			<ChatList
+				threads={chats.threads}
+				current={thread.threadId}
+				{hrefOf}
+				loading={chats.loading}
+				error={chats.error}
+				more={chats.next !== null}
+				deleting={chats.deleting}
+				onmore={() => chats.more()}
+				ondelete={remove}
+			/>
+		</aside>
+	{/if}
 <div
 	class="ask"
 	bind:this={pageEl}
@@ -148,9 +252,14 @@ again.
 >
 	<header class="head">
 		<div class="title">
+			{#if !historyOpen}
+				<Button size="sm" variant="ghost" iconOnly label="Show past chats" onclick={toggleHistory}>
+					<History aria-hidden="true" />
+				</Button>
+			{/if}
 			<h1>Ask {name}</h1>
-			{#if thread.turns.length}
-				<Button size="sm" onclick={() => thread.reset()}><SquarePen aria-hidden="true" />New chat</Button>
+			{#if !historyOpen && (thread.turns.length || thread.threadId)}
+				<Button size="sm" class="new" onclick={newChat}><SquarePen aria-hidden="true" />New chat</Button>
 			{/if}
 		</div>
 		{#if wide}
@@ -170,7 +279,12 @@ again.
 		onscroll={measure}
 	>
 		<div class="lanes" {@attach watchGrowth}>
-			{#if thread.turns.length === 0}
+			{#if thread.loadError}
+				<div class="notice"><Banner tone="danger" title="This chat could not be opened">{thread.loadError}</Banner></div>
+			{/if}
+			{#if thread.loading}
+				<p class="opening" role="status"><LoaderCircle class="spin" aria-hidden="true" />Opening the chat</p>
+			{:else if thread.turns.length === 0}
 				<div class="intro">
 					<p>
 						Ask about people, systems or decisions. Each answer shows the walk the agent took through the graph and
@@ -239,9 +353,48 @@ again.
 		</div>
 	{/if}
 </div>
+</div>
 
 <style>
+	.ask-page {
+		display: flex;
+		flex: 1;
+		min-height: 0;
+	}
+	.history {
+		display: flex;
+		flex: none;
+		flex-direction: column;
+		gap: var(--space-3);
+		width: var(--sidebar-width);
+		min-height: 0;
+		padding: var(--space-4) var(--space-3);
+		overflow-y: auto;
+		border-right: var(--border-hair) solid var(--color-line);
+	}
+	.history-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-2);
+	}
+	.notice {
+		max-width: 66ch;
+		padding: var(--space-4) var(--space-6) 0;
+	}
+	.opening {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-6);
+		color: var(--color-text-muted);
+	}
+	.opening :global(svg) {
+		width: var(--space-4);
+		height: var(--space-4);
+	}
 	.ask {
+		min-width: 0;
 		position: relative;
 		display: flex;
 		flex: 1;
@@ -267,7 +420,7 @@ again.
 		min-width: 0;
 		padding: var(--space-4) var(--space-6) var(--space-3);
 	}
-	.title :global(.btn) {
+	.title :global(.new) {
 		margin-left: auto;
 	}
 	h1 {
@@ -363,6 +516,18 @@ again.
 		right: calc(var(--gutter) + var(--walk-width));
 		bottom: 0;
 		z-index: 2;
+	}
+	/* Below 1400px the past chats sit above the lanes, as a short scrolling strip. */
+	@media (max-width: 1400px) {
+		.ask-page.history-open {
+			flex-direction: column;
+		}
+		.history {
+			width: auto;
+			max-height: 12rem;
+			border-right: 0;
+			border-bottom: var(--border-hair) solid var(--color-line);
+		}
 	}
 	@media (max-width: 1100px) {
 		.head,

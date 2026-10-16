@@ -23,6 +23,7 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 	import Button from '../ui/Button.svelte';
 	import AnswerRating from './AnswerRating.svelte';
 	import GraphWalk from './GraphWalk.svelte';
+	import TurnTimeline from './TurnTimeline.svelte';
 	import WalkAnswer from './WalkAnswer.svelte';
 	import WalkLedger from './WalkLedger.svelte';
 
@@ -227,6 +228,10 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 					<RotateCcw aria-hidden="true" />{replaying ? 'Replaying' : 'Replay walk'}
 				</Button>
 			</div>
+		{/if}
+		{#if turn.calls.length}
+			<!-- Folded under one line: the ledger already shows the work as it happens. -->
+			<TurnTimeline calls={turn.calls} steps={turn.steps} />
 		{/if}
 	</div>
 

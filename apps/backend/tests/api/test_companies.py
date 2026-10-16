@@ -5,11 +5,13 @@ from __future__ import annotations
 import time
 
 import pytest
+from agents import checkpoint
+from backend.api import create_app
+from backend.api.companies import status_of
+from backend.jobs import JobRunner
+from backend.testing import FakeSteps
 from brain import config, db, loader
-from brain.api import create_app
-from brain.api.companies import status_of
-from brain.jobs import JobRunner
-from conftest import FakeSteps, needs_graph
+from brain.testing import needs_graph
 from fastapi.testclient import TestClient
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -143,7 +145,7 @@ def leave_build_history(runner) -> None:
 
 
 def leave_graphs(monkeypatch, *names: str) -> None:
-    monkeypatch.setattr(db, "company_graphs", lambda slug: list(names))
+    monkeypatch.setattr(checkpoint, "company_graphs", lambda slug: list(names))
 
 
 @pytest.mark.parametrize(
@@ -180,7 +182,7 @@ def test_slug_check_with_the_graph_down_uses_the_files(client, api_root, monkeyp
     def down(slug):
         raise error("unreachable")
 
-    monkeypatch.setattr(db, "company_graphs", down)
+    monkeypatch.setattr(checkpoint, "company_graphs", down)
     assert client.post("/api/companies/validate", json=VALID_DRAFT).json()["slug_taken"] is False
     assert client.post("/api/companies", json=VALID_DRAFT).status_code == 201
 
@@ -209,7 +211,7 @@ def graph_down(request, monkeypatch):
         asked.append(slug)
         raise request.param("unreachable")
 
-    monkeypatch.setattr("brain.api.companies.status_of", down)
+    monkeypatch.setattr("backend.api.companies.status_of", down)
     return asked
 
 

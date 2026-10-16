@@ -8,8 +8,8 @@ Only a small set of Markdown is understood, and never as HTML (`answerBlocks` in
 Pass `reveal` for an answer that just arrived live: its blocks fade in one after another.
 -->
 <script lang="ts">
-	import { NODE_LABELS, type AskAnswer } from '$lib/types';
-	import { answerBlocks, nodeType, type Inline } from '$lib/walk';
+	import type { AskAnswer } from '$lib/types';
+	import { answerBlocks, sourceKind, type Inline } from '$lib/walk';
 
 	type Props = {
 		answer: AskAnswer;
@@ -104,7 +104,7 @@ Pass `reveal` for an answer that just arrived live: its blocks fade in one after
 							<span class="title">{src.title ?? src.uid}</span>
 						{/if}
 						<small>
-							{NODE_LABELS[nodeType(src.label)]}{#if src.step !== null}&ensp;·&ensp;found in step {src.step}{/if}
+							{sourceKind(src.label)}{#if src.step !== null}&ensp;·&ensp;found in step {src.step}{/if}
 						</small>
 					</div>
 				</li>

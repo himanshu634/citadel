@@ -128,6 +128,16 @@ export const rough: WalkStep[] = [
 	{ id: 'e3', n: null, tool: 'submit_answer', input: {}, status: 'done', error: 'These uids did not appear in any tool result: person:zed.' }
 ];
 
+/** An answer that also cites a tool on an outside MCP server (no node in the walk). */
+export const withMcp: AskAnswer = {
+	...answer,
+	text: 'Carol and Alice pair on token work [1], as the handbook notes [2].',
+	sources: [
+		answer.sources[0],
+		{ uid: 'mcp:handbook/search_handbook', title: 'search_handbook on handbook', url: null, label: 'MCP', step: null }
+	]
+};
+
 export const stopped: AskAnswer = { ...answer, text: null, sources: [], stop: 'stopped' };
 export const refused: AskAnswer = { ...answer, text: null, sources: [], stop: 'refusal' };
 
@@ -172,6 +182,7 @@ export const followUp: WalkStep[] = [
 
 const turn = (over: Partial<Turn>): Turn => ({
 	question: '',
+	calls: [],
 	steps: [],
 	answer: null,
 	error: null,

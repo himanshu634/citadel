@@ -1,0 +1,61 @@
+graph TB
+  subgraph SRC["Sources"]
+    GH["GitHub<br/>GraphQL + partial clone"]
+    LIN["Linear<br/>tickets, assignees, blockers"]
+    JSONL["Canonical JSONL<br/>Slack / Jira exports"]
+    DOCS["Local docs<br/>markdown"]
+    CFG["companies/slug.yaml<br/>path rules, bots,<br/>window, data_permission"]
+  end
+
+  subgraph BRAIN["apps/brain: THE BRAIN"]
+    direction LR
+    AD["adapters<br/>fetch → data/raw cache<br/>→ records"]
+    CAN["canonical records<br/>Person · Team · System<br/>WorkItem · Change · Doc"]
+    EXT["extractor · planned<br/>(not built yet)"]
+    NORM["normalize<br/>systems, bots,<br/>emails scrubbed,<br/>activity window"]
+    LOAD["loader<br/>UNWIND + MERGE on uid<br/>queries/load/*.cypher"]
+    G[("FalkorDB graph<br/>brain_slug<br/>one graph per company")]
+    TOOLS["named tools<br/>queries/tools/*.cypher<br/>tools.py<br/>no LLM-written Cypher"]
+    AD --> CAN --> NORM --> LOAD --> G --> TOOLS
+    CAN -.-> EXT -.-> NORM
+  end
+
+  subgraph AGENTS["apps/agents — first user"]
+    direction TB
+    LOOP["Claude agent loop<br/>router · Ask<br/>submit_answer with cited uids"]
+    ROLES["agent roles<br/>work layer · sim"]
+    EVAL["evals & traces"]
+    CK[("agent_slug<br/>checkpoints")]
+    LOOP --- ROLES
+    LOOP --- EVAL
+    LOOP --- CK
+  end
+
+  subgraph BACK["apps/backend — HTTP API"]
+    direction TB
+    API["FastAPI<br/>/api/companies/slug/..."]
+    JOBS["build jobs (SSE)<br/>company registry<br/>onboarding"]
+  end
+
+  FE["apps/frontend<br/>SvelteKit"]
+
+  GH --> AD
+  LIN --> AD
+  JSONL --> AD
+  DOCS --> AD
+  CFG -.-> NORM
+  LOOP ==>|"calls named tools only"| TOOLS
+  API -->|"overview,<br/>tools routes"| TOOLS
+  API -->|"graph view"| G
+  API -->|"Ask"| LOOP
+  JOBS -->|"builds"| AD
+  FE --> API
+  API --- JOBS
+
+  classDef planned stroke-dasharray: 6 4,stroke:#d97706,stroke-width:2px,fill:#fff7ed,color:#92400e
+  classDef engine fill:#e0f2fe,stroke:#0369a1,stroke-width:2px
+  classDef thin fill:#f8fafc,stroke:#94a3b8
+  class EXT planned
+  class AD,CAN,NORM,LOAD,G,TOOLS engine
+  class API,JOBS,FE,LOOP,ROLES,EVAL,CK thin
+  style BRAIN fill:#f0f9ff,stroke:#0369a1,stroke-width:3px

@@ -14,6 +14,7 @@
 		Card,
 		Checkbox,
 		ChoiceCard,
+		ChatList,
 		CitedAnswer,
 		CompanyForm,
 		CompanyRail,
@@ -37,6 +38,7 @@
 		TagInput,
 		TerritoryMap,
 		Tooltip,
+		TurnTimeline,
 		WalkAnswer,
 		WalkLedger,
 		WalkSteps,
@@ -48,6 +50,7 @@
 	import * as builds from './build-samples';
 	import { syntheticGraph } from './graph-samples';
 	import * as walks from './walk-samples';
+	import * as chatSamples from './chat-samples';
 	import { carryOver, highlightFor } from '$lib/walk';
 	import { WALK_LIMITS, clampSize } from '$lib/splitter';
 	import {
@@ -89,7 +92,7 @@
 		splitFolded ? 'var(--walk-strip)' : `${Math.round(clampSize(splitSize, splitWidth) * splitWidth)}px`
 	);
 
-	// Example content for the gallery, taken from apps/backend/examples/synthetic_company.
+	// Example content for the gallery, taken from apps/brain/examples/synthetic_company.
 	const featuredAnswer: Answer = {
 		question: 'Why did we replace sessions with JWTs?',
 		parts: [
@@ -819,6 +822,10 @@
 				<figcaption>Answer: hover a chip or a source</figcaption>
 			</figure>
 			<figure>
+				<WalkAnswer answer={walks.withMcp} />
+				<figcaption>Answer citing an MCP result next to a graph node</figcaption>
+			</figure>
+			<figure>
 				<WalkSteps steps={walks.rough} />
 				<GraphWalk steps={[]} />
 				<WalkAnswer answer={walks.stopped} />
@@ -945,6 +952,36 @@
 					<AskLane turn={walks.laneDone} index={0} brain="Synthetic Co" walkWidth="var(--walk-strip)" folded />
 				</div>
 				<figcaption>The walk column folded to its strip: a dot and the node count</figcaption>
+			</figure>
+		</div>
+	</Card>
+
+	<Card title="Chat list and answer timeline (Ask)">
+		<div class="walks">
+			<figure>
+				<ChatList
+					threads={chatSamples.chats}
+					current="c2"
+					hrefOf={(id) => `?chat=${id}`}
+					more
+					now={chatSamples.NOW}
+					ondelete={() => {}}
+				/>
+				<figcaption>Answering, open, stopped, failed and older chats; more to read</figcaption>
+			</figure>
+			<figure>
+				<ChatList threads={[]} hrefOf={(id) => `?chat=${id}`} />
+				<ChatList threads={[]} hrefOf={(id) => `?chat=${id}`} loading />
+				<ChatList threads={chatSamples.chats.slice(1, 2)} hrefOf={(id) => `?chat=${id}`} error="FalkorDB is not reachable" now={chatSamples.NOW} />
+				<figcaption>No chats yet; loading; a failed read</figcaption>
+			</figure>
+			<figure>
+				<TurnTimeline calls={chatSamples.timeline} steps={chatSamples.timelineSteps} running />
+				<figcaption>Timeline open: reasoning, text, graph tools, an MCP call with its result, the answer check</figcaption>
+			</figure>
+			<figure>
+				<TurnTimeline calls={chatSamples.timeline.slice(0, 1)} steps={walks.running} />
+				<figcaption>Folded; open it to see a graph call still running</figcaption>
 			</figure>
 		</div>
 	</Card>

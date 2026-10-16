@@ -133,7 +133,7 @@ Rules:
 ### The graph map (design direction D, "Territories")
 
 - Every node sits in the territory of the system it touches most (rules in
-  `apps/backend/brain/graph_view.py`): the nine biggest systems, one territory for the smaller
+  `apps/brain/brain/graph_view.py`): the nine biggest systems, one territory for the smaller
   ones, and a dashed outline for work linked to no code. The layout numbers are in `src/lib/graph.ts`.
 - Territories are **tonal**, never hue: `--graph-territory` and `--graph-territory-alt`
   alternate, outlined in `--color-line`. Hue stays reserved for node kinds.
@@ -189,6 +189,12 @@ Rules:
   the `[` key, and the choice is kept (`citadel-sidebar`). Folded items are named by tooltips and
   for screen readers. Below 900px the drawer is never folded. The Ask page, like the Graph page,
   fills the height under the top bar (a bleed page).
+- **Past chats** (`ChatList`) are a column left of the lanes, with New chat at its top; below
+  1400px they sit above the lanes as a short scrolling strip. "Hide past chats" folds the column
+  (kept in `citadel-ask-history`); folded, "Show past chats" and New chat move into the page head.
+  `?thread=<id>` opens a saved chat and scrolls its last lane to the top.
+- **How it answered** (`TurnTimeline`) sits folded under each lane's answer: the ledger already
+  shows the work while it happens, so the timeline never opens by itself here.
 
 ## 7. Components
 
@@ -225,6 +231,8 @@ not add another component library.
 | `AskLane`    | One question and everything it led to (section 6, The Ask page): strip, conversation with its ledger and answer, and its own walk. The page owns the columns (`walkWidth`), the splitter and the scrolling. Hovering a citation or a ledger row lights what backs it in the walk; a citation wins. The walk is drawn once and kept (folding only hides it). |
 | `WalkAnswer` | The answer on the Ask page: limited Markdown rendered as text, citation chips that are buttons (hover or focus lights the path, click pins it), sources that say which step found them. No answer says why (refused, stopped, step limit). |
 | `AnswerRating` | A thumbs up and down under an Ask answer, saved on its trace. Ghost icon buttons with `aria-pressed`; pressed is a filled ink icon on the sunken fill plus a line of words ("Marked right"), never accent (the citations own it). Pressing again takes it back. A thumbs down offers an optional note, which becomes the `why` of a draft eval case. Saving and a failed save are said in words; a failed save keeps the earlier thumbs. Hidden when the answer has no trace or was stopped. |
+| `ChatList` | The Ask page's past chats, newest first, in a column left of the thread (above it below 1400px). Each row is a link: the first question on one line, then "n questions · 5 min ago". The open chat has the surface fill and a hairline; a chat still answering shows a spinner and "answering", a failed one says "failed" in danger text, a stopped one says "stopped". Delete is a ghost icon shown on hover or focus (always on touch) and asks once inline (Delete / Keep). Shared per company: there are no users. |
+| `TurnTimeline` | How one answer came about (on the Ask page, folded under the lane's answer): one summary line ("How it answered · 3 responses · 5 tool calls · 17,340 tokens") on the sunken fill that folds open (its `running` prop opens it while an answer runs; the Ask page leaves it folded). Inside, each Claude response is a hairline-ruled block: model, ms and stop reason in meta, its reasoning folded, its text, then every tool call as a row: status icon (success, danger, spinner), a badge for where it ran (Graph tool, Answer check, Server tool neutral; MCP with the server name in accent), the call in mono and its rows count or status. MCP and server calls fold open to their result. |
 | `EntityRow`, `WorkItemRow`, `ActivityBars` | List and comparison patterns for people, teams, systems and work items. |
 | `CompanyForm` | The fields of a company file for one wizard step or all three (Settings). Edits the draft; the page validates and hands back `errors`, which show under the field their `loc` names. Errors no field shows are listed at the foot of the step, so nothing blocks without a reason. Rules in `src/lib/onboarding.ts`. |
 | `SourceCard` | One source of a company. GitHub: repository, what to read, token note with "Check again", GitHub's answer; an error only when the repository is private while the data is not `own`. Not found, rate limits and outages are warnings with "Check again", never blockers; Continue waits while a check is unanswered. |

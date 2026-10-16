@@ -1,4 +1,4 @@
-/** Shapes the UI renders. They mirror the brain's graph labels (apps/backend/brain/canonical.py). */
+/** Shapes the UI renders. They mirror the brain's graph labels (apps/brain/brain/canonical.py). */
 
 export type NodeType = 'person' | 'team' | 'system' | 'work-item' | 'change' | 'document';
 
@@ -71,8 +71,9 @@ export interface MenuItem {
 }
 
 // --- Companies and builds (the HTTP API) --------------------------------------------------------
-// Written by hand to match apps/backend/brain/api/models.py, jobs.py, events.py, config_diff.py and
-// the row models in tools.py. Field names are the backend's (snake_case), not renamed.
+// Written by hand to match apps/backend/backend/api/models.py, jobs.py, config_diff.py,
+// apps/brain/brain/events.py and the row models in apps/brain/brain/tools.py. Field names are the
+// backend's (snake_case), not renamed.
 
 /** `unknown`: FalkorDB did not answer and no build says otherwise (`graph_reachable` is false). */
 export type CompanyStatus = 'ready' | 'building' | 'failed' | 'empty' | 'invalid' | 'unknown';
@@ -149,7 +150,7 @@ export interface SourceConfig {
 	[field: string]: unknown;
 }
 
-/** The company YAML as the API reads and writes it (apps/backend/brain/config.py CompanyConfig). */
+/** The company YAML as the API reads and writes it (apps/brain/brain/config.py CompanyConfig). */
 export interface CompanyConfig {
 	slug: string;
 	name: string;
@@ -162,6 +163,8 @@ export interface CompanyConfig {
 		ignore?: string[];
 	};
 	people?: { bots?: string[]; aliases?: Record<string, string> };
+	/** Outside MCP servers the Ask agent may call; the token is read from the `token_env` var. */
+	mcp_servers?: { name: string; url: string; token_env?: string | null; allowed_tools?: string[] | null }[];
 }
 
 export interface CompanyDetail extends Company {
@@ -297,7 +300,7 @@ export const LABEL_TYPES: Record<GraphLabel, NodeType> = {
 	Document: 'document'
 };
 
-/** One node of `GET /api/companies/<slug>/graph` (apps/backend/brain/graph_view.py). */
+/** One node of `GET /api/companies/<slug>/graph` (apps/brain/brain/graph_view.py). */
 export interface GraphNode {
 	uid: string;
 	label: GraphLabel;
@@ -358,7 +361,7 @@ export interface Entity {
 	neighbour_count: number;
 }
 
-// --- Ask (POST /api/companies/{slug}/ask, Server-Sent Events; brain/api/models.py Ask*) -------
+// --- Ask (POST /api/companies/{slug}/ask, Server-Sent Events; backend/api/models.py Ask*) -------
 
 /** A node one step touched. `label` is the graph label (Person, Team, System, WorkItem ...). */
 export interface WalkNode {
@@ -385,6 +388,45 @@ export interface AskStepEvent {
 	n: number | null;
 	tool: string;
 	input: Record<string, unknown> | null;
+	/** The seq of the Claude response (`AskLlmEvent`) that asked for it. */
+	call?: number | null;
+}
+
+/**
+ * Where a tool call ran: `graph` (a named graph tool), `submit` (the answer check), `mcp` (a tool
+ * on an MCP server, through the API's MCP connector) or `server` (an Anthropic server tool).
+ */
+export type CallKind = 'graph' | 'submit' | 'mcp' | 'server';
+
+/** A tool one Claude response used. MCP and server calls ran already and carry their result. */
+export interface AskCall {
+	id: string;
+	tool: string;
+	kind: CallKind;
+	/** The MCP server's name. */
+	server: string | null;
+	input: Record<string, unknown>;
+	error?: string | null;
+	result?: string | null;
+}
+
+export interface AskUsage {
+	input: number;
+	output: number;
+	cache_read: number;
+	cache_write: number;
+}
+
+/** One Claude response (`llm` event): what it said, its thinking when returned, what it asked for. */
+export interface AskLlmEvent {
+	seq: number;
+	text: string | null;
+	thinking: string | null;
+	model: string | null;
+	stop: string | null;
+	ms: number | null;
+	usage: AskUsage;
+	calls: AskCall[];
 }
 
 export interface AskStepDoneEvent extends AskStepEvent {
@@ -428,6 +470,71 @@ export interface WalkStep extends AskStepEvent {
 	rows?: unknown[];
 	nodes?: WalkNode[];
 	rels?: WalkRel[];
+}
+
+// --- Chat history (GET /api/companies/{slug}/threads...; brain/agents/history.py) -------------
+
+export type ChatStatus = 'running' | 'done' | 'stopped' | 'failed';
+
+/** A row of the chat list. Times are ISO strings. */
+export interface ThreadSummary {
+	id: string;
+	/** The first question, on one line. */
+	title: string;
+	created_at: string;
+	updated_at: string;
+	turns: number;
+	last_status: ChatStatus;
+}
+
+export interface ThreadPage {
+	threads: ThreadSummary[];
+	/** Pass as `before` for the next page; null when this was the last. */
+	next: number | null;
+}
+
+/** A saved tool call: the step shape plus where it ran. */
+export interface ChatStep extends AskStepDoneEvent {
+	kind: CallKind;
+	server: string | null;
+	status: string;
+	result: string | null;
+}
+
+export interface ChatLlmCall {
+	seq: number;
+	at: string | null;
+	model: string | null;
+	stop: string | null;
+	text: string | null;
+	thinking: string | null;
+	ms: number | null;
+	usage: AskUsage;
+}
+
+export interface ChatTurn {
+	n: number;
+	question: string;
+	status: ChatStatus;
+	started_at: string;
+	ended_at: string | null;
+	ms: number | null;
+	error: string | null;
+	answer: AskAnswer | null;
+	calls: ChatLlmCall[];
+	steps: ChatStep[];
+	rating: Rating | null;
+	note: string | null;
+}
+
+/** A whole chat, as the Ask page reopens it. */
+export interface Thread {
+	id: string;
+	title: string;
+	created_at: string;
+	updated_at: string;
+	last_status: ChatStatus;
+	turns: ChatTurn[];
 }
 
 /** A thumbs on one answer (POST .../traces/{trace_id}/feedback); null takes it back. */
