@@ -6,11 +6,12 @@ import json
 import threading
 
 import pytest
-from brain.api import create_app
-from brain.api.ask import Asker
+from agents.testing import TOOLSET, FakeClient, reply, settings, submit, tool_use  # noqa: F401
+from backend.api import create_app
+from backend.api.ask import Asker
 from fastapi.testclient import TestClient
-from tests.api.conftest import write
-from tests.test_agent import TOOLSET, FakeClient, reply, settings, submit, tool_use  # noqa: F401
+
+from .conftest import write
 
 
 @pytest.fixture

@@ -8,7 +8,7 @@ window:
   since: 2026-01-01
 sources:
   - type: canonical_jsonl   # the base data only: no tickets folder, Linear provides the tickets
-    path: apps/backend/examples/synthetic_company
+    path: apps/brain/examples/synthetic_company
   - type: linear
     workspace: synthetic-co
     teams: [IDN, PAY]

@@ -6,9 +6,9 @@ from datetime import date
 
 import httpx
 import pytest
-from brain import onboard, registry
+from backend import onboard, registry
+from backend.api import checks
 from brain.adapters.github.client import GithubError, GithubRateLimited
-from brain.api import checks
 from brain.config import CompanyConfig
 
 from .conftest import write
@@ -134,7 +134,7 @@ def test_lookup_owner_has_a_company_suggests_a_separate_slug(client, api_root, m
 
 def test_lookup_slug_left_behind_is_skipped(client, api_root, monkeypatch):
     monkeypatch.setattr(
-        "brain.db.company_graphs", lambda slug: ["x"] if slug == "acme_labs" else []
+        "agents.checkpoint.company_graphs", lambda slug: ["x"] if slug == "acme_labs" else []
     )
     use(monkeypatch, FakeClient(repo()))
     assert client.get("/api/onboard/github/acme-labs/platform").json()["slug"] == "platform"

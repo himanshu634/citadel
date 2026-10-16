@@ -143,7 +143,7 @@ export function incompleteReason(draft: CompanyConfig, section: Section): string
 	return half ? 'Give each path rule a pattern and a system, or remove the row.' : null;
 }
 
-// What GET /api/checks/github/{owner}/{name} accepts (apps/backend/brain/api/checks.py).
+// What GET /api/checks/github/{owner}/{name} accepts (apps/backend/backend/api/checks.py).
 const OWNER = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
 const NAME = /^[A-Za-z0-9._-]+$/;
 

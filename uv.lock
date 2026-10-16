@@ -4,8 +4,35 @@ requires-python = "==3.12.*"
 
 [manifest]
 members = [
+    "agents",
+    "backend",
     "brain",
     "citadel",
+]
+
+[[package]]
+name = "agents"
+version = "0.1.0"
+source = { editable = "apps/agents" }
+dependencies = [
+    { name = "anthropic" },
+    { name = "brain" },
+    { name = "langchain-falkordb", extra = ["langgraph"] },
+    { name = "langgraph" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", specifier = ">=1.15.0" },
+    { name = "brain", editable = "apps/brain" },
+    { name = "langchain-falkordb", extras = ["langgraph"], specifier = ">=0.2.0" },
+    { name = "langgraph", specifier = ">=1.2.15" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "typer", specifier = ">=0.27.3" },
 ]
 
 [[package]]
@@ -59,19 +86,18 @@ wheels = [
 ]
 
 [[package]]
-name = "brain"
+name = "backend"
 version = "0.1.0"
 source = { editable = "apps/backend" }
 dependencies = [
-    { name = "anthropic" },
-    { name = "falkordb" },
+    { name = "agents" },
+    { name = "anyio" },
+    { name = "brain" },
     { name = "fastapi" },
     { name = "httpx" },
-    { name = "langchain-falkordb", extra = ["langgraph"] },
-    { name = "langgraph" },
     { name = "pydantic" },
-    { name = "pydantic-settings" },
     { name = "pyyaml" },
+    { name = "redis" },
     { name = "ruamel-yaml" },
     { name = "sse-starlette" },
     { name = "typer" },
@@ -80,19 +106,45 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=1.15.0" },
-    { name = "falkordb", specifier = ">=1.8.0" },
+    { name = "agents", editable = "apps/agents" },
+    { name = "anyio", specifier = ">=4" },
+    { name = "brain", editable = "apps/brain" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "langchain-falkordb", extras = ["langgraph"], specifier = ">=0.2.0" },
-    { name = "langgraph", specifier = ">=1.2.15" },
     { name = "pydantic", specifier = ">=2" },
-    { name = "pydantic-settings", specifier = ">=2.16.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "redis", specifier = ">=7" },
     { name = "ruamel-yaml", specifier = ">=0.18" },
     { name = "sse-starlette", specifier = ">=2.1" },
     { name = "typer", specifier = ">=0.27.3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+
+[[package]]
+name = "brain"
+version = "0.1.0"
+source = { editable = "apps/brain" }
+dependencies = [
+    { name = "falkordb" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyyaml" },
+    { name = "redis" },
+    { name = "rich" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "falkordb", specifier = ">=1.8.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "pydantic-settings", specifier = ">=2.16.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "redis", specifier = ">=7" },
+    { name = "rich", specifier = ">=14" },
+    { name = "typer", specifier = ">=0.27.3" },
 ]
 
 [[package]]
@@ -150,6 +202,8 @@ name = "citadel"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "agents" },
+    { name = "backend" },
     { name = "brain" },
 ]
 
@@ -160,7 +214,11 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "brain", editable = "apps/backend" }]
+requires-dist = [
+    { name = "agents", editable = "apps/agents" },
+    { name = "backend", editable = "apps/backend" },
+    { name = "brain", editable = "apps/brain" },
+]
 
 [package.metadata.requires-dev]
 dev = [
