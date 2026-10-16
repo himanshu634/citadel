@@ -161,15 +161,25 @@ Rules:
 - **The walk is sticky per lane.** It stays in view while its lane scrolls by and leaves with it.
   A follow-up's walk starts from what the earlier questions found: those nodes are dashed and faint
   until a step reaches them.
-- **Walks draw only near the screen.** A lane draws its walk within 200px of the scroller's view
-  (IntersectionObserver); off screen a box of the same size keeps its place.
+- **Walks draw first near the screen, then stay drawn.** A lane draws its walk the first time it
+  comes within 200px of the scroller's view (IntersectionObserver); until then a box of the same
+  size (canvas and caption line) keeps its place. A drawn walk is never drawn again from scratch:
+  scrolling back or unfolding shows it as it was, with no new layout or animation.
 - **One splitter for every lane** (`Splitter`), between the conversation and the walk column. Width
-  is a share of the page: 38% by default, 320px to 65% when dragged, kept in this browser
-  (`citadel-ask-walk`). A double-click puts it back to 38%. Keys: arrows move it by a step, Shift
-  by a bigger step, Home and End go to the narrowest and the widest, Enter folds and unfolds.
-  Dragging more than 80px past the narrowest width folds the column.
+  is a share of the page: 38% by default, 320px to 65% when dragged, and the chat column keeps at
+  least 420px (on a narrow page the widest share drops, but never below 320px). The width is kept
+  in this browser (`citadel-ask-walk`). A double-click puts it back to 38%. Keys: arrows move it
+  by a step, Shift by a bigger step, Home and End go to the narrowest and the widest, Enter folds
+  and unfolds. Dragging more than 80px past the narrowest width folds the column.
 - **Folded, the column is a strip** (`--walk-strip`, 48px) with a marker per lane: a status dot and
-  the node count. The splitter stays, so one drag opens it again.
+  the node count. Folding keeps the width: unfolding (by key, button or drag) brings back the
+  width from before. The splitter stays, so one drag opens it again.
+- **"Hide the walks" / "Show the walks"**: an icon button at the top of the walk column (in the
+  page head, wide screens only) folds and opens the column too, and saves the choice like the
+  splitter does.
+- **Progress for screen readers.** While a lane's answer runs, a hidden polite live region says
+  the step under way (the ledger's sentence, "Reading recent work on Auth"), or "Writing the
+  answer" while only the answer check runs.
 - **A new question scrolls its lane to the top** (pin-to-top), and the newest lane is at least as
   tall as the scroller so there is room to do it. Further than 80px from the end, a "Jump to latest"
   pill shows, left-aligned with the chat column.
@@ -207,12 +217,12 @@ not add another component library.
 | `Stat`       | A count with its label, inside a `<dl>`. For summaries, not decoration.                        |
 | `EmptyState` | Says what will appear and how to get it, with one action.                                      |
 | `CitedAnswer`, `GraphPath` | The answer pattern from section 1. Citation chips link to the numbered source.   |
-| `GraphWalk`  | The agent's walk for one answer (Ask page, direction D). Nodes are pills with their type dot; the start node is ink at the centre. Links are `--graph-edge` hairlines labelled `step · RELATIONSHIP` in mono; a link the rows only imply is dashed (the legend says so). The newest step of a running answer is accent (ring on its nodes, accent links); a lit citation is accent and everything else drops to 25% (links 20%). Above 12 nodes, only the start, cited, lit and newest nodes keep their names; the rest are dots that name themselves on hover or focus. Earlier nodes drift at most 36 stage units when a step lands, and glide there with their links (`--duration-slow`); new links draw on from their ends. `carried` is context from earlier questions: its nodes and links are dashed and faint until a step touches them. Rules in `src/lib/walk.ts`. |
+| `GraphWalk`  | The agent's walk for one answer (Ask page, direction D). Nodes are pills with their type dot; the start node is ink at the centre. Links are `--graph-edge` hairlines labelled `step · RELATIONSHIP` in mono; a link the rows only imply is dashed (the legend says so). The newest step of a running answer is accent (ring on its nodes, accent links); a lit citation is accent and everything else drops to 25% (links 20%). Above 12 nodes of its own, only the start, cited, lit and newest nodes keep their names; the rest are dots that name themselves on hover or focus. Carried nodes never crowd the walk: they keep their names only while the whole walk, carried nodes included, has 12 nodes or fewer. Earlier nodes drift at most 36 stage units when a step lands, and glide there with their links (`--duration-slow`); new links draw on from their ends. `carried` is context from earlier questions: its nodes and links are dashed and faint until a step touches them. Rules in `src/lib/walk.ts`. |
 | `WalkSteps`  | The tool calls behind an answer: number circle (success tint; accent while running; danger with an alert icon when failed), the call in mono, rows and ms. One step opens to show its rows (paths as chains); rows a citation used carry its chip. The last row is the answer check, and a rejected check stays visible with the reason. |
-| `WalkLedger` | The brain's work for one answer, one row per graph step in plain words ("Read recent work on Auth"). Each row has a mark for how it ended (done, running, found nothing, failed, not run), its rows and its time. Once the answer is in, repeated calls of one tool fold into one row; a call that found nothing or failed keeps its own row and says so under it. An open row shows its call and rows (`StepRows`). Hovering or focusing a row lights what its steps added to the walk. The last row is the answer check ("Checked: every citation came from a step above"); a rejected check says why. There is no Checked, Assumed or Not in the brain footer. |
+| `WalkLedger` | The brain's work for one answer, one row per graph step in plain words ("Read recent work on Auth"). Each row has a mark for how it ended (done, running, found nothing, failed, not run), its rows and its time. Once the answer is in, repeated calls of one tool fold into one row; a call that found nothing or failed keeps its own row and says so under it. An open row shows its call and rows (`StepRows`). Hovering or focusing a row lights what its steps added to the walk; leaving the list, or the answer landing, clears it. The last row is the newest answer check ("Checked: every citation came from a step above"); a rejected check says why, and a pass after send-backs says how many ("Checked after 1 send-back: …"). There is no Checked, Assumed or Not in the brain footer. |
 | `StepRows`   | The rows one step returned: paths as chains of nodes and relationships, other rows on one line. Rows a citation used carry its number; the active citation tints its rows. Says so when the step found nothing. |
-| `Splitter`   | The line between two panes that resizes the one after it (rules in section 6, The Ask page). A hairline at rest; on hover, focus or drag it thickens to accent and shows a grip. A `separator` with `aria-valuenow`, so it is keyboard and screen reader usable. The parent places it full height and keeps `size` and `folded`. |
-| `AskLane`    | One question and everything it led to (section 6, The Ask page): strip, conversation with its ledger and answer, and its own walk. The page owns the columns (`walkWidth`), the splitter and the scrolling. Hovering a citation or a ledger row lights what backs it in the walk; a citation wins. |
+| `Splitter`   | The line between two panes that resizes the one after it (rules in section 6, The Ask page). A hairline at rest; on hover, focus or drag it thickens to accent and shows a grip. A `separator` with `aria-valuenow`, so it is keyboard and screen reader usable. The parent places it full height and keeps `size` and `folded`; a fold by drag keeps the size from before the drag. |
+| `AskLane`    | One question and everything it led to (section 6, The Ask page): strip, conversation with its ledger and answer, and its own walk. The page owns the columns (`walkWidth`), the splitter and the scrolling. Hovering a citation or a ledger row lights what backs it in the walk; a citation wins. The walk is drawn once and kept (folding only hides it). |
 | `WalkAnswer` | The answer on the Ask page: limited Markdown rendered as text, citation chips that are buttons (hover or focus lights the path, click pins it), sources that say which step found them. No answer says why (refused, stopped, step limit). |
 | `AnswerRating` | A thumbs up and down under an Ask answer, saved on its trace. Ghost icon buttons with `aria-pressed`; pressed is a filled ink icon on the sunken fill plus a line of words ("Marked right"), never accent (the citations own it). Pressing again takes it back. A thumbs down offers an optional note, which becomes the `why` of a draft eval case. Saving and a failed save are said in words; a failed save keeps the earlier thumbs. Hidden when the answer has no trace or was stopped. |
 | `EntityRow`, `WorkItemRow`, `ActivityBars` | List and comparison patterns for people, teams, systems and work items. |
@@ -245,8 +255,8 @@ Adding a component:
 - Icons next to text are `aria-hidden`; icon-only controls have an accessible name.
 - Motion is short (120 to 180ms, ease-out), only answers a user action, and is removed under
   `prefers-reduced-motion`. `--duration-slow` (320ms) is for motion that shows where something
-  came from: a link drawing on in a walk, a node gliding to its new place, and the scroll to a new
-  question.
+  came from in a walk: a link drawing on from its ends and a node gliding to its new place (with
+  its links). The scroll to a new question is the browser's native smooth scroll, not a token.
 
 ## 9. Writing
 
