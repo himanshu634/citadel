@@ -65,6 +65,24 @@ queues and answer, and the Keeper reads the answers. These are ordinary jobs (`r
 `Job`: queue, optional claim, one submit tool, apply) run by `runner.run_job`. Each new job gets
 a deterministic offline policy (`agents/policies`), so `make test` never calls the API.
 
+## Sources win
+
+When a Keeper claim disagrees with what the sources say, **the source is accepted** (user
+decision). The Keeper fills in what the sources don't say; it never overrides them.
+
+- A claim that contradicts an ingested fact never becomes knowledge. It is stored with status
+  `conflicts_with_source`, is not projected into the brain, and is logged with both sides. `pm`
+  opens a FollowUp to fix the source, for example "update CODEOWNERS for Billing". When a later
+  ingest brings the fixed source, the brain is right on its own.
+- "Ingested fact" here means the declared `OWNS`, the top of `experts_for_system`, and any
+  property or edge the loader writes about the claim's subject.
+- After every build, each accepted claim is checked again against the new sources. A claim the
+  sources now contradict is marked `superseded` by the source and logged `claim_superseded`, with
+  the source node as the reason.
+- Ask presents source facts as the answer. It uses Keeper claims only for what the sources don't
+  cover, and says when a part of the answer comes from the Keeper. The owner and expert tools are
+  therefore unchanged; `keeper_notes` and `get_entity` are enough.
+
 ## Where the data lives
 
 A rebuild deletes `brain_<slug>` (`backend/jobs.py` `reset` calls `db.delete_graph`), so the
@@ -99,7 +117,8 @@ reads, so `test_package_boundaries.py` keeps passing.
     recorded, not verified.
   - `kind`: `owner`, `expert`, `decision`, `fact`, `link`. This one label replaces the spec's
     planned `Decision` node; `docs/graph-model.md` and `docs/agents.md` are updated to match.
-  - `status`: `pending_approval`, `accepted`, `rejected`, `superseded`, `stale`.
+  - `status`: `pending_approval`, `accepted`, `rejected`, `superseded`, `stale`,
+    `conflicts_with_source`.
   - `stale`: after a build, projection reports any accepted claim whose subject or every evidence
     uid is gone from the brain. Such a claim is marked `stale` (logged `claim_stale`, not
     projected) and its gap reopens.
@@ -120,14 +139,16 @@ One bounded run, started after a build or by **Review now**:
    a claim, `needs_person` (nobody could ground it), or `dismiss` (the gap was noise), with a reason.
 4. **Check (deterministic).**
    - Every evidence uid must exist in `brain_<slug>`; otherwise the claim is rejected and logged.
+   - A claim that contradicts an ingested fact becomes `conflicts_with_source` (see "Sources win").
+     It is not written into the brain, and it skips approval.
    - Then the critical rule below is applied.
 5. **Write.**
    - Not critical: accepted at once, projected into the brain, and the gap resolved.
    - Critical: `pending_approval`, and the gap stays `in_review` until a lead acts.
    - An accepted claim with the same kind and subject as an earlier one supersedes it (`valid_to`
      is set).
-6. **React.** For each accepted claim of kind `owner`, `expert` or `decision`, the `pm` react job
-   opens a FollowUp.
+6. **React.** The `pm` react job opens a FollowUp for each `conflicts_with_source` claim (fix the
+   source) and for each accepted claim of kind `owner`, `expert` or `decision`.
 7. **Log** every step. Progress streams as events, the same way builds and Ask do.
 
 Rough cost: with 5 gaps, about 15–20 job runs of a few model calls each. A Review now press takes
@@ -146,8 +167,8 @@ minutes on Haiku, so the run streams progress and can be stopped between steps.
 
 ### Gap lifecycle
 
-- Noticing skips a subject that already has an accepted claim of the matching kind. A stale owner
-  that the Keeper has already settled is not raised again.
+- Noticing skips a subject that already has an accepted claim of the matching kind, or an open
+  FollowUp to fix its source. A stale owner already being fixed is not raised again.
 - Dedupe bumps `count` only on gaps that are `open` or `in_review`. A resolved gap never reopens
   from noticing; a new failed question with the same text opens a fresh gap that links the old one.
 - A rejected claim sends its gap back to `open` and adds one to `attempts`. After 2 attempts the
@@ -157,11 +178,11 @@ minutes on Haiku, so the run streams progress and can be stopped between steps.
 
 A claim is critical if any of these hold, whatever the model said:
 
-1. **It contradicts or replaces something.**
+1. **It replaces an earlier Keeper claim.**
    - An accepted claim with the same `kind` and `subject` already exists.
-   - Or, for `owner` / `expert`, the ingested answer differs: the declared `OWNS` or the top of
-     `experts_for_system` names someone else.
    - Or, for `decision`, any accepted decision claim exists about the same system.
+
+   A claim that contradicts the sources doesn't get here; see "Sources win".
 2. **It touches a high-impact system.** One of its `about` systems is in the top 25% of systems by
    how many other systems co-change with it (`impact_of` row count). This is computed by one named
    query.
@@ -191,7 +212,8 @@ The reasons are stored in `critical_reasons` and shown to the lead.
   evidence.
 - `get_entity` neighbours include `Claim` nodes. Claim uids enter the toolset's seen set, so
   answers can cite them.
-- One line in `system_prompt.md` covers using claims. It stays static to keep the prompt cacheable.
+- `system_prompt.md` gets one rule: sources come first, and Keeper claims are only for what the
+  sources don't cover, labelled as such. The prompt stays static, so it remains cacheable.
 - The Graph page draws `Claim` nodes. The territory of a claim is its `ABOUT` system.
   `queries/graph/*`, `graph_view.py` and the frontend types are extended.
 - When a gap from a failed question is resolved, its question becomes a draft eval case, tagged
@@ -265,3 +287,6 @@ The reasons are stored in `critical_reasons` and shown to the lead.
 - A minimal FalkorDB store for `keeper_<slug>` and a `keeper_` ACL graph kind are in scope.
 - The approver is a typed name, recorded but not verified (the app has no sign-in).
 - Claims whose subject or evidence disappears after a rebuild become `stale` and reopen their gap.
+- A claim that contradicts the sources becomes `conflicts_with_source`, with a `pm` FollowUp to fix the
+  source. The owner and expert tools stay unchanged. (The rule itself, sources win, was the user's
+  decision.)
