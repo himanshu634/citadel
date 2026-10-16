@@ -8,12 +8,22 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from agents import ask as agent
 from agents import checkpoint, history
 from agents.graphs import agent_graph_name
 from agents.history import GraphChatStore
-from agents.testing import FakeClient, reply, settings, submit, text, tool_use  # noqa: F401
+from agents.testing import (  # noqa: F401
+    FakeClient,
+    mcp_call,
+    reply,
+    settings,
+    submit,
+    text,
+    tool_use,
+)
 from agents.testing import record_run as record
 from brain import db
+from brain.config import McpServer, load_company
 from brain.testing import needs_graph
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -52,6 +62,23 @@ def test_a_run_reads_back_from_the_graph_as_it_was_written(store):
     assert (check.call, check.kind, check.status) == (2, "submit", "done")
     assert [t.id for t in store.ref_threads("pr:1", 5)] == [answer.thread_id]
     assert [t.id for t in store.ref_threads("issue:11", 5)] == [answer.thread_id]  # touched
+
+
+def test_an_mcp_call_and_its_citation_read_back_from_the_graph(store, monkeypatch):
+    server = McpServer(name="handbook", url="https://handbook.example/mcp")
+    cfg = load_company("synthetic").model_copy(update={"mcp_servers": [server]})
+    monkeypatch.setattr(agent, "load_company", lambda slug: cfg)
+    client = FakeClient(
+        reply(*mcp_call("m1", "handbook", "search_docs", "JWT since 2025."),
+              submit("t1", "JWT [1].", ["mcp:handbook/search_docs"])),
+    )  # fmt: skip
+    answer = record(store, "Why JWT?", client)
+    [turn] = store.get_thread(answer.thread_id).turns
+    mcp, check = turn.steps
+    assert (mcp.kind, mcp.server, mcp.tool, mcp.n, mcp.status, mcp.result) == (
+        "mcp", "handbook", "search_docs", None, "done", "JWT since 2025.")  # fmt: skip
+    assert check.kind == "submit" and check.status == "done"
+    assert [t.id for t in store.ref_threads("mcp:handbook/search_docs", 5)] == [answer.thread_id]
 
 
 def test_turns_number_on_and_the_list_pages_newest_first(store):

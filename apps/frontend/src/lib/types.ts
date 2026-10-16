@@ -163,6 +163,8 @@ export interface CompanyConfig {
 		ignore?: string[];
 	};
 	people?: { bots?: string[]; aliases?: Record<string, string> };
+	/** Outside MCP servers the Ask agent may call; the token is read from the `token_env` var. */
+	mcp_servers?: { name: string; url: string; token_env?: string | null; allowed_tools?: string[] | null }[];
 }
 
 export interface CompanyDetail extends Company {

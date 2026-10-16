@@ -22,6 +22,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 
 from agents.loop import AgentState, add_brain_loop
+from agents.mcp import Connector
 from agents.toolset import Toolset
 
 Route = Literal["brain", "build"]
@@ -46,9 +47,10 @@ def build_graph(
     client: anthropic.Anthropic,
     toolset: Toolset,
     checkpointer: BaseCheckpointSaver | None = None,
+    mcp: Connector | None = None,
 ):
     g = StateGraph(AgentState)
-    brain_entry = add_brain_loop(g, client, toolset)
+    brain_entry = add_brain_loop(g, client, toolset, mcp=mcp)
     g.add_node("router", router)
     g.add_node("builder", builder)
     g.add_node("critic", critic)

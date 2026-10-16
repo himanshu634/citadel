@@ -13,6 +13,9 @@ The graph owns the loop (not the SDK tool runner), so every step is checkpointed
 - The answer arrives through the `submit_answer` tool (the current models reject forced tool
   choice, so the system prompt asks for it). Cited uids must have appeared in a tool result in
   this thread; otherwise Claude gets an error result and tries again.
+- A company's MCP servers (`agents/mcp.py`) run inside the Claude call: their `mcp_tool_use` /
+  `mcp_tool_result` blocks arrive in the assistant content and replay with it; run_tools never
+  sees them. A successful MCP call is citable as `mcp:<server>/<tool>`.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
 
 from agents import llm
+from agents import mcp as mcp_
 from agents.toolset import Toolset
 from agents.walk import preview_rows, subgraph
 
@@ -43,7 +47,9 @@ SUBMIT_TOOL: dict[str, Any] = {
     "name": SUBMIT,
     "description": (
         "Submit the final answer with its sources. Call this exactly once, when you are done "
-        "looking things up. Every uid in sources and path must come from an earlier tool result."
+        "looking things up. Every uid in sources and path must come from an earlier tool result. "
+        "A result from a tool on an MCP server has no uid: cite it in sources as "
+        "mcp:<server>/<tool>."
     ),
     "strict": True,
     "input_schema": {
@@ -102,6 +108,7 @@ def add_brain_loop(
     system_prompt: str = SYSTEM_PROMPT,
     submit_tool: dict[str, Any] = SUBMIT_TOOL,
     check: Check | None = None,  # default: check_answer
+    mcp: mcp_.Connector | None = None,  # the company's MCP servers, if any
 ) -> str:
     """Add the loop's nodes and edges to `g`; returns the entry node name.
 
@@ -110,10 +117,12 @@ def add_brain_loop(
     s = get_settings()
     check = check or check_answer
     submit = submit_tool["name"]
-    tool_defs = [*toolset.definitions(), submit_tool]
+    tool_defs = [*toolset.definitions(), submit_tool, *(mcp.toolsets if mcp else ())]
 
     def call_claude(state: AgentState) -> dict[str, Any]:
         started = time.perf_counter()
+        fallback = llm.fallback_params(s.anthropic_model)
+        extra = mcp_.request_params(mcp, state["messages"], fallback.pop("betas", []))
         with client.beta.messages.stream(
             model=s.anthropic_model,
             max_tokens=s.anthropic_max_tokens,
@@ -122,24 +131,28 @@ def add_brain_loop(
             messages=state["messages"],
             output_config={"effort": s.anthropic_effort},
             cache_control={"type": "ephemeral"},
-            **llm.fallback_params(s.anthropic_model),
+            **fallback,
+            **extra,
         ) as stream:
             msg = stream.get_final_message()
         details = getattr(msg, "stop_details", None)
         content = replayable(msg.content)
         if msg.stop_reason == "max_tokens":
-            # A tool call cut off mid-input never runs; an unanswered tool_use would make the
-            # next request in this thread invalid. Nothing has been sent back yet, so drop it.
-            content = [b for b in content if b["type"] != "tool_use"]
+            # A tool call cut off mid-input never runs; an unanswered tool_use (or an MCP or
+            # server tool use without its result) would make the next request in this thread
+            # invalid. Nothing has been sent back yet, so drop it.
+            content = drop_unpaired([b for b in content if b["type"] != "tool_use"])
         writer = get_stream_writer()
         ms = round((time.perf_counter() - started) * 1000)
         writer(llm_event(content, msg, ms, submit))  # before its steps: they hang off it
         for b in content:
             if b["type"] == "tool_use":
                 writer({"kind": "step", "id": b["id"], "tool": b["name"], "input": b.get("input")})
+        found = mcp_.seen_from(content)
         return {
             # An empty turn (e.g. a refusal before any output) has nothing to replay.
             "messages": [{"role": "assistant", "content": content}] if content else [],
+            **({"seen": found} if found else {}),
             "usage": [msg.usage.model_dump(mode="json", exclude_none=True)],
             "stop": msg.stop_reason,
             "stop_details": details.model_dump(mode="json") if details else None,
@@ -248,11 +261,20 @@ def check_answer(answer: dict[str, Any], seen: dict[str, Any]) -> str | None:
     if not isinstance(answer.get("answer"), str) or not answer["answer"].strip():
         return "answer is empty."
     sources = answer.get("sources", [])
-    unknown = [u for u in [*sources, *answer.get("path", [])] if u not in seen]
+    path = answer.get("path", [])
+    unknown = [u for u in [*sources, *path] if u not in seen]
     if unknown:
+        outside = sorted(u for u, n in seen.items() if n.get("label") == mcp_.LABEL)
+        hint = f" MCP results you may cite: {', '.join(outside)}." if outside else ""
         return (
             f"These uids did not appear in any tool result: {', '.join(unknown)}. Look them up, "
-            f"or remove them, then call {SUBMIT} again."
+            f"or remove them, then call {SUBMIT} again.{hint}"
+        )
+    outside_path = [u for u in path if seen[u].get("label") == mcp_.LABEL]
+    if outside_path:
+        return (
+            f"path holds graph uids only; move {', '.join(outside_path)} to sources and call "
+            f"{SUBMIT} again."
         )
     markers = {int(n) for m in _MARKER.findall(answer["answer"]) for n in m.split(",")}
     bad = sorted(n for n in markers if not 1 <= n <= len(sources))
@@ -327,17 +349,27 @@ def _result_text(block: dict[str, Any]) -> str:
     return json.dumps(body, default=str)
 
 
-_MODEL_INTERNAL = {"thinking", "redacted_thinking", "tool_use", "server_tool_use"}
+_MODEL_INTERNAL = {"thinking", "redacted_thinking", "tool_use"}
+_SERVER_USES = {"server_tool_use", "mcp_tool_use"}  # ran on Anthropic's side, with a result block
 
 
 def replayable(content: list[Any]) -> list[dict[str, Any]]:
     """Assistant content as dicts to send back next turn, unchanged except after a mid-output
-    fallback: model-internal blocks before the last `fallback` marker belong to the model that
-    declined, so they are dropped (the API's echo rule); text before it and everything after
-    are kept."""
+    fallback: the API's echo rule drops model-internal blocks before the last `fallback` marker
+    (they belong to the model that declined) and server-side tool uses there that have no
+    result. Text, paired server or MCP calls with their results, MCP tool listings and
+    everything after the marker are kept."""
     blocks = [b.model_dump(mode="json", exclude_none=True) for b in content]
     marks = [i for i, b in enumerate(blocks) if b["type"] == "fallback"]
     if not marks:
         return blocks
     cut = marks[-1]
-    return [b for i, b in enumerate(blocks) if i >= cut or b["type"] not in _MODEL_INTERNAL]
+    before = drop_unpaired([b for b in blocks[:cut] if b["type"] not in _MODEL_INTERNAL])
+    return before + blocks[cut:]
+
+
+def drop_unpaired(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`blocks` without server or MCP tool uses that have no result block (cut off, or before
+    a fallback): the API rejects them in history."""
+    answered = {b["tool_use_id"] for b in blocks if "tool_use_id" in b}
+    return [b for b in blocks if b["type"] not in _SERVER_USES or b["id"] in answered]

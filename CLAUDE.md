@@ -146,6 +146,14 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
   models). It may cite only uids seen in tool results; anything else is sent back as an error.
 - Keep `agents/system_prompt.md` and the tool list static (no dates, sorted tools) so the prompt
   prefix stays cacheable. Threads are checkpointed in graph `agent_<slug>` (`checkpoint.py`).
+- MCP servers (`agents/mcp.py`): a company's `mcp_servers:` (name, https url, optional
+  `token_env` naming the env var with its bearer token, optional `allowed_tools`) go on every
+  call as `mcp_servers` + one `mcp_toolset` each (after the graph tools, sorted by name), with
+  beta `mcp-client-2026-09-15`, which records each server's tool list in a replayed
+  `mcp_tool_listing` block. Anthropic runs the MCP calls inside the Claude call; their blocks
+  replay with the assistant content (`replayable` keeps paired calls, drops unpaired ones). A
+  successful call is citable as `mcp:<server>/<tool>` (label `MCP`); never on `path`. A missing
+  token fails the question with a sentence; an unreachable server fails the Claude call.
 - `ask.ask_events` streams a run for the Ask page (`ask()` is its last item): each tool call is
   timed and recorded in the append-only `trace` channel with the subgraph it touched
   (`agents/walk.py` turns any tool's rows into nodes + relationships; links the rows only imply

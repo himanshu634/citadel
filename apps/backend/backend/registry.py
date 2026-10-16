@@ -118,6 +118,8 @@ def validate_draft(data: dict[str, Any]) -> tuple[CompanyConfig | None, list[Fie
 def _dump(cfg: CompanyConfig) -> dict[str, Any]:
     data = cfg.model_dump(mode="json")  # field order: slug, name, data_permission, window, ...
     data["window"]["since"] = cfg.window.since  # a date, so YAML writes 2026-04-15 unquoted
+    if not cfg.mcp_servers:
+        del data["mcp_servers"]  # optional: a file without outside sources doesn't mention them
     return data
 
 
@@ -190,4 +192,6 @@ def update(slug: str, cfg: CompanyConfig) -> None:
                     doc[key][sub] = sub_value
         else:
             doc[key] = value
+    if not cfg.mcp_servers:
+        doc.pop("mcp_servers", None)  # _dump leaves out an empty list, so remove it here
     _atomic_write(path, _to_text(doc))

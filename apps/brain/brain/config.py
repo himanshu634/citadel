@@ -3,8 +3,10 @@
 Why: two kinds of configuration exist and they must not mix.
 - `Settings` comes from the environment (.env): where FalkorDB is, API tokens, Claude settings.
   Changing it switches local Docker <-> FalkorDB Cloud without code changes.
-- `CompanyConfig` comes from `companies/<slug>.yaml`: what to ingest for one company and how
-  to map file paths to systems. Adding a company means adding one of these files.
+- `CompanyConfig` comes from `companies/<slug>.yaml`: what to ingest for one company, how
+  to map file paths to systems, and which outside MCP servers the Ask agent may call. Adding a
+  company means adding one of these files. Secrets never go in it: an MCP server names the env
+  var that holds its token (`env_value` reads it), because the config is sent to the browser.
 
 Relative paths inside a company YAML resolve from the repo root (the folder that holds
 `companies/`), so the CLI behaves the same from the root or from apps/brain.
@@ -83,6 +85,17 @@ def get_settings() -> Settings:
     return Settings()
 
 
+def env_value(name: str) -> str | None:
+    """An env var by name, from the process or else the repo-root .env (which Settings reads but
+    does not export). Empty counts as unset."""
+    if value := os.environ.get(name):
+        return value
+    from dotenv import dotenv_values
+
+    env_file = REPO_ROOT / ".env"
+    return (dotenv_values(env_file).get(name) or None) if env_file.is_file() else None
+
+
 # --- Company config -------------------------------------------------------------------------
 
 SLUG_RE = r"^[a-z0-9][a-z0-9_]*$"  # becomes part of the graph name brain_<slug>
@@ -127,6 +140,17 @@ class People(_Strict):
     aliases: dict[str, str] = {}  # "git author name" -> "login"
 
 
+class McpServer(_Strict):
+    """An outside MCP server the Ask agent may call through the Messages API's MCP connector
+    (agents/mcp.py), e.g. a handbook or docs server. Anthropic connects to it, so it must be
+    reachable over public HTTPS. Changing this list needs no rebuild."""
+
+    name: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")  # also the `mcp:<name>/...` citations
+    url: str = Field(pattern=r"^https://\S+$")
+    token_env: str | None = Field(default=None, pattern=r"^[A-Z_][A-Z0-9_]*$")  # bearer token
+    allowed_tools: list[str] | None = None  # None: every tool the server lists
+
+
 class CompanyConfig(_Strict):
     slug: str = Field(pattern=SLUG_RE)
     name: str
@@ -135,6 +159,15 @@ class CompanyConfig(_Strict):
     sources: list[Any]  # each entry becomes its adapter's SourceConfig subclass, see below
     systems: Systems = Systems()
     people: People = People()
+    mcp_servers: list[McpServer] = []
+
+    @field_validator("mcp_servers")
+    @classmethod
+    def _unique_server_names(cls, servers: list[McpServer]) -> list[McpServer]:
+        names = [s.name for s in servers]
+        if dupes := sorted({n for n in names if names.count(n) > 1}):
+            raise ValueError(f"MCP server names must be unique: {', '.join(dupes)}")
+        return servers
 
     @field_validator("sources")
     @classmethod
