@@ -101,6 +101,10 @@ def test_submit_validators():
     ok = SubmitKeeperDecision(outcome="claim", statement="s", value="person:alice", **base)
     assert set(ok.uids()) == {"fake:pr:2", "person:alice"}
     assert SubmitKeeperDecision(gap="gap:1", outcome="needs_person", reason="r").uids() == []
+    # outside a claim, only the cites are checked: leftover draft fields are not uids
+    for outcome in ("needs_person", "dismiss"):
+        stray = SubmitKeeperDecision(outcome=outcome, value="person:x", **base)
+        assert stray.uids() == ["fake:pr:2"]
 
     with pytest.raises(ValidationError):
         SubmitConsult(consult="c", can_ground=True, kind="fact", subject_uid="x:1", cites=["x:1"])
@@ -115,6 +119,9 @@ def test_submit_validators():
                           statement="s", value="plain text", cites=["x:2"])  # fmt: skip
     assert plain.uids() == ["x:2", "x:1"]
     assert SubmitConsult(consult="c", can_ground=False).uids() == []
+    stray = SubmitConsult(consult="c", can_ground=False, subject_uid="x:1", value="person:x",
+                          cites=["x:2"])  # fmt: skip
+    assert stray.uids() == ["x:2"]  # not grounded: only the cites are checked
 
     with pytest.raises(ValidationError):
         SubmitFollowUp(claim="claim:1", title="t", body="b", cites=[])
@@ -130,10 +137,10 @@ def test_consult_job_grounded():
     gap = seed_gap(store, "Why did the auth refresh token race happen?")
     result = run(store, "pm", "consult")
     assert result.stop is None, result
-    assert result.tools_called == ["related_work_items"]
+    assert result.tools_called == ["related_work_items", "get_entity"]  # the system, re-read
     c = consults(store, gap)["pm"]
     assert c["status"] == "answered" and c["can_ground"] is True
-    assert c["kind"] == "fact" and c["subject"] in FAKE_UIDS
+    assert c["kind"] == "fact" and c["subject"] == "system:Auth"  # the first row's system
     assert c["cites"] and set(c["cites"]) <= FAKE_UIDS
     assert "refresh token rotation race" in c["statement"]
     assert consults(store, gap)["qa"]["status"] == "open"  # pm answered only its own
@@ -199,7 +206,8 @@ def test_keeper_decide_claim_reaches_apply():
     result = run(store, "keeper", "decide")
     sub = result.submit
     assert sub["outcome"] == "claim" and sub["gap"] == gap
-    assert sub["about"] == [sub["subject_uid"]] and set(sub["cites"]) <= FAKE_UIDS
+    assert sub["subject_uid"] == "system:Auth" and sub["about"] == ["system:Auth"]
+    assert set(sub["cites"]) <= FAKE_UIDS
     assert set(result.tools_called) == {"related_work_items", "get_entity"}
     assert result.stop.startswith("error: NotImplementedError")
     [g] = store.read("ledger/get_gap", {"uid": gap})
@@ -244,6 +252,21 @@ def _claim(store, status: str, kind: str = "owner") -> str:
     return uid
 
 
+def test_follow_up_with_nothing_to_cite_gives_no_answer():
+    """Neither evidence nor subject found again: no submit with empty cites, no retry loop."""
+    store = MemoryKeeperStore(SLUG)
+    _claim(store, "accepted")
+    client = offline_client("pm", "follow_up")
+    r, j = ROLES["pm"], ROLES["pm"].job("follow_up")
+    [subject] = j.queue(store, ctx("pm"))
+    result = run_job(store, r, j, subject, ctx("pm"), client=client, graph_run=no_rows)
+    assert result.submit is None and result.rows == []  # ended without a decision
+    assert result.stop == "end_turn"  # the policy's plain-text reply, after one nudge
+    assert result.tools_called == ["get_entity", "get_entity"]  # one round: evidence + subject
+    assert client.calls == 3  # tools, then no decision, then the one nudge
+    assert store.read("ledger/followups", {"limit": 5}) == []
+
+
 @pytest.mark.parametrize(
     ("status", "prefix"),
     [("accepted", "Follow up: "), ("conflicts_with_source", "Fix the source: ")],
@@ -258,6 +281,21 @@ def test_follow_up_job(status, prefix):
     assert f["claim"] == claim and f["title"] == prefix + "Alice owns Auth."
     assert result.submit["cites"] == ["fake:pr:2"]
     assert ROLES["pm"].job("follow_up").queue(store, ctx("pm")) == []
+    actions = [e["action"] for e in store.read("ledger/read_log", {"claim": claim, "limit": 5})]
+    assert "follow_up_opened" in actions
+
+
+def test_consult_without_systems_falls_back_to_the_row():
+    def no_systems(slug, name, **params):
+        rows = fake_brain(slug, name, **params)
+        return [{**r, "systems": []} for r in rows] if name == "related_work_items" else rows
+
+    store = MemoryKeeperStore(SLUG)
+    gap = seed_gap(store, "Why did the auth refresh token race happen?")
+    result = run(store, "pm", "consult", graph_run=no_systems)
+    assert result.stop is None, result
+    c = consults(store, gap)["pm"]
+    assert c["subject"] in FAKE_UIDS and c["subject"] == c["cites"][0]
 
 
 def test_keeper_decide_claims_from_the_search_alone():

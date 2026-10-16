@@ -329,8 +329,11 @@ class SubmitConsult(Submit):
         return self
 
     def uids(self) -> list[str]:
-        return [*self.cites, *([self.subject_uid] if self.subject_uid else []),
-                *_uid_like(self.value)]  # fmt: skip
+        """The cites; with a grounded answer also its subject and a uid-like value."""
+        if not self.can_ground:
+            return list(self.cites)
+        subject = [self.subject_uid] if self.subject_uid else []
+        return [*self.cites, *subject, *_uid_like(self.value)]
 
 
 class SubmitKeeperDecision(Submit):
@@ -365,6 +368,9 @@ class SubmitKeeperDecision(Submit):
         return self
 
     def uids(self) -> list[str]:
+        """The cites; with a claim also its subject, about and a uid-like value."""
+        if self.outcome != "claim":
+            return list(self.cites)
         subject = [self.subject_uid] if self.subject_uid else []
         return [*self.cites, *subject, *self.about, *_uid_like(self.value)]
 

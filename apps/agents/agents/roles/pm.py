@@ -108,7 +108,7 @@ def _apply_follow_up(store: WorkStore, ctx: Ctx, s: Subject, sub: SubmitFollowUp
     )
     if not rows or not rows[0].get("created"):
         return []  # one follow-up per claim: someone opened it already
-    log(store, ctx, "pm", "followup_opened", claim=s.uid, why=sub.title, evidence=sub.cites)
+    log(store, ctx, "pm", "follow_up_opened", claim=s.uid, why=sub.title, evidence=sub.cites)
     return rows
 
 

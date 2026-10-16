@@ -137,16 +137,18 @@ def accept(context: dict[str, Any], results: Results) -> list[Call] | dict[str, 
     }
 
 
-def follow_up(context: dict[str, Any], results: Results) -> list[Call] | dict[str, Any]:
+def follow_up(context: dict[str, Any], results: Results) -> list[Call] | dict[str, Any] | None:
     """A follow-up task for the claim: fix the source it conflicts with, or tell the people an
-    accepted claim concerns. Cites the claim's evidence, re-read with get_entity (its subject when
-    none of the evidence is found)."""
+    accepted claim concerns. Cites the claim's evidence, re-read with one round of get_entity (its
+    subject when none of the evidence is found). Nothing found: no answer, never empty cites."""
     claim = context["claim"]
     evidence = claim.get("evidence") or []
     if not results.called("get_entity"):
         return [("get_entity", {"uid": u}) for u in uniq([*evidence, claim["subject"]])]
     found = {r["uid"] for r in results.rows("get_entity")}
     cites = [u for u in evidence if u in found] or [u for u in [claim["subject"]] if u in found]
+    if not cites:
+        return None
     conflict = claim.get("status") == "conflicts_with_source"
     prefix = "Fix the source: " if conflict else "Follow up: "
     title = prefix + claim["statement"]

@@ -5,27 +5,33 @@ from __future__ import annotations
 
 from typing import Any
 
+from brain.canonical import system_uid
+
 from agents.policies.base import Call, Results, uniq
 
 CONSULT_ROWS = 3  # related work items a consult answer quotes and cites
 
 
 def consult(context: dict[str, Any], results: Results) -> list[Call] | dict[str, Any]:
-    """pm.consult and qa.consult: a `fact` about the first related work item, quoting the titles
-    of the first few; can_ground False when nothing is related."""
+    """pm.consult and qa.consult: a `fact` about the system of the first related work item that
+    names one (re-read with get_entity, so the run has seen its uid), else about the first item;
+    the statement quotes the first few titles. can_ground False when nothing is related."""
     c, gap = context["consult"], context["gap"]
     if not results.called("related_work_items"):
         return [("related_work_items", {"text": gap.get("text") or ""})]
     rows = results.rows("related_work_items")[:CONSULT_ROWS]
     if not rows:
         return {"consult": c["uid"], "can_ground": False, "cites": []}
-    first = rows[0]
+    system = next((system_uid(r["systems"][0]) for r in rows if r.get("systems")), None)
+    if system and not results.called("get_entity"):
+        return [("get_entity", {"uid": system})]
+    seen = {r["uid"] for r in results.rows("get_entity")}
     titles = "; ".join(f"'{r['title']}'" for r in rows)
     return {
         "consult": c["uid"],
         "can_ground": True,
         "kind": "fact",
-        "subject_uid": first.get("system_uid") or first["uid"],
+        "subject_uid": system if system in seen else rows[0]["uid"],
         "statement": f"Related work on this: {titles}.",
         "cites": uniq([r["uid"] for r in rows]),
     }
@@ -44,7 +50,7 @@ def decide(context: dict[str, Any], results: Results) -> list[Call] | dict[str, 
         search: list[Call] = [("related_work_items", {"text": gap.get("text") or ""})]
         return search + [("get_entity", {"uid": u}) for u in uniq([c["subject"], *c["cites"]])]
     rows = [*results.rows("related_work_items"), *results.rows("get_entity")]
-    found = {u for r in rows for u in (r.get("uid"), r.get("system_uid")) if u}
+    found = {r["uid"] for r in rows}
     cites = [u for u in c["cites"] if u in found]
     if c["subject"] not in found or not cites:
         return _needs_person(gap, f"The {c['role']} answer's evidence is no longer in the graph.")
