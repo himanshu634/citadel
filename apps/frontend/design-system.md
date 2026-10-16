@@ -51,6 +51,8 @@ All colours are tokens in `tokens.css`, with light values on `:root` and dark va
 | `--color-on-accent`                     | Text and icons on an accent fill.                           |
 | `--color-success` / `warning` / `danger` (+ `-soft`) | Status only. Never as an accent or for emphasis. |
 | `--node-person` … `--node-document`     | Graph node types. Only for dots, avatars, bars and graph marks. |
+| `--graph-edge`                          | Links between nodes on a graph.                             |
+| `--graph-territory` (+ `-alt`)          | The two tones graph territories alternate between. Tone, never hue. |
 
 Rules:
 
@@ -122,6 +124,32 @@ Rules:
   below, panels go to 6 or full width; at 720px and below, everything is one column.
 - Content is left-aligned. Nothing is centred except icons inside controls.
 - The page never scrolls sideways. Long text wraps (`overflow-wrap: anywhere` for titles).
+- The Graph page (`/c/<slug>/graph`) is the one exception to `--content-max`: `AppShell` drops
+  the width cap and the padding, and the page fills the height under the top bar. Its bar holds the
+  title, Find, a one-line count and the Filters and List buttons; the inspector (20rem) opens on
+  the right when a node is selected, and below 900px it takes the lower part of the page.
+
+### The graph map (design direction D, "Territories")
+
+- Every node sits in the territory of the system it touches most (rules in
+  `apps/backend/brain/graph_view.py`): the nine biggest systems, one territory for the smaller
+  ones, and a dashed outline for work linked to no code. The layout numbers are in `src/lib/graph.ts`.
+- Territories are **tonal**, never hue: `--graph-territory` and `--graph-territory-alt`
+  alternate, outlined in `--color-line`. Hue stays reserved for node kinds.
+- Routes between territories are ink (`--color-text`) at low opacity, as wide as the links they
+  carry; fewer than 10 links draw no route. Links inside a territory are `--graph-edge`, faint.
+- Territory names are wide black type on the outline's top edge, with a surface halo so they read
+  over dots. Small territories drop the count, the smallest drop the name until you zoom in.
+- **Selected is an ink ring**, never accent (the Graph nav item holds the accent). A selection
+  lights its node, neighbours and links, outlines the territories it reaches in ink, and dims
+  everything else. Hover is a thinner ink ring and a raised name label.
+- Filters hide nodes in place; the map never moves under them. Only Bots refetches and lays out
+  again, because it adds nodes. Comments are counted on their work items, not drawn.
+- The canvas is hidden from assistive tech, which reads a one-line summary. Find (a combobox)
+  and List (a table, most linked first) are the keyboard way to every node, and both select on
+  the map. The selection is kept in the URL as `?focus=<uid>`.
+- No motion: the layout is worked out before the map is shown (in a worker), and panning to a
+  selection jumps.
 
 ## 7. Components
 
@@ -160,6 +188,8 @@ not add another component library.
 | `BuildProgress` | One build: "Step n of N" from the plan, an ink progress meter (the one accent block of the view is the primary button), a table with a cell per source and stage, and the plain log. Each cell is icon plus word plus count or message; a skipped source is one merged cell saying why. Rules live in `src/lib/buildProgress.ts`. |
 | `AddCompanyDialog` | Add a company from one public GitHub repository: one field (a link or `owner/name`), then what Citadel will make (company, graph, window). Private repos are refused in the field's error; no token, GitHub down and a company that already reads the repo or its owner are banners with their one action. "Advanced setup" opens the step-by-step form at `/new`. Rules in `src/lib/addCompany.svelte.ts`. |
 | `CompanyRail` | One tile per company brain; one click switches company and keeps the section you are on. Monogram 15px at width 118; ink for the current tile (section 3). Tooltip shows the name and `brain_<slug>` in mono. The + opens `AddCompanyDialog`. |
+| `TerritoryMap` | The whole company graph as territories (section 6, The graph map). Canvas plus an HTML label layer; drag pans, scroll zooms (`scrollZoom={false}` where it sits in a scrolling page; pinch and the buttons still zoom), click selects. Colours are read from the tokens and re-read when the theme changes. |
+| `NodeInspector` | The selected node: kind, territory and state, its fields (`get_entity`), where its neighbours live, its links by relationship, and its most linked neighbours, which select in turn. Counts come from the links the map draws. "Open on GitHub" only when the node has a url. |
 | `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". |
 
 Adding a component:
