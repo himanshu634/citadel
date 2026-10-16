@@ -5,7 +5,13 @@ and `FakeBrainFacts`, no FalkorDB."""
 from __future__ import annotations
 
 import pytest
-from agents.keeper.decide import ClaimNotPending, apply_decision, approve, reject
+from agents.keeper.decide import (
+    BrainUnavailable,
+    ClaimNotPending,
+    apply_decision,
+    approve,
+    reject,
+)
 from agents.keeper.model import Gap, gap_uid, iso
 from agents.keeper.store import MemoryKeeperStore
 from agents.roles import ROLES, Ctx
@@ -286,3 +292,66 @@ def test_claim_on_a_gap_not_in_review_writes_nothing():
                 {"uid": g.uid, "from": ["in_review"], "to": "dismissed", "now": NOW})  # fmt: skip
     assert apply_decision(store, CTX, gap(store, g.uid), claim_sub(g), brain) == []
     assert claims(store, g) == [] and store.log == []
+
+
+# --- a stale approval, a missing brain --------------------------------------------------------
+
+
+def test_stale_approval_keeps_the_earlier_claim():
+    """The replacing claim's evidence is gone at approval: it goes stale and supersedes nothing."""
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
+    first = seed_gap(store)
+    apply_decision(store, CTX, first, claim_sub(first), brain)
+    earlier = the_claim(store, first)
+    second = seed_gap(store, "Who owns Auth now?")
+    sub = claim_sub(second, value="person:carol", cites=["fake:pr:10"])
+    apply_decision(store, CTX, second, sub, brain)
+    new = the_claim(store, second)
+    assert new["status"] == "pending_approval"
+
+    del brain.labels["fake:pr:10"]  # a rebuild dropped it while the claim waited
+    got = approve(store, SLUG, new["uid"], "Dana", None, brain=brain, now=LATER)
+    assert got.status == "stale"
+    [old] = store.read("ledger/get_claim", {"uid": earlier["uid"]})
+    assert (old["status"], old["valid_to"]) == ("accepted", None)
+    assert brain.retired == []
+    assert actions(store) == ["claim_written", "claim_queued", "claim_stale"]
+    assert gap(store, second.uid).status == "open"
+
+
+def test_brain_unavailable_writes_nothing():
+    """A rebuild deleted brain_<slug>: every read is empty, which must not reject the claim."""
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts(exists=False, labels={})
+    g = seed_gap(store)
+    with pytest.raises(BrainUnavailable):
+        apply_decision(store, CTX, g, claim_sub(g), brain)
+    assert claims(store, g) == [] and store.log == []
+    assert gap(store, g.uid).status == "in_review"
+
+
+def test_approve_with_the_brain_gone_writes_nothing():
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts(high_impact={"system:Auth"})
+    g = seed_gap(store)
+    apply_decision(store, CTX, g, claim_sub(g), brain)
+    uid = the_claim(store, g)["uid"]
+    brain.exists, brain.labels = False, {}
+    with pytest.raises(BrainUnavailable):
+        approve(store, SLUG, uid, "Dana", None, brain=brain, now=LATER)
+    assert the_claim(store, g)["status"] == "pending_approval"
+    assert actions(store) == ["claim_queued"]
+
+
+def test_brain_deleted_during_projection_puts_the_claim_back():
+    """The graph goes between the check and the projection: the claim waits again, not stale."""
+
+    class Vanishing(FakeBrainFacts):
+        def project(self, slug, claims):
+            self.exists, self.labels = False, {}
+            return super().project(slug, claims)
+
+    store, brain = MemoryKeeperStore(SLUG), Vanishing()
+    g = seed_gap(store)
+    with pytest.raises(BrainUnavailable):
+        apply_decision(store, CTX, g, claim_sub(g), brain)
+    assert the_claim(store, g)["status"] == "pending_approval"
+    assert gap(store, g.uid).status == "in_review" and store.log == []

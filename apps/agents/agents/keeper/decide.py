@@ -12,9 +12,11 @@ Why: the model only proposes. Whether a claim becomes knowledge is fixed here, i
 4. Critical rule: a critical claim waits for a lead (`pending_approval`, the gap stays
    `in_review`); any other is accepted at once (`accept`).
 
-`accept` supersedes the accepted claim of the same kind and subject, projects the claim into the
-brain, and marks it `stale` (its gap reopens) when projection finds its subject or evidence gone.
-`approve` re-checks the sources first, since they may have changed while the claim waited.
+`accept` projects the claim into the brain, then supersedes the accepted claim of the same kind
+and subject; when projection finds its subject or evidence gone it is `stale` instead (its gap
+reopens, the earlier claim stays). `approve` re-checks the sources first, since they may have
+changed while the claim waited. A missing brain_<slug> (a rebuild) raises `BrainUnavailable`
+before any write an empty brain would make wrong.
 
 Every claim status move is guarded on its current status, so of two racing approvals (or approve
 and reject) one wins and the other raises `ClaimNotPending` having written nothing. Every path
@@ -50,6 +52,12 @@ EARLIER_LIMIT = 10_000  # accepted claims read for the critical rule's replaces_
 
 class ClaimNotPending(Exception):
     """The claim is not (or no longer) waiting for approval: someone else decided it first."""
+
+
+class BrainUnavailable(Exception):
+    """brain_<slug> does not exist (a rebuild deleted it). Raised before any write that an
+    empty brain would make wrong: rejecting for missing evidence, marking stale, superseding.
+    The review run stops on it (`stop="brain_unavailable"`)."""
 
 
 class BrainFacts(Protocol):
@@ -108,6 +116,7 @@ def apply_decision(
 
     brain = brain or DEFAULT_BRAIN
     slug = store.slug  # type: ignore[attr-defined]  # the ledger stores know their company
+    _brain_present(brain, slug)
     subject = sub.subject_uid or ""
     claim = Claim(
         uid=claim_uid(),
@@ -127,6 +136,7 @@ def apply_decision(
     labels = brain.evidence(slug, claim.evidence)
     missing = [u for u in claim.evidence if u not in labels]
     if missing:
+        _brain_present(brain, slug)  # not every uid gone because the whole graph is
         why = f"evidence_missing: {', '.join(missing)}"
         _write_claim(store, ctx.now, claim, status="rejected", why=why)
         _reopen(store, ctx.now, gap, why, rejected=True)
@@ -171,17 +181,35 @@ def accept(
     why: str | None = None,
     action: str = "claim_written",
 ) -> Claim:
-    """Accept a pending claim: supersede the accepted one it replaces, project it, resolve its
-    gap. Logs `action` (actor `by`), or `claim_stale` when projection finds it missing.
+    """Accept a pending claim: project it, then supersede the accepted one it replaces and
+    resolve its gap. Logs `action` (actor `by`), or `claim_stale` when projection finds it
+    missing; a stale claim supersedes nothing, so the earlier claim stays.
 
     The guarded move to `accepted` comes first, so a caller that loses a race raises
-    `ClaimNotPending` before writing anything."""
+    `ClaimNotPending` before writing anything. If brain_<slug> vanished during the projection,
+    the claim goes back to `pending_approval` and `BrainUnavailable` is raised (nothing logged)."""
     brain = brain or DEFAULT_BRAIN
     now = ctx.now
     slug = slug or store.slug  # type: ignore[attr-defined]
     moved = _set_claim(store, now, claim.uid, "accepted", by=by, why=why)
     if not moved:
         raise ClaimNotPending(claim.uid)
+
+    stored = _claim(store, claim.uid)
+    if brain.project(slug, [stored.model_dump()]):
+        if not brain.graph_exists(slug):
+            back = "brain unavailable during projection; waits again"
+            _set_claim(store, now, claim.uid, "pending_approval", frm=["accepted"], why=back)
+            raise BrainUnavailable(slug)
+        why_stale = "projection: its subject or every evidence uid is gone from the brain"
+        _set_claim(store, now, claim.uid, "stale", frm=["accepted"], why=why_stale)
+        if stored.gap:
+            gap = _gap(store, stored.gap)
+            if gap is not None:
+                _reopen(store, now, gap, why_stale, rejected=False, frm=["in_review", "resolved"])
+        _log(store, now, by, "claim_stale", gap=stored.gap, claim=claim.uid, why=why_stale,
+             evidence=stored.evidence)  # fmt: skip
+        return _claim(store, claim.uid)
 
     replaced = store.read(
         "ledger/claims_for_subject",
@@ -195,18 +223,6 @@ def accept(
             brain.retire(slug, old["uid"], "superseded", iso(now))
             _log(store, now, by, "claim_superseded", gap=old["gap"], claim=old["uid"],
                  why=f"superseded by {claim.uid}", evidence=[claim.uid])  # fmt: skip
-
-    stored = _claim(store, claim.uid)
-    if brain.project(slug, [stored.model_dump()]):
-        why_stale = "projection: its subject or every evidence uid is gone from the brain"
-        _set_claim(store, now, claim.uid, "stale", frm=["accepted"], why=why_stale)
-        if stored.gap:
-            gap = _gap(store, stored.gap)
-            if gap is not None:
-                _reopen(store, now, gap, why_stale, rejected=False, frm=["in_review", "resolved"])
-        _log(store, now, by, "claim_stale", gap=stored.gap, claim=claim.uid, why=why_stale,
-             evidence=stored.evidence)  # fmt: skip
-        return _claim(store, claim.uid)
 
     if stored.gap:
         _set_gap(store, now, stored.gap, ["in_review"], "resolved", f"claim {claim.uid}")
@@ -230,6 +246,7 @@ def approve(
     brain = brain or DEFAULT_BRAIN
     now = int(time.time()) if now is None else now
     claim = _pending(store, claim_uid)
+    _brain_present(brain, slug)
     clash = conflict(claim.kind, claim.value, brain.source_facts(slug, claim.subject))
     if clash:
         if not _set_claim(store, now, claim.uid, "conflicts_with_source", by=by, why=why,
@@ -276,6 +293,11 @@ def _ctx(now: str | float) -> Ctx:
     from agents.roles.base import Ctx
 
     return Ctx("keeper", DB_USER, now)  # type: ignore[arg-type]  # iso() takes either
+
+
+def _brain_present(brain: BrainFacts, slug: str) -> None:
+    if not brain.graph_exists(slug):
+        raise BrainUnavailable(slug)
 
 
 def _log(store: WorkStore, now: str | float, actor: str, action: str, **fields: Any) -> None:
