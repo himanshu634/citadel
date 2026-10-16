@@ -18,7 +18,9 @@ brain = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["apps/brain/tests", "apps/agents/tests", "apps/backend/tests"]
-addopts = ["-p", "brain.testing"]  # shared FalkorDB fixtures, one per session for every package
+# brain.testing: shared FalkorDB fixtures, one per session for every package.
+# importlib: three test roots can reuse a file name (test_graph.py) without a clash.
+addopts = ["-p", "brain.testing", "--import-mode=importlib"]
 
 [tool.ruff]
 line-length = 100
