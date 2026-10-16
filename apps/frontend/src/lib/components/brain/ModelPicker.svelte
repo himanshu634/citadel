@@ -70,7 +70,9 @@ answer runs: one run per chat.
 	:global(.model-chip) {
 		display: inline-flex;
 		align-items: center;
+		align-self: flex-start;
 		gap: var(--space-2);
+		width: fit-content;
 		min-height: var(--control-sm);
 		padding: 0 var(--space-2) 0 var(--space-3);
 		border: var(--border-hair) solid var(--color-line);
