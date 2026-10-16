@@ -29,22 +29,27 @@ const sameEvent = (a: BuildEvent, b: BuildEvent) =>
 	a.count === b.count &&
 	a.message === b.message;
 
-/** The snapshot with `event` added. The same snapshot when it is another company's or a repeat. */
+/**
+ * The snapshot with `event` added, and the build's step taken from it (the backend stamps each
+ * event with its step counter). The same snapshot when it is another company's or a repeat.
+ */
 export function withEvent(snapshot: BuildSnapshot, event: BuildEvent): BuildSnapshot {
 	if (event.slug !== snapshot.slug || snapshot.events.some((held) => sameEvent(held, event))) {
 		return snapshot;
 	}
-	return { ...snapshot, events: [...snapshot.events, event] };
+	const next = { ...snapshot, events: [...snapshot.events, event] };
+	if (event.step != null) next.step = event.step;
+	return next;
 }
 
 const noun = (snapshot: BuildSnapshot) => (snapshot.kind === 'rebuild' ? 'Rebuild' : 'Build');
 const lastStage = (snapshot: BuildSnapshot): BuildStage | null => snapshot.events.at(-1)?.stage ?? null;
 
 /**
- * The line over the table: "Step 2 of 4: records" while running. A rebuild's reset and prepare
- * count as steps, and a rebuild that fetches nothing has no fetch step, so the total comes from
- * the plan (`snapshot.stages`), never a fixed number. `stopping` is a stop the user asked for that
- * the build has not reached yet.
+ * The line over the table: "Step 2 of 4: records" while running. The count is the backend's
+ * (`snapshot.step` of `snapshot.steps`, see `stepOf`): every source's stages are steps, and so are
+ * a rebuild's reset and prepare. `stopping` is a stop the user asked for that the build has not
+ * reached yet.
  */
 export function headerOf(snapshot: BuildSnapshot, stopping = false): string {
 	const stage = lastStage(snapshot);
@@ -59,7 +64,9 @@ export function headerOf(snapshot: BuildSnapshot, stopping = false): string {
 				state: snapshot.state,
 				stage,
 				stages: snapshot.stages,
-				started_at: snapshot.started_at
+				started_at: snapshot.started_at,
+				step: snapshot.step,
+				steps: snapshot.steps
 			});
 			return step ? `Step ${step.n} of ${step.total}: ${stage}` : 'Building';
 		}

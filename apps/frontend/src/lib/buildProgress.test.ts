@@ -79,6 +79,13 @@ function twoSources(): BuildEvent[] {
 	];
 }
 
+/** What the backend stamps on `twoSources()`: each (stage, source) is one step of 9. */
+const TWO_SOURCE_STEPS = [1, 1, 2, 2, 3, 3, 4, 4, 5, 6, 6, 7, 7, 8, 9, 9];
+
+function twoSourcesStamped(): BuildEvent[] {
+	return twoSources().map((event, i) => ({ ...event, step: TWO_SOURCE_STEPS[i] }));
+}
+
 describe('states', () => {
 	test('queued and running are active', () => {
 		expect(['queued', 'running', 'done', 'failed', 'stopped'].map((s) => isActive(s as BuildState))).toEqual([
@@ -115,6 +122,42 @@ describe('withEvent', () => {
 		const held = snap([ev('prepare', 'running')]);
 		const next = withEvent(held, ev('prepare', 'running', null, undefined, undefined, '2026-10-16T10:00:09+00:00'));
 		expect(next.events).toHaveLength(2);
+	});
+});
+
+describe('withEvent and the step counter', () => {
+	test("takes the event's step, so a live stream keeps the count", () => {
+		const held = snap([ev('prepare', 'running')], 'running', { step: 1, steps: 9 });
+		const next = withEvent(held, { ...ev('fetch', 'running', 'github:acme/platform'), step: 2 });
+		expect([next.step, next.steps]).toEqual([2, 9]);
+	});
+
+	test('an event without a step leaves the counter as it is', () => {
+		const held = snap([ev('prepare', 'running')], 'running', { step: 1, steps: 9 });
+		expect(withEvent(held, ev('prepare', 'done')).step).toBe(1);
+	});
+});
+
+describe('two sources: header and meter agree', () => {
+	test('neither the step nor the meter ever goes back, and the count is per source', () => {
+		const events = twoSourcesStamped();
+		let live = snap([], 'running', { step: 1, steps: 9 });
+		let lastStep = 0;
+		let lastPercent = 0;
+		const headers: string[] = [];
+		for (const event of events) {
+			live = withEvent(live, event);
+			const header = headerOf(live);
+			headers.push(header);
+			const n = Number(/^Step (\d+) of 9: /.exec(header)?.[1]);
+			expect(n).toBeGreaterThanOrEqual(lastStep);
+			const percent = percentOf(live);
+			expect(percent).toBeGreaterThanOrEqual(lastPercent);
+			lastStep = n;
+			lastPercent = percent;
+		}
+		expect(headers[11]).toBe('Step 7 of 9: records'); // the second source, not "Step 3" again
+		expect(headers.at(-1)).toBe('Step 9 of 9: load');
 	});
 });
 

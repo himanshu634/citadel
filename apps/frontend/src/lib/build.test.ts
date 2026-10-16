@@ -152,4 +152,21 @@ describe('stepOf', () => {
 		expect(stepOf(summary({ stage: 'done' }))).toBeNull();
 		expect(stepOf(summary({ stage: 'reset' }))).toBeNull();
 	});
+
+	test("uses the backend's step counter when the summary has one", () => {
+		// Two sources: the second source's records is step 7 of 9, not "step 3" again.
+		expect(stepOf(summary({ stage: 'records', step: 7, steps: 9 }))).toEqual({ n: 7, total: 9 });
+		expect(stepOf(summary({ stage: 'load', step: 9, steps: 9 }))).toEqual({ n: 9, total: 9 });
+	});
+
+	test('with a counter: null while queued, before the first step, or once the build ended', () => {
+		expect(stepOf(summary({ state: 'queued', stage: 'prepare', step: null, steps: 9 }))).toBeNull();
+		expect(stepOf(summary({ step: null, steps: 9 }))).toBeNull();
+		expect(stepOf(summary({ state: 'done', stage: 'done', step: 9, steps: 9 }))).toBeNull();
+		expect(stepOf(summary({ state: 'stopped', step: 4, steps: 9 }))).toBeNull();
+	});
+
+	test('without a counter (an old build file) falls back to the stage index', () => {
+		expect(stepOf(summary({ step: null, steps: null }))).toEqual({ n: 2, total: 5 });
+	});
 });

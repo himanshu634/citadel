@@ -9,6 +9,12 @@ a restart as `stopped`. Async subscribers (the SSE routes) get every event as it
 
 A stop sets a per-job flag; the runner's `on_event` wrapper raises `BuildStopped` at the next
 event, and the runner checks the flag between steps. The pipeline itself knows nothing of jobs.
+
+"Step n of N" is counted here, not in the UI: the ingest stages repeat per source, so a stage's
+place in `stages` goes backwards on the second source. Before it runs, a job lists every
+(stage, source) it will go through (its trail, from the company's sources); `steps` is its
+length and `step` only moves forward along it. Every event carries the step it happened at, so
+a live stream keeps the count without reading the snapshot again.
 """
 
 from __future__ import annotations
@@ -61,6 +67,10 @@ class BuildSnapshot(BaseModel):
     ended_at: str | None = None
     events: list[BuildEvent] = []
     error: str | None = None
+    # The place in the trail (1-based) and its length: None while queued, for old files, and
+    # when the company's sources could not be read. Kept as it is when the job ends.
+    step: int | None = None
+    steps: int | None = None
 
     @model_validator(mode="after")
     def _full_plan_for_old_files(self) -> BuildSnapshot:
@@ -71,14 +81,16 @@ class BuildSnapshot(BaseModel):
 
 
 class BuildSummary(BaseModel):
-    """The short form the company list shows: kind, state, the stage of the latest event, and
-    the planned stages (so the UI can say "step 2 of 5")."""
+    """The short form the company list shows: kind, state, the stage of the latest event, the
+    planned stages, and the step counter (so the UI can say "step 2 of 5")."""
 
     kind: Kind
     state: State
     stage: Stage | None
     stages: list[Stage]
     started_at: str
+    step: int | None = None
+    steps: int | None = None
 
     @classmethod
     def of(cls, snap: BuildSnapshot) -> BuildSummary:
@@ -89,6 +101,8 @@ class BuildSummary(BaseModel):
             stage=stage,
             stages=snap.stages,
             started_at=snap.started_at,
+            step=snap.step,
+            steps=snap.steps,
         )
 
 
@@ -99,6 +113,7 @@ class JobRunning(Exception):
 
 
 class Steps(Protocol):
+    def sources(self, slug: str, keys: set[str] | None) -> tuple[list[str], list[str]]: ...
     def reset(self, slug: str) -> None: ...
     def prepare(self, slug: str, on_event: OnEvent) -> None: ...
     def fetch(self, slug: str, keys: set[str] | None, on_event: OnEvent) -> None: ...
@@ -107,6 +122,9 @@ class Steps(Protocol):
 
 class PipelineSteps:
     """The real steps: drop the graph, apply the schema, fetch, ingest."""
+
+    def sources(self, slug: str, keys: set[str] | None) -> tuple[list[str], list[str]]:
+        return pipeline.planned_sources(slug, keys)
 
     def reset(self, slug: str) -> None:
         db.delete_graph(slug)
@@ -127,6 +145,7 @@ class _Job:
     full: bool
     refetch: set[str] | None
     plan: tuple[Stage, ...]
+    trail: Trail | None = None  # every (stage, source) in order; None when unknown
     step: Step | None = None  # the step `_execute` is in
     stop: threading.Event = field(default_factory=threading.Event)
 
@@ -136,6 +155,33 @@ class _Subscriber:
     slug: str | None  # None = every company
     loop: asyncio.AbstractEventLoop
     queue: asyncio.Queue[BuildEvent]
+
+
+Trail = tuple[tuple[Stage, str | None], ...]
+_COUNTED = ("running", "done", "skipped")  # what moves the step counter
+
+
+def _trail(plan: tuple[Stage, ...], fetched: list[str], ingested: list[str]) -> Trail:
+    """Every (stage, source) a job goes through, in order: the step counter's track."""
+    trail: list[tuple[Stage, str | None]] = [(s, None) for s in plan if s in ("reset", "prepare")]
+    if "fetch" in plan:
+        trail += [("fetch", key) for key in fetched]
+    trail += [(stage, key) for key in ingested for stage in _INGEST]
+    return tuple(trail)
+
+
+def _advance(snap: BuildSnapshot, trail: Trail | None, event: BuildEvent) -> None:
+    """Move the step to the event's (stage, source), searching forward only: a skipped records
+    stage jumps over its source's normalize and load, and nothing ever moves the step back."""
+    if trail is None or snap.step is None or snap.state != "running":
+        return
+    if event.status not in _COUNTED:
+        return
+    here = (event.stage, event.source)
+    for i in range(snap.step - 1, len(trail)):
+        if trail[i] == here:
+            snap.step = i + 1
+            return
 
 
 def _plan(kind: Kind, refetch: set[str] | None) -> tuple[Stage, ...]:
@@ -216,10 +262,20 @@ class JobRunner:
         # Validate everything before taking a slot, so a bad argument cannot leak one.
         keys = set(refetch) if refetch is not None else None
         plan = _plan(kind, keys)
+        try:
+            trail: Trail | None = _trail(plan, *self.steps.sources(slug, keys))
+        except Exception:  # an unreadable YAML: the build will fail and say why; no count
+            log.warning("could not list the sources of %s", slug, exc_info=True)
+            trail = None
         snap = BuildSnapshot(
-            slug=slug, kind=kind, state="queued", started_at=_now(), stages=list(plan)
+            slug=slug,
+            kind=kind,
+            state="queued",
+            started_at=_now(),
+            stages=list(plan),
+            steps=len(trail) if trail is not None else None,
         )
-        job = _Job(snap, full, keys, plan)
+        job = _Job(snap, full, keys, plan, trail)
         with self._lock:
             current = self._jobs.get(slug)
             if current is not None and current.snapshot.state in ACTIVE:
@@ -227,7 +283,7 @@ class JobRunner:
             has_slot = self._slots.acquire(blocking=False)
             try:
                 if has_slot:
-                    snap.state = "running"
+                    self._set_running(job)
                 self._jobs[slug] = job
                 self._emit(job, BuildEvent(slug, job.plan[0], "waiting"))
                 worker = threading.Thread(
@@ -323,6 +379,7 @@ class JobRunner:
                     continue
                 event = _closing_event(snap, "stopped", tuple(snap.stages))
                 if event is not None:
+                    event.step = snap.step
                     snap.events.append(event)
                 snap.state = "stopped"
                 snap.ended_at = _now()
@@ -342,7 +399,7 @@ class JobRunner:
                 if job.snapshot.state == "stopped":  # stopped while queued; already recorded
                     return
                 if job.snapshot.state == "queued":
-                    job.snapshot.state = "running"
+                    self._set_running(job)
                     self._persist(job.snapshot)
             self._execute(job)
         finally:
@@ -391,8 +448,15 @@ class JobRunner:
 
     # --- snapshot and delivery (callers may or may not hold the lock; it is reentrant) --------
 
+    def _set_running(self, job: _Job) -> None:
+        job.snapshot.state = "running"
+        if job.trail is not None:
+            job.snapshot.step = 1
+
     def _emit(self, job: _Job, event: BuildEvent) -> None:
         with self._lock:
+            _advance(job.snapshot, job.trail, event)
+            event.step = job.snapshot.step
             job.snapshot.events.append(event)
             self._persist(job.snapshot)
             self._publish(event)
@@ -407,6 +471,7 @@ class JobRunner:
             snap.ended_at = _now()
             snap.error = error
             if event is not None:
+                event.step = snap.step
                 snap.events.append(event)
             self._persist(snap)
             if event is not None:

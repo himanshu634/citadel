@@ -9,9 +9,10 @@ import time
 
 import pytest
 from brain import config, db, registry
+from brain.adapters.canonical_jsonl import CanonicalJsonlSource
 from brain.events import BuildEvent
 from brain.jobs import BuildSnapshot, JobRunner, JobRunning, PipelineSteps
-from conftest import SRC, FakeSteps, needs_graph, synthetic_company
+from conftest import SECOND, SRC, FakeSteps, needs_graph, synthetic_company
 
 TERMINAL = {"done", "failed", "stopped"}
 
@@ -306,6 +307,102 @@ def test_summary(runner, gate):
     assert s.kind == "build" and s.stages == ["prepare", "fetch", "records", "normalize", "load"]
 
 
+A, B = "github:acme/a", "github:acme/b"
+
+
+def steps_of(snap: BuildSnapshot) -> list[int | None]:
+    """The step each event was stamped with, in order."""
+    return [e.step for e in snap.events]
+
+
+def test_two_source_build_counts_steps_per_source(tmp_path):
+    r = JobRunner(steps=FakeSteps(sources=[A, B]), jobs_dir=tmp_path)
+    r.start("a")
+    snap = wait_done(r, "a")
+    # prepare, fetch a, fetch b, then records/normalize/load for a, then for b
+    assert snap.steps == 9 and snap.step == 9
+    stamped = steps_of(snap)
+    assert stamped == sorted(stamped)  # never goes backwards
+    reached = {(e.stage, e.source): e.step for e in snap.events if e.status != "waiting"}
+    assert reached[("prepare", None)] == 1
+    assert (reached[("fetch", A)], reached[("fetch", B)]) == (2, 3)
+    assert reached[("records", A)] == 4 and reached[("load", A)] == 6
+    assert reached[("records", B)] == 7 and reached[("load", B)] == 9
+    assert reached[("done", None)] == 9  # the closing done keeps the last step
+    summary = r.summary("a")
+    assert (summary.step, summary.steps) == (9, 9)
+
+
+def test_skipped_records_jump_over_that_sources_ingest_steps(tmp_path):
+    r = JobRunner(steps=FakeSteps(sources=[A, B], skip_records={A}), jobs_dir=tmp_path)
+    r.start("a")
+    snap = wait_done(r, "a")
+    reached = {(e.stage, e.source): e.step for e in snap.events if e.status != "waiting"}
+    assert reached[("records", A)] == 4 and reached[("records", B)] == 7
+    assert snap.step == snap.steps == 9
+
+
+def test_rebuild_without_fetch_counts_reset_and_no_fetch(tmp_path):
+    r = JobRunner(steps=FakeSteps(sources=[A, B]), jobs_dir=tmp_path)
+    r.start("a", kind="rebuild", refetch=set())
+    snap = wait_done(r, "a")
+    assert snap.steps == 2 + 6  # reset, prepare, then 3 ingest stages per source
+    assert snap.step == snap.steps
+    assert [e.step for e in snap.events if e.stage == "reset"][-1] == 1
+
+
+def test_partial_refetch_counts_only_the_fetched_sources(tmp_path):
+    r = JobRunner(steps=FakeSteps(sources=[A, B]), jobs_dir=tmp_path)
+    r.start("a", refetch={B})
+    snap = wait_done(r, "a")
+    assert snap.steps == 1 + 1 + 6
+    assert [e.step for e in snap.events if e.stage == "fetch"] == [2, 2]
+    assert snap.step == snap.steps
+
+
+def test_queued_build_has_no_step_yet(runner, gate):
+    runner.start("a")
+    runner.start("b")
+    queued = runner.start("c")
+    assert queued.state == "queued" and queued.step is None and queued.steps == 5
+    assert runner.summary("c").step is None
+    running = runner.summary("a")
+    assert running.state == "running" and running.step == 1
+    gate.set()
+    assert wait_done(runner, "c").step == 5
+
+
+def test_stopped_build_keeps_its_step(tmp_path, gate):
+    r = JobRunner(steps=FakeSteps(gate=gate, gate_at=2, sources=[A, B]), jobs_dir=tmp_path)
+    r.start("a")
+    deadline = time.monotonic() + 5
+    while r.current("a").events[-1].status != "done" and time.monotonic() < deadline:
+        time.sleep(0.01)
+    r.stop("a")
+    gate.set()
+    snap = wait_done(r, "a")
+    assert snap.state == "stopped" and snap.step == 1  # stopped after prepare, before fetch
+    assert snap.events[-1].step == 1
+
+
+def test_steps_unknown_when_the_sources_cannot_be_read(tmp_path):
+    class NoSources(FakeSteps):
+        def sources(self, slug, keys):
+            raise ValueError("bad yaml")
+
+    r = JobRunner(steps=NoSources(), jobs_dir=tmp_path)
+    snap = r.start("a")
+    assert snap.steps is None and snap.step is None
+    done = wait_done(r, "a")
+    assert done.steps is None and done.step is None
+
+
+def test_old_snapshot_file_has_no_step(tmp_path):
+    (tmp_path / "a.json").write_text(json.dumps(RUNNING_SNAPSHOT))
+    snap = JobRunner(jobs_dir=tmp_path, steps=FakeSteps()).current("a")
+    assert snap.step is None and snap.steps is None
+
+
 def test_snapshot_carries_its_planned_stages(runner_recording, tmp_path):
     snap = runner_recording.start("a", "rebuild", refetch=set())  # nothing to fetch
     assert snap.stages == ["reset", "prepare", "records", "normalize", "load"]
@@ -490,3 +587,33 @@ def test_forget_refuses_a_running_build(runner, gate):
     with pytest.raises(JobRunning):
         runner.forget("a")
     assert runner.has_history("a")
+
+
+@pytest.fixture
+def two_source_company(tmp_path, monkeypatch):
+    """The synthetic company plus a missing folder (its records are skipped) and a second one."""
+    slug = "test_steps"
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    (tmp_path / "companies").mkdir()
+    cfg = synthetic_company(slug)
+    cfg.sources = [
+        *cfg.sources,
+        CanonicalJsonlSource(type="canonical_jsonl", path=tmp_path / "missing"),
+        CanonicalJsonlSource(type="canonical_jsonl", path=SECOND),
+    ]
+    registry.write_new(cfg)
+    db.delete_graph(slug)
+    yield slug
+    db.delete_graph(slug)
+
+
+@needs_graph
+def test_real_pipeline_reaches_the_planned_step_count(two_source_company, tmp_path):
+    r = JobRunner(jobs_dir=tmp_path / "jobs")
+    r.start(two_source_company)
+    snap = wait_done(r, two_source_company, 60)
+    assert snap.state == "done", snap.error
+    assert snap.steps == 1 + 3 + 3 * 3  # prepare, a fetch and three ingest stages per source
+    stamped = steps_of(snap)
+    assert stamped == sorted(stamped)
+    assert snap.events[-2].step == snap.steps == snap.step  # the last stage before `done`

@@ -62,6 +62,20 @@ def _selected(cfg: CompanyConfig, only: str | None):
             yield source, adapters.REGISTRY.get(source.type)
 
 
+def planned_sources(slug: str, keys: set[str] | None = None) -> tuple[list[str], list[str]]:
+    """The source keys `fetch(slug, keys=keys)` and `ingest(slug)` will report on, in order:
+    (fetched, ingested). A source with no adapter is reported under its type. Mirrors the
+    loops below, so a build job can count its steps before it runs them."""
+    fetched: list[str] = []
+    ingested: list[str] = []
+    for source, adapter in _selected(load_company(slug), None):
+        key = adapter.key(source) if adapter is not None else source.type
+        if keys is None or (adapter is not None and key in keys):
+            fetched.append(key)
+        ingested.append(key)
+    return fetched, ingested
+
+
 def fetch(
     slug: str,
     only: str | None = None,

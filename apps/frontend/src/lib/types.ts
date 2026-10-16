@@ -94,6 +94,8 @@ export interface BuildEvent {
 	at: string;
 	/** Final event only: what the load wrote and dropped. */
 	totals: Record<string, unknown> | null;
+	/** The build's step when this happened (see `BuildSummary.step`); absent in old build files. */
+	step?: number | null;
 }
 
 /** The short form of a build that a company list entry carries (the last build, in any state). */
@@ -104,6 +106,13 @@ export interface BuildSummary {
 	/** The planned stage order; the ingest stages run once per source. */
 	stages: BuildStage[];
 	started_at: string;
+	/**
+	 * "Step n of N", counted by the backend with every source's stages: `step` only goes forward
+	 * and keeps its value when the build ends. Null while queued, and both null (or absent) for
+	 * an old build file or a company whose sources could not be read.
+	 */
+	step?: number | null;
+	steps?: number | null;
 }
 
 export interface BuildSnapshot {
@@ -115,6 +124,9 @@ export interface BuildSnapshot {
 	ended_at: string | null;
 	events: BuildEvent[];
 	error: string | null;
+	/** As in `BuildSummary`. */
+	step?: number | null;
+	steps?: number | null;
 }
 
 export interface Company {

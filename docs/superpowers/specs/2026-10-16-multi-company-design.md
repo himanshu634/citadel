@@ -269,9 +269,16 @@ and no job says `building` or `failed`, the status is `unknown` (never a guessed
 `graph_reachable` is false; these routes and `/api/events` still answer 200/201, while the
 overview and tool routes answer 503. `last_synced_at` is the latest `SyncState` update, also
 while a build runs (so the UI can tell "building, graph empty" from "building over data").
-`build` is `{kind, state, stage, stages, started_at}`: `stage` is the latest event's stage and
-`stages` the planned order (`reset` only for rebuilds, `fetch` only when something is
-fetched; the ingest stages repeat per source).
+`build` is `{kind, state, stage, stages, started_at, step, steps}`: `stage` is the latest
+event's stage and `stages` the planned order (`reset` only for rebuilds, `fetch` only when
+something is fetched; the ingest stages repeat per source). The backend counts "step n of N":
+`steps` is the number of (stage, source) pairs the build will go through (reset for a rebuild,
+prepare, one fetch per fetched source, then records, normalize and load per source), and `step`
+the place of the current one. `step` only goes forward (a source whose records are skipped
+jumps over its normalize and load), is null while queued and keeps its value when the build
+ends. Both are null for a build file written before they existed, or when the company's
+sources could not be read. The build snapshot carries the same two fields, and every build
+event carries the `step` it happened at, so the live stream keeps the count.
 
 ### 6.2 Create and validate
 

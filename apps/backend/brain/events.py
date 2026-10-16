@@ -31,6 +31,8 @@ class BuildEvent:
     message: str | None = None
     at: str = field(default_factory=_now)  # ISO 8601, UTC
     totals: dict | None = None  # final event only: LoadReport.written and .dropped
+    # Set by the build job, not the pipeline: its step counter when the event happened.
+    step: int | None = None
 
 
 OnEvent = Callable[[BuildEvent], None]

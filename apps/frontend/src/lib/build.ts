@@ -111,12 +111,16 @@ export function buildTable(events: BuildEvent[], stages?: BuildStage[]): BuildTa
 }
 
 /**
- * "Building, step n of N": n is the 1-based place of the build's current stage among its planned
- * stages, N their number, both without the closing `done`. Null when no build is active or the
- * stage is not (yet) one of the planned ones.
+ * "Building, step n of N" while a build is active, else null. The backend counts the steps
+ * (`step` of `steps`, every source's stages included), so the number never goes back when the
+ * second source starts its records. Only a summary without a count (an old build file) falls back
+ * to the 1-based place of the current stage among the planned stages, without `done`.
  */
 export function stepOf(summary: BuildSummary): { n: number; total: number } | null {
 	if (summary.state !== 'queued' && summary.state !== 'running') return null;
+	if (summary.steps != null) {
+		return summary.step != null ? { n: summary.step, total: summary.steps } : null;
+	}
 	if (summary.stage == null) return null;
 	const planned: BuildStage[] = summary.stages.filter((s) => s !== 'done');
 	const index = planned.indexOf(summary.stage);

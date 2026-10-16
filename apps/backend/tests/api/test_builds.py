@@ -101,6 +101,7 @@ def test_status_shows_building(client, company):
     assert listed["build"]["state"] == "running" and listed["build"]["stage"] == "prepare"
     assert listed["build"]["kind"] == "build"
     assert listed["build"]["stages"] == ["prepare", "fetch", "records", "normalize", "load"]
+    assert (listed["build"]["step"], listed["build"]["steps"]) == (1, 5)
 
 
 def test_failed_build_shows_failed_with_the_error(api_root, company, tmp_path):
@@ -186,6 +187,8 @@ async def test_events_stream_sends_build_events_until_done(company, runner, gate
     sent += [(e["stage"], e["status"], e["at"]) for e in map(json.loads, (m["data"] for m in rest))]
     assert len(sent) == len(set(sent))  # nothing sent twice
     assert sent[-1][:2] == ("done", "done")
+    steps = [json.loads(m["data"])["step"] for m in rest]  # each live event carries its step
+    assert steps == sorted(steps) and steps[-1] == snap["steps"] == 5
     assert not runner._subscribers
 
 
