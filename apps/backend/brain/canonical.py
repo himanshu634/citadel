@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # --- uid helpers ------------------------------------------------------------------------------
 
@@ -75,6 +75,13 @@ class Person(Record):
     login: str
     display_name: str | None = None
     is_bot: bool = False  # normalize sets it from the config (people.bots, "[bot]" suffix)
+
+    @field_validator("login")
+    @classmethod
+    def _not_an_email(cls, v: str) -> str:
+        if "@" in v:
+            raise ValueError("login must be a handle, not an email address")
+        return v
 
     @model_validator(mode="before")
     @classmethod

@@ -5,6 +5,7 @@ module applies the config so the loader can stay dumb:
 - file path -> System name (first matching rule wins, then fallback, ignore list),
 - bot detection and login aliases,
 - conventional-commit prefix -> Change.kind,
+- email addresses scrubbed from every text field (people are identified by login only),
 - the ingest window (drop activity before `window.since`),
 - make sure every referenced person, team and system exists as a record.
 All functions are pure: same input, same output, no network, no database.
@@ -144,6 +145,16 @@ def change_kind(subject: str) -> str:
     return kind if kind in _KINDS else "other"
 
 
+# --- privacy ----------------------------------------------------------------------------------
+
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def scrub_emails(text: str | None) -> str | None:
+    """Replace email addresses (e.g. in `Co-authored-by:` trailers) with [email]."""
+    return EMAIL_RE.sub("[email]", text) if text else text
+
+
 # --- the pass ---------------------------------------------------------------------------------
 
 
@@ -182,6 +193,7 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
                 update={
                     "login": name,
                     "uid": Person(login=name).uid,
+                    "display_name": scrub_emails(rec.display_name),
                     "is_bot": rec.is_bot or is_bot(name, people),
                 }
             )
@@ -204,6 +216,7 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
             yield rec.model_copy(
                 update={
                     "author_login": login(rec.author_login),
+                    "subject": scrub_emails(rec.subject),
                     "kind": rec.kind or change_kind(rec.subject),
                     "touches": touches,
                 }
@@ -211,15 +224,29 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
         elif isinstance(rec, WorkItem):
             if not _in_window(rec.changed_at(), since):
                 continue
-            yield rec.model_copy(update={"author_login": login(rec.author_login)})
+            yield rec.model_copy(
+                update={
+                    "author_login": login(rec.author_login),
+                    "title": scrub_emails(rec.title),
+                    "body": scrub_emails(rec.body),
+                }
+            )
         elif isinstance(rec, Review):
             if _in_window(rec.changed_at(), since):
                 yield rec.model_copy(update={"reviewer_login": login(rec.reviewer_login)})
         elif isinstance(rec, Comment):
             if _in_window(rec.changed_at(), since):
-                yield rec.model_copy(update={"author_login": login(rec.author_login)})
+                yield rec.model_copy(
+                    update={"author_login": login(rec.author_login), "body": scrub_emails(rec.body)}
+                )
         elif isinstance(rec, Document):
-            yield rec.model_copy(update={"author_login": login(rec.author_login)})
+            yield rec.model_copy(
+                update={
+                    "author_login": login(rec.author_login),
+                    "title": scrub_emails(rec.title),
+                    "body": scrub_emails(rec.body),
+                }
+            )
         elif isinstance(rec, Ownership):
             mapped = (
                 [(s, None) for s in rec.systems]
