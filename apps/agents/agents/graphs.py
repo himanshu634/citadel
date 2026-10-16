@@ -2,7 +2,8 @@
 
 Why: the company graph is the brain's (`brain.config.graph_name`). The agents keep their own
 state in other graphs: the conversation checkpoints (agent_<slug>), each role's memory
-(mem_<slug>_<role>) and what-if forks for simulations (sim_<slug>_<run>). The names live here,
+(mem_<slug>_<role>), the Keeper's records (keeper_<slug>) and what-if forks for simulations
+(sim_<slug>_<run>). The names live here,
 apart from `checkpoint.py`, so the permission table (`acl.py`) can use them without loading
 langchain. Every name starts from the same slug rules as the company graph.
 """
@@ -18,6 +19,12 @@ def agent_graph_name(slug: str) -> str:
     """Agent conversation checkpoints for one company: agent_<slug>, apart from its brain graph."""
     graph_name(slug)  # same slug rules
     return f"agent_{slug}"
+
+
+def keeper_graph_name(slug: str) -> str:
+    """The Keeper's own records for one company: keeper_<slug>, apart from its brain graph."""
+    graph_name(slug)
+    return f"keeper_{slug}"
 
 
 def mem_graph_name(slug: str, role: str) -> str:

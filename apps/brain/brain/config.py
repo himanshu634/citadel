@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     anthropic_max_tokens: int = 64000
 
+    # The Keeper's limits (budget per run, budget during a build, cap on notices).
+    keeper_budget: int = 5
+    keeper_build_budget: int = 3
+    keeper_notice_cap: int = 10
+
     @field_validator(
         "falkordb_username",
         "falkordb_password",
