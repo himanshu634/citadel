@@ -21,14 +21,10 @@ nothing to ask (building, empty, unreachable, invalid) and says why in its place
 	const company = $derived(companies.currentCompany);
 	const ask = $derived(askFieldOf(company));
 	const status = $derived(statusLineOf(company));
-	const mono = $derived(
-		company
-			? monogram(
-					companies.list.map((c) => c.name),
-					company.name
-				)
-			: null
-	);
+	const mono = $derived.by(() => {
+		const index = companies.list.findIndex((c) => c.slug === company?.slug);
+		return index < 0 ? null : monogram(companies.list.map((c) => c.name), index);
+	});
 	// Status is never colour alone: the icon and the words say it too.
 	const icon = $derived<Component | null>(
 		company?.status === 'building'
@@ -40,6 +36,11 @@ nothing to ask (building, empty, unreachable, invalid) and says why in its place
 					: null
 	);
 	let question = $state('');
+	// A question typed for one company must not follow you to the next.
+	$effect(() => {
+		void companies.current;
+		question = '';
+	});
 </script>
 
 <header class="topbar">

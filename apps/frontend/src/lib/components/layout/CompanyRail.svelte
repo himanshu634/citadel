@@ -61,7 +61,7 @@ accessible name says the same in words. The tile list scrolls; the add tile stay
 <nav class="rail" aria-label="Company brains">
 	<h2>Brains</h2>
 	<ul bind:this={list}>
-		{#each companies as c (c.slug)}
+		{#each companies as c, i (c.slug)}
 			{@const mark = marks[c.status]}
 			{@const isCurrent = c.slug === current}
 			<li class={{ current: isCurrent }}>
@@ -70,12 +70,12 @@ accessible name says the same in words. The tile list scrolls; the add tile stay
 						<a
 							{...props}
 							class="tile"
-							href={resolve(sectionPath(pathname, c.slug) as `/c/${string}`)}
+							href={resolve(sectionPath(pathname, c.slug, c.status) as `/c/${string}`)}
 							aria-current={isCurrent ? 'true' : undefined}
 							aria-label={label(c)}
 							onclick={click(props)}
 						>
-							<span class="mono" aria-hidden="true">{monogram(names, c.name)}</span>
+							<span class="mono" aria-hidden="true">{monogram(names, i)}</span>
 							{#if mark}
 								<span class={['badge', mark.tone]} aria-hidden="true">
 									<mark.icon class={{ spin: c.status === 'building' }} />

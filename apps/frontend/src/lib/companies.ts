@@ -6,6 +6,8 @@
  * the components and are unit-tested (spec 5.2).
  */
 
+import type { CompanyStatus } from './types';
+
 /** Same pattern as the backend's SLUG_RE (apps/backend/brain/config.py). */
 const SLUG = /^[a-z0-9][a-z0-9_]*$/;
 
@@ -32,16 +34,16 @@ function unique(name: string, taken: Set<string>): string {
 }
 
 /**
- * The 1-2 letter label for a company: initials of the first two words, else the first two letters
- * in title case ("Acme Labs" -> "AL", "FalkorDB" -> "Fa"). `names` is every company in rail order;
- * a name whose monogram an earlier name already has gets its first letter plus the next letter
- * that makes it unique ("Fabric" after "FalkorDB" -> "Fb"). A name not in `names` counts as last.
+ * The 1-2 letter label for the company at `index`: initials of the first two words, else the first
+ * two letters in title case ("Acme Labs" -> "AL", "FalkorDB" -> "Fa"). `names` is every company
+ * in rail order; a company whose monogram an earlier one already has gets its first letter plus the
+ * next letter that makes it unique ("Fabric" after "FalkorDB" -> "Fb"). It takes a position, not a
+ * name, because two companies can share a display name and each still needs its own monogram.
  */
-export function monogram(names: string[], name: string): string {
-	const order = names.includes(name) ? names.slice(0, names.indexOf(name) + 1) : [...names, name];
+export function monogram(names: string[], index: number): string {
 	const taken = new Set<string>();
-	let own = '';
-	for (const n of order) {
+	let own = '?';
+	for (const n of names.slice(0, index + 1)) {
 		own = base(n);
 		if (own === '?') continue;
 		if (taken.has(own)) own = unique(n, taken);
@@ -62,11 +64,13 @@ export function slugify(name: string): string {
 /**
  * Where to go when the user picks another company: the same section (`/c/a/settings` ->
  * `/c/b/settings`), except the build page, which belongs to one build, and any route outside
- * `/c/<slug>/`: those land on the new company's home.
+ * `/c/<slug>/`: those land on the new company's home. A company whose config is `invalid` has no
+ * settings or build to open (its settings cannot load), so it always lands on its overview, which
+ * shows the config error (spec 5.2: the overview when the section does not exist).
  */
-export function sectionPath(pathname: string, toSlug: string): string {
+export function sectionPath(pathname: string, toSlug: string, toStatus?: CompanyStatus): string {
 	const home = `/c/${toSlug}/`;
 	const match = pathname.match(/^\/c\/[^/]+\/([^/]+)/);
-	if (!match || match[1] === 'build') return home;
+	if (!match || match[1] === 'build' || toStatus === 'invalid') return home;
 	return `/c/${toSlug}/${match[1]}`;
 }
