@@ -8,16 +8,10 @@
  * a company the user has left must not be drawn under the one they are on. Every async step
  * checks that its `open` is still the current one.
  */
-import { api, ApiError } from './api/client';
+import { api, ApiError, describeError } from './api/client';
 import { openEvents } from './api/events';
 import { endsBuild, isActive, withEvent } from './buildProgress';
 import type { BuildEvent, BuildSnapshot } from './types';
-
-function describe(e: unknown): string {
-	if (e instanceof ApiError && typeof e.detail === 'string') return e.detail;
-	// A dev proxy answers 500 with no body when nothing listens behind it.
-	return "The Citadel API isn't answering. Start it with make api, then try again.";
-}
 
 export class BuildFeed {
 	/** The build of the company that was opened; null until it is read, or when it never built. */
@@ -62,7 +56,7 @@ export class BuildFeed {
 			if (run !== this.#run) return;
 			this.stopping = false;
 			if (e instanceof ApiError && e.status === 404) await this.#read(run); // it ended already
-			else this.error = describe(e);
+			else this.error = describeError(e);
 		}
 	}
 
@@ -80,7 +74,7 @@ export class BuildFeed {
 		} catch (e) {
 			if (run !== this.#run) return;
 			if (e instanceof ApiError && e.status === 409) await this.#read(run); // one is running
-			else this.error = describe(e);
+			else this.error = describeError(e);
 		}
 	}
 
@@ -98,7 +92,7 @@ export class BuildFeed {
 				this.snapshot = null;
 				this.missing = true;
 			} else {
-				this.error = describe(e);
+				this.error = describeError(e);
 			}
 		}
 	}
