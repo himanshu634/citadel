@@ -1,5 +1,6 @@
 # Company Brain: one entry point for day-to-day commands.
-# Each target wraps `uv run brain ...` or `docker compose ...`, so you never type uv directly.
+# Each target wraps `uv run brain ...`, `uv run agents ...` or `docker compose ...`, so you never
+# type uv directly.
 # Most targets act on one company: pass SLUG=<slug> (default: falkordb).
 #
 #   make help                      list targets
@@ -8,6 +9,7 @@
 SLUG ?= falkordb
 API_PORT ?= 8000
 BRAIN := uv run brain
+AGENTS := uv run agents
 
 .DEFAULT_GOAL := help
 .PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask chat eval eval-drafts traces reset linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
@@ -60,10 +62,10 @@ stats: ## Node and relationship counts for brain_$(SLUG)
 	$(BRAIN) stats $(SLUG)
 
 ask: ## Ask brain_$(SLUG) a question: make ask SLUG=synthetic Q="who knows Auth?" (THREAD=id follows up)
-	$(BRAIN) ask $(SLUG) "$(Q)" $(if $(THREAD),--thread $(THREAD))
+	$(AGENTS) ask $(SLUG) "$(Q)" $(if $(THREAD),--thread $(THREAD))
 
 chat: ## Chat with brain_$(SLUG) (OFFLINE=1: one scripted turn, no API key; THREAD=id resumes)
-	$(BRAIN) chat $(SLUG) $(if $(filter 1 yes,$(OFFLINE)),--offline) $(if $(THREAD),--thread $(THREAD))
+	$(AGENTS) chat $(SLUG) $(if $(filter 1 yes,$(OFFLINE)),--offline) $(if $(THREAD),--thread $(THREAD))
 
 synthetic: ## Regenerate the synthetic company JSONL and load it into brain_synthetic
 	uv run python apps/brain/examples/synthetic_company/generate.py
@@ -77,24 +79,24 @@ tools: ## List the named query tools and their parameters
 	$(BRAIN) tools
 
 agents: ## List the agent roles, their jobs and read tools
-	$(BRAIN) agents
+	$(AGENTS) agents
 
 sim: ## Run agents on $(SLUG): make sim SLUG=synthetic SCENARIO=race OFFLINE=1 (TICKS=30)
-	$(BRAIN) sim run $(SLUG) --scenario $(or $(SCENARIO),sprint) --ticks $(or $(TICKS),30) $(if $(filter 1 yes,$(OFFLINE)),--offline)
+	$(AGENTS) sim run $(SLUG) --scenario $(or $(SCENARIO),sprint) --ticks $(or $(TICKS),30) $(if $(filter 1 yes,$(OFFLINE)),--offline)
 
 # Evals default to the synthetic company: it is the one with golden cases.
 EVAL_SLUG = $(if $(filter file,$(origin SLUG)),synthetic,$(SLUG))
 
 eval: ## Agent evals (calls the API; SLUG defaults to synthetic): CASE=id|tag REPEAT=3 MODEL=.. EFFORT=.. BASELINE=file
-	cd apps/brain && uv run python -m evals --slug $(EVAL_SLUG) $(foreach c,$(CASE),--case $(c)) \
+	uv run python -m agents.evals --slug $(EVAL_SLUG) $(foreach c,$(CASE),--case $(c)) \
 		$(if $(REPEAT),--repeat $(REPEAT)) $(if $(MODEL),--model $(MODEL)) \
 		$(if $(EFFORT),--effort $(EFFORT)) $(if $(BASELINE),--baseline $(abspath $(BASELINE)))
 
 traces: ## How the brain did on live questions (CLI + Ask page) for $(SLUG): rates, p50/p95; DAYS=7
-	$(BRAIN) traces $(SLUG) $(if $(DAYS),--days $(DAYS))
+	$(AGENTS) traces $(SLUG) $(if $(DAYS),--days $(DAYS))
 
 eval-drafts: ## Thumbs-down answers of $(SLUG) as draft eval cases (printed; WRITE=1 appends to the case file) DAYS=..
-	cd apps/brain && uv run python -m evals.drafts --slug $(SLUG) $(if $(DAYS),--days $(DAYS)) \
+	uv run python -m agents.evals.drafts --slug $(SLUG) $(if $(DAYS),--days $(DAYS)) \
 		$(if $(filter 1 yes,$(WRITE)),--write)
 
 reset: ## Delete graphs brain_/agent_$(SLUG), its build history and Ask traces; needs CONFIRM=1
@@ -136,7 +138,7 @@ fe-test: ## Frontend unit tests (vitest)
 # --- Quality ----------------------------------------------------------------------------------
 
 test: ## Run pytest (needs FalkorDB up for graph tests)
-	uv run pytest apps/brain/tests $(ARGS)
+	uv run pytest $(ARGS)
 
 lint: ## Ruff lint + format check
 	uv run ruff check .
