@@ -150,7 +150,7 @@ def embed(
     """Embed the chunks of brain_<slug> whose text or model changed (ingest runs this too)."""
     company(slug)
     connected()
-    _print_embed(embeddings.embed_pending(slug, everything=everything))
+    _print_embed(pipeline.embed(slug, everything=everything))
 
 
 def _print_embed(report: embeddings.EmbedReport) -> None:

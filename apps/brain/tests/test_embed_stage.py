@@ -249,3 +249,12 @@ def test_a_chunk_still_pending_after_its_write_stops_with_a_reason(fresh_synthet
     report = embed_pending(fresh_synthetic, FakeEmbedder(), batch=4, on_event=events.append)
     assert report.embedded == 4 and "still pending" in report.skipped_reason
     assert (events[-1].stage, events[-1].status) == ("embed", "skipped")
+
+
+def test_a_batch_that_stores_nothing_skips_with_a_reason(fresh_synthetic, monkeypatch):
+    monkeypatch.setattr(loader, "set_embeddings", lambda slug, rows, model: 0)
+    events = []
+    report = embed_pending(fresh_synthetic, FakeEmbedder(), batch=4, on_event=events.append)
+    assert report.embedded == 0
+    assert "No vectors were stored" in report.skipped_reason
+    assert events[-1].status == "skipped" and events[-1].message == report.skipped_reason

@@ -106,10 +106,13 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   relationships; relationship queries `MATCH` both ends, so dangling links are dropped and counted.
 - **Chunks** (`chunking.py`, loader): `Chunk -[:FROM]-> WorkItem|Document`, kinds `comment`
   (uid `chunk:<comment uid>`), `work_item` (`chunk:<uid>:body`, title + body) and `document`
-  (`chunk:<uid>:<idx>`, cut by `split_text` at 1200 chars; a shorter document loses its extra
-  chunks). Each carries `text_hash`. Before the embed stage, `pipeline.ingest` runs
-  `loader.backfill_body_chunks` (`load/backfill_body_chunks`): a work item with no body chunk
-  (an upgraded graph; the cursor skips old items) gets one, with the same text a load writes.
+  (`chunk:<uid>:<idx>`). Every text is cut by `split_text` at 1200 chars (bge reads only 512
+  tokens); a comment or body keeps its uid for piece 0 and adds `:<idx>` for the rest, and a
+  shorter text loses its extra chunks. Each carries `idx` and `text_hash`. Comment counts,
+  `get_entity` neighbours and the Graph page take only piece 0 (`coalesce(c.idx, 0) = 0`).
+  `pipeline.embed` (end of ingest, and `brain embed`) first runs `loader.backfill_chunks`: text
+  still without chunks or held whole in one chunk with no idx (an upgraded graph; the cursor
+  skips old items) is cut as a load would, then `embed_pending`.
 - **`embeddings.py`**: `Embedder` protocol (`passages` / `query`), fastembed provider
   (`BAAI/bge-base-en-v1.5`, 768 dims, ONNX on CPU, no key), `get_embedder()` (None when
   `EMBEDDING_PROVIDER=none`) / `set_embedder()`. `embed_pending` is incremental: it embeds chunks
@@ -117,7 +120,10 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   `embedded_hash` first). Bot text (comments by, and bodies of work items authored by, an
   `is_bot` Person) is never embedded, and `semantic_search` filters it out too. A model that
   cannot load or run makes the stage `skipped` with the reason, never a failed build; its first
-  event says the model is loading; progress events go out at most once a second.
+  event says the model is loading; progress events go out at most once a second. A failed model
+  load is remembered for 5 minutes; a question asked while the model loads is refused, not kept
+  waiting. `semantic_search` uses only vectors from the current model and raises
+  `EmbeddingUnavailable` (a sentence) when the graph has none.
 - **`pipeline.py`** is the source-agnostic glue the CLI calls. Ingest is incremental: each source
   has a `SyncState` node holding a cursor; records older than it are skipped, records without a
   timestamp (people, teams, ownership, links) are always loaded. `--full` ignores the cursor.

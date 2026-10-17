@@ -10,10 +10,10 @@ are always loaded, which is cheap and keeps edges complete.
 `full=True` ignores the cursor, and so does a changed `window.since` (widening the window must
 pull in records older than the cursor).
 
-After the sources, every work item still without a body chunk gets one (graphs built before
-work items had them; the cursor skips old items), then the embed stage gives new or changed
-Chunk text its vectors (see `embeddings.embed_pending`); without a usable model it is skipped,
-never failed.
+After the sources, `embed` runs: text still without chunks, or held whole in one chunk (graphs
+built before work items had chunks or long text was cut; the cursor skips old items), is cut
+into chunks, then the embed stage gives new or changed Chunk text its vectors (see
+`embeddings.embed_pending`); without a usable model it is skipped, never failed.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from brain import adapters, embeddings, loader
 from brain.canonical import CanonicalRecord
 from brain.config import CompanyConfig, load_company, raw_dir
+from brain.embeddings import EmbedReport
 from brain.events import BuildEvent, OnEvent, noop
 from brain.normalize import normalize
 
@@ -41,7 +42,7 @@ class SourceResult:
 class IngestReport:
     sources: list[SourceResult] = field(default_factory=list)
     load: loader.LoadReport = field(default_factory=loader.LoadReport)
-    embed: embeddings.EmbedReport = field(default_factory=embeddings.EmbedReport)
+    embed: EmbedReport = field(default_factory=EmbedReport)
 
 
 _NO_ADAPTER = "no adapter registered"
@@ -156,6 +157,13 @@ def ingest(
         latest = next_cursor(records, cursor, datetime.now(UTC))
         loader.set_sync_state(slug, adapter.name, key, latest, window_since, result.loaded)
         emit(BuildEvent(slug, "load", "done", key, count=sum(loaded.written.values())))
-    loader.backfill_body_chunks(slug)  # graphs built before work items had body chunks
-    report.embed = embeddings.embed_pending(slug, on_event=emit)
+    report.embed = embed(slug, on_event=emit)
     return report
+
+
+def embed(slug: str, everything: bool = False, on_event: OnEvent | None = None) -> EmbedReport:
+    """The embed step, as ingest ends and `brain embed` runs it: first cut the text that graphs
+    built before chunking still hold whole (`loader.backfill_chunks`), then give every pending
+    chunk its vector. `everything` embeds every chunk again."""
+    loader.backfill_chunks(slug)
+    return embeddings.embed_pending(slug, everything=everything, on_event=on_event)

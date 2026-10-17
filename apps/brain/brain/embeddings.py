@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -50,13 +51,23 @@ class Embedder(Protocol):
 
 class FastEmbedEmbedder:
     """fastembed's TextEmbedding. The model loads on the first call (and downloads into
-    data/models the first time); `dim` is checked against the loaded model right away."""
+    data/models the first time); `dim` is checked against the loaded model right away.
 
-    def __init__(self, model: str, dim: int) -> None:
+    A failed load (no network, a wrong EMBEDDING_DIM) is remembered for `RETRY_AFTER` seconds:
+    every call in that time raises the same sentence at once instead of trying the download
+    again (semantic search asks on every question). One thread loads; a question (`query`)
+    that comes while it does is refused with a sentence rather than kept waiting for a
+    download, while the embed stage (`passages`) waits for it."""
+
+    RETRY_AFTER = 300.0  # seconds a failed load is remembered
+
+    def __init__(self, model: str, dim: int, clock: Callable[[], float] = time.monotonic) -> None:
         self.model = model
         self.dim = dim
         self._engine: Any = None
         self._lock = threading.Lock()
+        self._clock = clock
+        self._failed: tuple[float, str] | None = None  # when the last load failed, and why
 
     def check_dim(self, actual: int) -> None:
         if actual != self.dim:
@@ -66,27 +77,50 @@ class FastEmbedEmbedder:
                 "index), or choose a model with that size."
             )
 
-    def _load(self) -> Any:
-        with self._lock:
-            if self._engine is None:
-                try:
-                    from fastembed import TextEmbedding
+    def _raise_recent_failure(self) -> None:
+        if self._failed is not None and self._clock() - self._failed[0] < self.RETRY_AFTER:
+            raise EmbeddingUnavailable(self._failed[1])
 
-                    engine = TextEmbedding(self.model, cache_dir=str(MODEL_CACHE))
-                    size = engine.embedding_size
-                except Exception as exc:
-                    raise EmbeddingUnavailable(
-                        f"Could not load embedding model {self.model}: {exc}"
-                    ) from exc
-                self.check_dim(size)
-                self._engine = engine
+    def _load(self, wait: bool) -> Any:
+        if self._engine is not None:
             return self._engine
+        self._raise_recent_failure()
+        if not self._lock.acquire(blocking=wait):
+            raise EmbeddingUnavailable(
+                f"Embedding model {self.model} is still loading (the first run downloads it). "
+                "Try again in a minute."
+            )
+        try:
+            if self._engine is None:
+                self._raise_recent_failure()  # the load this thread waited on failed
+                try:
+                    self._engine = self._new_engine()
+                except EmbeddingUnavailable as exc:
+                    self._failed = (self._clock(), str(exc))
+                    raise
+                self._failed = None
+            return self._engine
+        finally:
+            self._lock.release()
+
+    def _new_engine(self) -> Any:
+        try:
+            from fastembed import TextEmbedding
+
+            engine = TextEmbedding(self.model, cache_dir=str(MODEL_CACHE))
+            size = engine.embedding_size
+        except Exception as exc:
+            raise EmbeddingUnavailable(
+                f"Could not load embedding model {self.model}: {exc}"
+            ) from exc
+        self.check_dim(size)
+        return engine
 
     def passages(self, texts: list[str]) -> list[list[float]]:
-        return [v.tolist() for v in self._load().passage_embed(texts)]
+        return [v.tolist() for v in self._load(wait=True).passage_embed(texts)]
 
     def query(self, text: str) -> list[float]:
-        return next(iter(self._load().query_embed(text))).tolist()
+        return next(iter(self._load(wait=False).query_embed(text))).tolist()
 
 
 _lock = threading.Lock()
@@ -190,8 +224,11 @@ def embed_pending(
             e.model,
         )
         report.embedded += written
-        if written == 0:
-            break  # nothing was stored, so the same batch would come back
+        if written == 0:  # the same batch would come back: stop, and say so
+            reason = (
+                f"No vectors were stored for {len(rows)} chunks (were they deleted meanwhile?)."
+            )
+            return _skip(slug, report, reason, emit)
         done.update(uids)
         # Progress, and the point where a build job's stop (raised by on_event) takes effect.
         now = _clock()

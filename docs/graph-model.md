@@ -47,7 +47,7 @@ accessor.
 | `Change` | `sha`, `date`, `ts`, `kind` (feat/fix/perf/ci/build/docs/refactor/other), `subject` | commits |
 | `WorkItem` | `kind` (pull_request/issue/ticket/thread), `number`, `title`, `body`, `state`, `created_at`, `closed_at`, `merged_at`, `labels`, `container`; tickets also `key`, `status_category` (backlog/todo/in_progress/done/canceled), `priority` (urgent/high/medium/low), `priority_rank` (1-4, 5 = none; null for PRs and issues), `due_date`, `due_ts` | PRs, issues, tickets, chat threads |
 | `Document` | `path`, `title`, `body`, `updated_at` | repo markdown, published docs folders |
-| `Chunk` | `kind` (`comment` / `work_item` / `document`), `text`, `text_hash`, `ts`, `embedding` (vector), `embedded_hash`, `embed_model`; comments also `author_uid`, `created_at`; work-item chunks `created_at`; document chunks `idx` | text for semantic search, one `FROM` its source; see below |
+| `Chunk` | `kind` (`comment` / `work_item` / `document`), `text`, `idx`, `text_hash`, `ts`, `embedding` (vector), `embedded_hash`, `embed_model`; comments also `comment_uid`, `author_uid`, `created_at`; work-item chunks `created_at` | text for semantic search, one `FROM` its source; see below |
 | `Decision` | `summary`, `rationale`, `valid_from`, `valid_to` | defined now, written later by the Builder agent |
 | `Episode` | `agent`, `run_at`, `input`, `summary` | agent memory, written later |
 | `SyncState` | `adapter`, `key`, `cursor`, `window_since`, `last_run`, `records` | ingestion bookkeeping, one per configured source |
@@ -56,13 +56,20 @@ A `Chunk` is a piece of text with a vector. Three kinds, each `FROM` its source:
 
 | `kind` | uid | Text |
 |---|---|---|
-| `comment` | `chunk:<comment uid>` | one comment |
-| `work_item` | `chunk:<work item uid>:body` | the title, then the body, of a PR, issue, ticket or thread |
-| `document` | `chunk:<document uid>:<idx>` | the title, then the body, cut at blank lines into pieces of up to 1200 characters; `idx` is the piece's position. A document that shrinks loses its extra chunks |
+| `comment` | `chunk:<comment uid>`, then `chunk:<comment uid>:<idx>` | one comment |
+| `work_item` | `chunk:<work item uid>:body`, then `chunk:<work item uid>:body:<idx>` | the title, then the body, of a PR, issue, ticket or thread |
+| `document` | `chunk:<document uid>:<idx>` | the title, then the body |
 
-Before the embed stage, every ingest backfills a `work_item` chunk for any WorkItem that has
-none (`load/backfill_body_chunks`: graphs built before body chunks existed, whose old items the
-sync cursor skips); its `text_hash` is filled when it is embedded.
+Each text is cut at blank lines into pieces of up to 1200 characters (`chunking.split_text`),
+because the embedding model reads only the start of a text (bge: 512 tokens); `idx` is the
+piece's position. A comment or work-item text keeps its old uid for piece 0, so a short text is
+one chunk as before, and only pieces 1 and up get the `:<idx>` suffix; comment pieces carry
+`comment_uid`. A text that shrinks loses its extra chunks. Counts of comments (`COMMENTED_ON`,
+the Graph page) and `get_entity`'s neighbours take only piece 0.
+
+Before the embed stage (every ingest, and `brain embed`), `loader.backfill_chunks` cuts text
+that graphs built earlier still hold whole: a WorkItem with no body chunk, and a body or comment
+chunk with no `idx` (written before long text was cut), whose old items the sync cursor skips.
 
 `text_hash` fingerprints `text`. The embed stage runs after the sources are loaded and writes
 `embedding`, `embedded_hash` (the `text_hash` it embedded) and `embed_model`. A chunk is embedded
@@ -71,7 +78,9 @@ costs nothing for unchanged text. `brain embed --all` clears `embedded_hash` to 
 once more. Bot text (a comment by, or the body of a work item authored by, a Person with
 `is_bot`) is never embedded, and `semantic_search` never returns it. `get_entity` lists comment
 chunks as neighbours but not work-item or document chunks (their text is the node's `body`). With `EMBEDDING_PROVIDER=none`, or a model that cannot load, chunks not yet embedded stay without a
-vector and semantic search is unavailable. A vector never leaves the graph: no tool row, `get_entity` result
+vector and semantic search is unavailable. `semantic_search` compares the question only with
+vectors from the current model, and says so in a sentence (not an empty result) when the graph
+has no vectors yet or only another model's. A vector never leaves the graph: no tool row, `get_entity` result
 or Graph page node carries one.
 
 People and systems get source-free uids, so the same login seen in GitHub and in a Slack export

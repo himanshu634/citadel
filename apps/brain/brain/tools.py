@@ -408,7 +408,26 @@ def _semantic(p: dict[str, Any]) -> dict[str, Any]:
     embedder = get_embedder()
     if embedder is None:
         raise EmbeddingUnavailable(SEMANTIC_OFF)
-    return {**out, "vector": embedder.query(p["text"])}
+    return {**out, "vector": embedder.query(p["text"]), "model": embedder.model}
+
+
+def _no_semantic_hits(slug: str, model: str) -> None:
+    """A semantic search found nothing: raise when that is because the graph has no vectors
+    from `model` (none at all, or another model's), so the agent hears why instead of reading
+    "nothing matched". Returns when vectors from `model` are there (the filters left nothing)."""
+    models = {r["model"]: r["n"] for r in db.run(slug, "load/embedded_models", read_only=True)}
+    if model in models:
+        return
+    if not models:
+        raise EmbeddingUnavailable(
+            f"Nothing in this company's graph is embedded yet, so semantic search finds nothing. "
+            f"Run make embed SLUG={slug}."
+        )
+    others = ", ".join(str(m) for m in models)
+    raise EmbeddingUnavailable(
+        f"This company's text was embedded with {others}, not {model}, so semantic search "
+        f"cannot compare it with the question. Run make embed SLUG={slug} to embed it again."
+    )
 
 
 def _person(p: dict[str, Any]) -> dict[str, Any]:
@@ -560,6 +579,8 @@ def call(slug: str, name: str, **params: Any) -> list[_Model]:
     if "vector" in query_params and query_params["vector"] is None:  # semantic, blank question
         return []
     rows = db.run(slug, tool.query, query_params, read_only=True)
+    if not rows and "vector" in query_params:
+        _no_semantic_hits(slug, query_params["model"])
     return [tool.row.model_validate(_plain(r)) for r in rows]
 
 
