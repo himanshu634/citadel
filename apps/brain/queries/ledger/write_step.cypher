@@ -1,7 +1,6 @@
 // purpose: Write one step of a review for the activity trail: a graph-tool call of a pm, qa or
 //          keeper job (written `running` when it starts), or a job's submit (written ended).
-//          Written again with the same (review, n), it is overwritten. A step written on a
-//          running review is its heartbeat.
+//          Written again with the same (review, n), it is overwritten.
 // params:  $review (Review uid), $n (1.. within the review), $actor, $tool,
 //          $kind ('graph' | 'submit'), $input (JSON text), $status ('running' | 'done' |
 //          'failed'), $count, $error (each may be null), $touched: [brain uid], $at (ISO)
@@ -21,6 +20,5 @@ SET s.actor = $actor,
     s.error = $error,
     s.touched = $touched,
     s.started_at = $at,
-    s.ended_at = CASE WHEN $status = 'running' THEN null ELSE $at END,
-    r.heartbeat_at = CASE WHEN r.state = 'running' THEN $at ELSE r.heartbeat_at END
+    s.ended_at = CASE WHEN $status = 'running' THEN null ELSE $at END
 RETURN s.review AS review, s.n AS n

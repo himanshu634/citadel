@@ -450,26 +450,6 @@ def test_a_stop_asked_during_a_job_lets_that_job_write():
     assert [c.status for c in store.consults.values()].count("answered") == 1
 
 
-def test_a_review_beats_at_every_job_boundary():
-    """Each job (no graph-tool call needed) refreshes the review's heartbeat before it runs, so a
-    start or a restart elsewhere sees the review is alive (store: REVIEW_STALE_SECONDS)."""
-    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
-    seed_gap(store, GROUNDED)
-    beats: list[str] = []
-    write = store.write
-
-    def recording(name, db_user, params):
-        if name == "ledger/review_heartbeat":
-            beats.append(params["uid"])
-        return write(name, db_user, params)
-
-    store.write = recording  # type: ignore[method-assign]
-    r, _ = run_review(store, brain, graph_run=lambda slug, name, **p: [])
-    assert r.state == "done"
-    jobs = [e for e in store.log if e.action == "episode"]
-    assert beats == [r.uid] * len(jobs) and jobs  # one beat per job: pm, qa consult, decide, ...
-
-
 # --- noticing ---------------------------------------------------------------------------------
 
 
