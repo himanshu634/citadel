@@ -17,6 +17,7 @@
 		AgentRun,
 		ChatList,
 		CitedAnswer,
+		ClaimApproval,
 		CompanyForm,
 		CompanyRail,
 		ConfigPreview,
@@ -26,6 +27,7 @@
 		GraphPath,
 		GraphWalk,
 		Input,
+		KeeperLog,
 		Menu,
 		ModelPicker,
 		NodeChip,
@@ -55,7 +57,8 @@
 	import * as builds from './build-samples';
 	import { syntheticGraph } from './graph-samples';
 	import { doneRun, failedRun, runningRun } from './activity-samples';
-	import { doingNow, trailOf } from '$lib/activity';
+	import * as keeper from './keeper-samples';
+	import { doingNow, hereLabel, trailOf } from '$lib/activity';
 	import * as walks from './walk-samples';
 	import * as chatSamples from './chat-samples';
 	import * as sourceSamples from './source-samples';
@@ -433,6 +436,11 @@
 	const runningTrail = trailOf(runningRun, drawnUid);
 	const doneTrail = trailOf(doneRun, drawnUid);
 	const failedTrail = trailOf(failedRun, drawnUid);
+	const keeperTrail = trailOf(keeper.keeperRun, drawnUid);
+	// The approval card's live sample: any name approves after a short wait.
+	let approverName = $state('');
+	const approveLater = () => new Promise<null>((done) => setTimeout(() => done(null), 900));
+	const neverDecides = () => new Promise<null>(() => {});
 	let mapSelected = $state<string | null>('person:alice');
 	const graphNode = (uid: string) => syntheticGraph.nodes.find((n) => n.uid === uid);
 	const territoryOf = (uid: string) =>
@@ -926,6 +934,10 @@
 				<figcaption>Answer citing an MCP result next to a graph node</figcaption>
 			</figure>
 			<figure>
+				<WalkAnswer answer={keeper.withClaim} />
+				<figcaption>Answer citing a Keeper claim (the Keeper mark) next to a source</figcaption>
+			</figure>
+			<figure>
 				<WalkSteps steps={walks.rough} />
 				<GraphWalk steps={[]} />
 				<WalkAnswer answer={walks.stopped} />
@@ -1275,6 +1287,98 @@
 			<div>
 				<h3 class="sub">Failed, no steps</h3>
 				<AgentRun run={failedRun} trail={failedTrail} />
+			</div>
+			<div>
+				<h3 class="sub">Keeper review, working now</h3>
+				<AgentRun run={keeper.keeperRun} trail={keeperTrail} />
+			</div>
+		</div>
+		<h3 class="sub">Keeper review on the map: {hereLabel(keeper.keeperRun)}</h3>
+		<div class="map-sample short">
+			<TerritoryMap
+				view={syntheticGraph}
+				layout={mapLayout}
+				trail={keeperTrail}
+				here={hereLabel(keeper.keeperRun)}
+				scrollZoom={false}
+			/>
+		</div>
+	</Card>
+
+	<Card title="Claim approval">
+		<p class="note">
+			A Keeper claim waiting for a lead, in the Systems page's rail: why it needs one in words, the
+			gap it answers, its evidence, then a typed name (no sign-in), an optional reason, and Approve or
+			Reject. Type a name and press Approve; an empty name says what is missing.
+		</p>
+		<div class="runs">
+			<div>
+				<h3 class="sub">Waiting (try it)</h3>
+				<ClaimApproval
+					claim={keeper.pendingClaim}
+					gapText={keeper.gapTexts.get('gap:refunds')}
+					evidence={keeper.pendingEvidence}
+					bind:name={approverName}
+					ondecide={approveLater}
+				/>
+			</div>
+			<div>
+				<h3 class="sub">Sending the approval</h3>
+				<ClaimApproval claim={keeper.pendingClaim} evidence={keeper.pendingEvidence} name="Dana Lee" busy="approve" ondecide={neverDecides} />
+			</div>
+			<div>
+				<h3 class="sub">Someone decided first (409)</h3>
+				<ClaimApproval
+					claim={keeper.pendingClaim}
+					evidence={keeper.pendingEvidence}
+					name="Dana Lee"
+					failure={{ message: 'Someone already decided this claim. The list now shows where it stands.', gone: true }}
+					ondecide={approveLater}
+				/>
+			</div>
+			<div>
+				<h3 class="sub">Brain unavailable (503)</h3>
+				<ClaimApproval
+					claim={keeper.pendingClaim}
+					evidence={keeper.pendingEvidence}
+					name="Dana Lee"
+					failure={{ message: 'The brain of synthetic is not there (brain_synthetic is missing). Build the company, then approve again.' }}
+					ondecide={approveLater}
+				/>
+			</div>
+			<div>
+				<h3 class="sub">Name refused (422)</h3>
+				<ClaimApproval
+					claim={keeper.pendingClaim}
+					evidence={keeper.pendingEvidence}
+					failure={{ field: 'by', message: 'Type your name, up to 80 characters.' }}
+					ondecide={approveLater}
+				/>
+			</div>
+			<div>
+				<h3 class="sub">Every reason, no evidence, long text</h3>
+				<ClaimApproval claim={keeper.longClaim} gapText="Why do invoice emails go out from a queue now and not from checkout?" evidence={[]} ondecide={approveLater} />
+			</div>
+		</div>
+	</Card>
+
+	<Card title="Keeper log">
+		<p class="note">
+			The Keeper's log in the Systems page's rail, newest first: who did what, in words, then why. An
+			auto-accept reads as the Keeper. A line about a waiting claim links to its card.
+		</p>
+		<div class="runs">
+			<div>
+				<h3 class="sub">A review and a decision</h3>
+				<KeeperLog
+					entries={keeper.logEntries}
+					gapText={(uid) => keeper.gapTexts.get(uid) ?? null}
+					claimHref={(uid) => (uid === keeper.pendingClaim.uid ? '#claim-approval' : null)}
+				/>
+			</div>
+			<div>
+				<h3 class="sub">Empty</h3>
+				<KeeperLog entries={[]} />
 			</div>
 		</div>
 	</Card>

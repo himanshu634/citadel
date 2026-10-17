@@ -115,6 +115,20 @@ export function doingNow(run: ActivityRun): string {
 	return step ? stepLine(step) : 'Thinking about the next step';
 }
 
+/**
+ * The marker's label on the map: who is working and on what. In a Keeper review the running
+ * step's actor (pm, qa or keeper) is the one at work, not the review.
+ */
+export function hereLabel(run: ActivityRun): string {
+	const step = run.steps.findLast((s) => s.status === 'running');
+	return `${actorName(step?.actor ?? run.actor)} · ${doingNow(run)}`;
+}
+
+/** What the rail calls a run: "Keeper review" or the agent's name. */
+export function runLabel(run: ActivityRun): string {
+	return run.source === 'keeper' ? 'Keeper review' : actorName(run.actor);
+}
+
 /** "4 steps · 2 not on the map", the line under a run's title. */
 export function stepsSummary(run: ActivityRun, trail: Trail): string {
 	const total = run.steps.length;

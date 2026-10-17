@@ -644,7 +644,7 @@ export interface Feedback {
 export interface ActivityStep {
 	/** 1-based, in the order the agent ran them. */
 	n: number;
-	/** `brain` for Ask; `keeper`, `pm`, `qa` once Keeper reviews are listed. */
+	/** `brain` for Ask; `keeper`, `pm` or `qa` for a step of a Keeper review. */
 	actor: string;
 	tool: string;
 	kind: CallKind;
@@ -656,13 +656,14 @@ export interface ActivityStep {
 	touched: string[];
 }
 
-/** One run of one agent: today an Ask turn. Times are ISO strings. */
+/** One run of one agent: an Ask turn or a Keeper review. Times are ISO strings. */
 export interface ActivityRun {
-	/** `ask:<thread id>:<turn n>`. */
+	/** `ask:<thread id>:<turn n>` or `keeper:<review uid>`. */
 	id: string;
-	source: 'ask';
+	source: 'ask' | 'keeper';
+	/** `brain` for Ask, `keeper` for a review (its steps name pm, qa or keeper). */
 	actor: string;
-	/** What the run was for: the question. */
+	/** What the run was for: the question, or the review's first gap. */
 	title: string;
 	status: ChatStatus;
 	started_at: string;
@@ -677,4 +678,116 @@ export interface Activity {
 	runs: ActivityRun[];
 	/** Some run is still going, so the page keeps watching. */
 	running: boolean;
+}
+
+// --- The Keeper (/api/companies/{slug}/keeper/...; agents/keeper/model.py) ------------------
+// Timestamps are ISO-8601 UTC strings. Records point at brain_<slug> nodes by uid.
+
+export type GapKind = 'failed_question' | 'thumbs_down' | 'stale_owner' | 'unowned_hot_system';
+export type GapStatus = 'open' | 'in_review' | 'resolved' | 'needs_person' | 'dismissed';
+export type ClaimKind = 'owner' | 'expert' | 'decision' | 'fact' | 'link';
+export type ClaimStatus =
+	| 'pending_approval'
+	| 'accepted'
+	| 'rejected'
+	| 'superseded'
+	| 'stale'
+	| 'conflicts_with_source';
+/** Why a claim waits for a lead (`agents/keeper/rules.py`), in this order. */
+export type CriticalReason = 'replaces_claim' | 'high_impact_system' | 'no_source_evidence';
+
+/** Something the brain could not answer or shows on its own (a stale owner, an unowned hot system). */
+export interface Gap {
+	uid: string;
+	kind: GapKind;
+	text: string;
+	norm: string | null;
+	status: GapStatus;
+	count: number;
+	/** Rejected claims so far; at 2 the gap needs a person. */
+	attempts: number;
+	created_at: string;
+	updated_at: string;
+	trace_ids: string[];
+	about: string[];
+	subject: string | null;
+	reason: string | null;
+}
+
+/** What the Keeper holds true beyond the sources. */
+export interface Claim {
+	uid: string;
+	kind: ClaimKind;
+	/** The brain uid it is about, e.g. system:Billing. */
+	subject: string;
+	statement: string;
+	value: string | null;
+	about: string[];
+	/** brain uids that support it. */
+	evidence: string[];
+	status: ClaimStatus;
+	critical: boolean;
+	critical_reasons: string[];
+	/** The source fact it contradicts (conflicts_with_source). */
+	conflict: string | null;
+	valid_from: string | null;
+	valid_to: string | null;
+	author: string;
+	/** The name the lead typed (not verified: no sign-in), or "auto". */
+	approved_by: string | null;
+	why: string | null;
+	gap: string | null;
+	created_at: string;
+	updated_at: string;
+	/** pm follow-up jobs that opened no task: after one, the claim is not tried again. */
+	follow_up_tries: number;
+}
+
+/** One line of the Keeper's append-only log. */
+export interface LogEntry {
+	uid: string;
+	at: string;
+	/** "keeper", "pm", "qa", an approver's name, or "auto". */
+	actor: string;
+	/** gap_opened, consulted, claim_queued, claim_written, ..., review_done. */
+	action: string;
+	why: string | null;
+	gap: string | null;
+	claim: string | null;
+	evidence: string[];
+}
+
+/** The task pm opens for an accepted claim. */
+export interface FollowUp {
+	uid: string;
+	claim: string;
+	title: string;
+	body: string;
+	by: string;
+	status: 'open' | 'done';
+	created_at: string;
+}
+
+/** One bounded review run; at most one per company is running. */
+export interface Review {
+	uid: string;
+	slug: string;
+	trigger: 'build' | 'manual' | 'approval';
+	state: 'running' | 'done' | 'stopped' | 'failed' | 'skipped';
+	budget: number;
+	started_at: string;
+	ended_at: string | null;
+	/** Why it ended early, e.g. no_api_key, restart, stale, brain_unavailable. */
+	stop: string | null;
+	/** Its last sign of life (start, step, job boundary); null on reviews from before it. */
+	heartbeat_at?: string | null;
+	/** The gaps it picked, in pick order. */
+	gaps: string[];
+	gap_text: string | null;
+}
+
+/** A lead's approve or reject. `by` is 1..80 characters once trimmed, `why` at most 500. */
+export interface ApprovalIn {
+	by: string;
+	why: string;
 }

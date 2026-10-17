@@ -11,21 +11,24 @@ graph TB
   end
 
   subgraph GRAPH["FalkorDB"]
-    G[("brain_slug<br/>Person · Team · System<br/>Change · WorkItem · Document<br/>Decision · Claim (curator)")]
+    G[("brain_slug<br/>Person · Team · System<br/>Change · WorkItem · Document<br/>Claim, projected by the Keeper")]
     IDX["Indexes<br/>range · full-text · vector"]
-    AG[("agent_slug<br/>chat checkpoints")]
+    AG[("agent_slug<br/>chat checkpoints<br/>and chat history")]
+    LEDGER[("keeper_slug<br/>the Keeper's ledger: gaps,<br/>consults, claims, follow-ups,<br/>log, review runs")]
     G --- IDX
   end
 
   subgraph READ["Read side"]
-    TOOLS["Named tools<br/>16 Cypher files, typed params,<br/>rows carry uids + urls"]
+    TOOLS["Named tools<br/>17 Cypher files, typed params,<br/>rows carry uids and urls"]
     LOOP["Brain agent loop<br/>Claude picks tools,<br/>never writes Cypher"]
     CHECK{"Grounding check<br/>cites only uids<br/>it has seen"}
   end
 
   OUT["Answer<br/>sources + graph path"]
   TRACE["Traces<br/>no-answer, zero-source,<br/>thumbs down"]
-  API["HTTP API · MCP server · CLI"]
+  API["HTTP API · CLI"]
+  MCPS["MCP server, planned<br/>the same tools, read-only"]
+  KEEP["Keeper review run<br/>consult pm and qa, decide,<br/>check: evidence, sources win,<br/>critical rule"]
 
   CFG -.-> NORM
   LOAD -->|"idempotent writes"| G
@@ -38,10 +41,17 @@ graph TB
   OUT --> TRACE
   API --> TOOLS
   API --> LOOP
+  MCPS -.-> TOOLS
+  TRACE -->|"failed turn, thumbs down: gap"| LEDGER
+  LOAD -.->|"after a build"| KEEP
+  KEEP <-->|"gaps, claims, log"| LEDGER
+  KEEP -->|"project accepted claims<br/>ABOUT and EVIDENCE edges"| G
 
   classDef engine fill:#e0f2fe,stroke:#0369a1,stroke-width:2px
   classDef thin fill:#f8fafc,stroke:#94a3b8
   classDef gate fill:#fff7ed,stroke:#d97706,stroke-width:2px
+  classDef planned stroke-dasharray: 6 4
   class AD,CAN,NORM,LOAD,G,IDX,TOOLS engine
-  class CHECK gate
-  class CFG,AG,LOOP,OUT,TRACE,API thin
+  class CHECK,KEEP,LEDGER gate
+  class CFG,AG,LOOP,OUT,TRACE,API,MCPS thin
+  class MCPS planned

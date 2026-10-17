@@ -29,11 +29,13 @@ export { default as BuildProgress } from './components/brain/BuildProgress.svelt
 export { default as AgentRun } from './components/brain/AgentRun.svelte';
 export { default as ChatList } from './components/brain/ChatList.svelte';
 export { default as CitedAnswer } from './components/brain/CitedAnswer.svelte';
+export { default as ClaimApproval } from './components/brain/ClaimApproval.svelte';
 export { default as CompanyForm } from './components/brain/CompanyForm.svelte';
 export { default as ConfigPreview } from './components/brain/ConfigPreview.svelte';
 export { default as EntityRow } from './components/brain/EntityRow.svelte';
 export { default as GraphPath } from './components/brain/GraphPath.svelte';
 export { default as GraphWalk } from './components/brain/GraphWalk.svelte';
+export { default as KeeperLog } from './components/brain/KeeperLog.svelte';
 export { default as ModelPicker } from './components/brain/ModelPicker.svelte';
 export { default as NodeInspector } from './components/brain/NodeInspector.svelte';
 export { default as WalkAnswer } from './components/brain/WalkAnswer.svelte';

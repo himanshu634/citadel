@@ -5,30 +5,32 @@ such as the Risk watchdog cannot change the brain whatever its prompt says. This
 one source for both layers: the in-memory store refuses a write it does not allow, and
 `setuser_commands` renders the same table as `ACL SETUSER` lines for FalkorDB.
 
-Graph kinds: `brain` (brain_<slug>), `sim` (sim_<slug>_*), `agent` (agent_<slug>), and
-`mem:<role>` (mem_<slug>_<role>); `mem:*` means every role's memory graph.
+Graph kinds: `brain` (brain_<slug>), `sim` (sim_<slug>_*), `agent` (agent_<slug>), `keeper`
+(keeper_<slug>, the Keeper's records) and `mem:<role>` (mem_<slug>_<role>); `mem:*` means every
+role's memory graph.
 """
 
 from __future__ import annotations
 
 from brain.config import graph_name
 
-from agents.graphs import agent_graph_name
+from agents.graphs import agent_graph_name, keeper_graph_name
 
 R, RW = "R", "RW"
 
 PERMISSIONS: dict[str, dict[str, str]] = {
     "citadel_loader": {"brain": RW},
     "citadel_orchestrator": {"brain": RW, "sim": RW},
-    "citadel_pm": {"brain": RW, "sim": RW, "mem:*": R, "mem:pm": RW},
+    "citadel_pm": {"brain": RW, "sim": RW, "keeper": RW, "mem:*": R, "mem:pm": RW},
     "citadel_dev": {"brain": RW, "sim": RW, "mem:dev": RW, "mem:qa": R},
-    "citadel_qa": {"brain": RW, "sim": RW, "mem:qa": RW},
+    "citadel_qa": {"brain": RW, "sim": RW, "keeper": RW, "mem:qa": RW},
     "citadel_devops": {"brain": RW, "sim": RW, "mem:devops": RW},
     "citadel_builder": {"brain": RW, "sim": RW},
     "citadel_critic": {"brain": RW, "sim": RW},
     "citadel_risk": {"brain": R, "sim": R, "mem:risk": RW},
-    "citadel_brain": {"brain": R, "sim": R, "agent": RW},
+    "citadel_brain": {"brain": R, "sim": R, "agent": RW, "keeper": RW},  # Ask opens gaps
     "citadel_reviewer": {"brain": RW, "sim": RW},
+    "citadel_keeper": {"brain": RW, "keeper": RW},
 }
 
 
@@ -42,6 +44,8 @@ def kind_of(slug: str, graph: str) -> str:
         return "brain"
     if graph == agent_graph_name(slug):
         return "agent"
+    if graph == keeper_graph_name(slug):
+        return "keeper"
     if graph.startswith(f"sim_{slug}_"):
         return "sim"
     if graph.startswith(f"mem_{slug}_"):
@@ -68,6 +72,8 @@ def _pattern(slug: str, kind: str) -> str:
         return graph_name(slug)
     if kind == "agent":
         return agent_graph_name(slug)
+    if kind == "keeper":
+        return keeper_graph_name(slug)
     if kind == "sim":
         return f"sim_{slug}_*"
     return f"mem_{slug}_{kind.removeprefix('mem:')}"
@@ -98,4 +104,5 @@ ROLE_OF: dict[str, str] = {
     "citadel_risk": "risk",
     "citadel_brain": "brain",
     "citadel_reviewer": "reviewer",
+    "citadel_keeper": "keeper",
 }

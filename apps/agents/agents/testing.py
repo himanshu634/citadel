@@ -7,6 +7,8 @@
 - A small fake brain (`fake_brain`): canned rows for the graph tools the roles read. Shaped like
   the synthetic company (brain's tests/test_graph.py has the real thing): four systems, a fix PR
   in Auth and in Web app (the regressions QA looks for), Billing and Web app coupled.
+- `FakeBrainFacts`: the Keeper's `BrainFacts` (agents/keeper/decide.py) over the same nodes,
+  recording what is projected and retired, with scripted noticing rows (`notices`).
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from __future__ import annotations
 import json
 import re
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
@@ -28,6 +30,7 @@ from anthropic.types.beta import (
     BetaUsage,
 )
 from brain.config import get_settings
+from brain.keeper import SourceFacts
 from pydantic import BaseModel, Field
 
 from agents import loop
@@ -212,6 +215,18 @@ def _words(text: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 2}
 
 
+def _entity(uid: str) -> list[dict[str, Any]]:
+    """get_entity: the node when the fake brain has it (an item, a system or an expert)."""
+    titles = {u: t for u, _, t, _ in ITEMS}
+    titles |= {s["system_uid"]: s["system"] for s in SYSTEMS}
+    titles |= {f"person:{login}": login for xs in EXPERTS.values() for login, _, _ in xs}
+    if uid not in titles:
+        return []
+    label = "WorkItem" if "pr:" in uid else uid.split(":")[0].title()
+    row = {"uid": uid, "label": label, "title": titles[uid], "body": "", "neighbours": []}
+    return [{**row, "kind": None, "state": None, "url": None, "date": None, "neighbour_count": 0}]
+
+
 def fake_brain(slug: str, name: str, **p: Any) -> list[dict[str, Any]]:
     """A `graph_run`: (slug, tool name, **params) -> rows."""
     if name == "list_systems":
@@ -301,6 +316,8 @@ def fake_brain(slug: str, name: str, **p: Any) -> list[dict[str, Any]]:
             }
         ]
     if name == "get_entity":
+        return _entity(p["uid"])
+    if name == "keeper_notes":
         return []
     raise KeyError(f"fake brain has no tool {name}")
 
@@ -320,3 +337,60 @@ def record_run(store, question, client, thread_id=None, saver=None):
             return event
         rec.on(dict(event))
     raise AssertionError("the run ended without an answer")
+
+
+# --- the Keeper's brain facts -----------------------------------------------------------------
+
+
+def _fact_labels() -> dict[str, str]:
+    labels = {u: "WorkItem" for u, *_ in ITEMS}
+    labels |= {s["system_uid"]: "System" for s in SYSTEMS}
+    labels |= {f"person:{login}": "Person" for xs in EXPERTS.values() for login, _, _ in xs}
+    return labels
+
+
+@dataclass
+class FakeBrainFacts:
+    """`agents.keeper.decide.BrainFacts` without FalkorDB. `labels` are the brain's nodes
+    (uid -> label); `facts` overrides what the sources say about a subject (default: it exists
+    when it is a node, no declared owner, no top expert). `project` mirrors brain.keeper.project:
+    a claim whose subject, or every evidence uid, is not a node is reported missing."""
+
+    labels: dict[str, str] = field(default_factory=_fact_labels)
+    facts: dict[str, SourceFacts] = field(default_factory=dict)
+    high_impact: set[str] = field(default_factory=set)
+    exists: bool = True
+    projected: list[dict[str, Any]] = field(default_factory=list)
+    project_calls: int = 0
+    retired: list[tuple[str, str, str]] = field(default_factory=list)
+    notices: dict[str, list[dict[str, Any]]] = field(default_factory=dict)  # kind -> rows
+    notice_limits: list[int] = field(default_factory=list)
+
+    def notice(self, slug: str, kind: str, limit: int) -> list[dict[str, Any]]:
+        self.notice_limits.append(limit)
+        return [dict(r) for r in self.notices.get(kind, [])[:limit]]
+
+    def evidence(self, slug: str, uids: list[str]) -> dict[str, str]:
+        return {u: self.labels[u] for u in uids if u in self.labels}
+
+    def source_facts(self, slug: str, subject: str) -> SourceFacts:
+        return self.facts.get(subject) or SourceFacts(exists=subject in self.labels)
+
+    def high_impact_systems(self, slug: str) -> set[str]:
+        return set(self.high_impact)
+
+    def project(self, slug: str, claims: list[dict[str, Any]]) -> list[str]:
+        self.project_calls += 1
+        missing = []
+        for c in claims:
+            if c["subject"] in self.labels and any(u in self.labels for u in c["evidence"]):
+                self.projected.append(c)
+            else:
+                missing.append(c["uid"])
+        return missing
+
+    def retire(self, slug: str, uid: str, status: str, valid_to: str) -> None:
+        self.retired.append((uid, status, valid_to))
+
+    def graph_exists(self, slug: str) -> bool:
+        return self.exists

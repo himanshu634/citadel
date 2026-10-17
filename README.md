@@ -15,35 +15,44 @@ that context guess.
 
 Company Brain puts it all in **one graph per company** and answers from it, with the sources and
 the graph path behind every answer. When the graph does not know something, it does not guess:
-the **Brain Curator** finds out, checks the answer, and writes it back. Each question it cannot
-answer makes the brain better for the next person.
+the **Keeper** finds out, checks the answer against the sources, and writes it back. Each question
+the brain cannot answer makes it better for the next person.
+
+**Sources win.** The Keeper only fills in what the sources don't say. When one of its owner or
+expert claims disagrees with the declared owners (CODEOWNERS) or with who does most of the work,
+the source is kept, the claim is set aside, and the `pm` agent opens a follow-up to fix the
+source.
 
 ## What we are building
 
 | Part | What it does | Status |
 |---|---|---|
 | **The Brain** | One FalkorDB graph per company (`brain_<slug>`), built from GitHub, Linear, docs and chat exports: people, teams, systems, changes, work items, documents | Built |
-| **Named graph tools** | 16 read queries, each a reviewed `.cypher` file with typed params. Agents pick a tool and fill its params; no LLM ever writes Cypher | Built |
-| **Ask** | A Claude agent that answers from the tools and may cite only the nodes it has seen. Every turn is traced (no-answer, zero-source, thumbs) | Built |
-| **Role agents** | PM, Developer, QA, DevOps, Reviewer, Risk, Builder and Critic, working a shared task board inside the graph. They never message each other: the graph is the only channel ([spec](docs/agents.md)) | Built offline, FalkorDB work store next |
-| **Brain Curator** | Turns unanswered or stale questions into gaps, consults the role agents, verifies their claims, gets a human yes, and writes the new knowledge into the brain | Planned |
+| **Named graph tools** | 17 read queries, each a reviewed `.cypher` file with typed params. Agents pick a tool and fill its params; no LLM ever writes Cypher | Built |
+| **Ask** (`brain` agent) | A Claude agent that answers from the tools and may cite only the nodes it has seen. Every turn is traced (no-answer, zero-source, thumbs). It answers from the sources first and says when a part comes from the Keeper | Built |
+| **Keeper** (`keeper` agent) | Turns failed questions, thumbs-down answers and what it notices after a build into gaps, consults `pm` and `qa`, checks their claims against the sources and a fixed critical rule, asks a lead to approve the critical ones, writes the rest into the brain, and logs every step | Built: CLI and HTTP API |
+| **`pm` and `qa` agents** | Answer the Keeper's consults with draft claims that cite real nodes; `pm` opens a follow-up for each new owner, expert or decision claim, and for each claim the sources contradict. They never message each other: the Keeper's ledger graph is the only channel ([spec](docs/agents.md)) | Built |
+| **Keeper in the app** | Keeper reviews as steps on the Systems page's agent trail, with Review now, the approvals card and the log in its rail | Planned (lands with the Systems page) |
 | **MCP server** | The same named tools for any outside agent (Claude, an IDE, a Slack bot), read-only, plus one gated `propose_claim` write | Planned |
-| **Designer agent** | A design-review voice for the curator to consult | Planned |
 
 ## How it works
 
-![Company Brain overview: people, the brain, the curator and the role agents](docs/architecture/overview.svg)
+![Company Brain overview: people, the brain, the Keeper and its ledger, pm and qa](docs/architecture/overview.svg)
 
-- **People ask, the brain answers.** A CEO or tech lead asks in the app; any other AI agent asks
-  over MCP. Both go through the same named tools and get an answer with sources and a graph path.
-- **The curator takes over when the brain cannot answer.** The answer may be missing, have no
-  source, get a thumbs down, or contradict a newer fact. The curator works out who should know,
-  posts consult tasks, and collects the replies.
-- **Agents talk through the graph.** Each role agent reads its queue on the shared board, answers
-  with claims that cite real nodes, and writes them back. No agent calls another directly, so
-  every exchange is stored, can be audited and can be replayed.
-- **Only verified knowledge reaches the brain.** The curator checks the evidence and asks the lead
-  to confirm. It then writes the fact as its own dated node, linked to its evidence.
+Four agents: `brain` answers questions, `keeper` keeps the brain right, `pm` and `qa` advise it.
+
+- **People ask, the brain answers.** A CEO or tech lead asks in the app (an outside AI agent will
+  ask over MCP, planned). Both go through the same named tools and get an answer with sources and
+  a graph path.
+- **The Keeper takes over when the brain cannot answer.** A turn with no answer or no source, or
+  an answer that gets a thumbs down, becomes a gap in the Keeper's ledger. After each build the
+  Keeper also notices gaps on its own (stale owners, busy systems nobody owns).
+- **Agents talk through the ledger.** The Keeper posts a consult for `pm` and one for `qa`; each
+  finds it in its own queue and answers with a draft claim that cites real nodes. No agent calls
+  another, so every exchange is stored and can be audited.
+- **Only checked knowledge reaches the brain.** Fixed rules in code, not the model, decide: the
+  evidence must exist, the sources win, and a critical claim waits for a lead's approval. An
+  accepted claim is written into the brain as its own dated `Claim` node, linked to its evidence.
 
 ## Inside the brain
 
@@ -53,7 +62,9 @@ answer makes the brain better for the next person.
   (stable uids, no emails), company rules from `companies/<slug>.yaml` are applied, and the loader
   `MERGE`s everything on uid. Loads are idempotent, and a re-ingest makes no API calls.
 - **FalkorDB is the only store.** Each company is an isolated graph `brain_<slug>`, with range,
-  full-text and vector indexes. Chat state is checkpointed in `agent_<slug>`.
+  full-text and vector indexes. Chat state and history live in `agent_<slug>`. The Keeper's
+  ledger lives in `keeper_<slug>`, so it survives a rebuild; accepted claims are projected back
+  into `brain_<slug>` after every accept and every build.
 - **The read side is deterministic.** Claude chooses which named tool to call. The query is always
   one we wrote and reviewed. A grounding check rejects any answer that cites a node the agent did
   not see.
@@ -62,22 +73,34 @@ answer makes the brain better for the next person.
 
 ## The self-healing loop
 
-![The self-healing loop: gap, curator, consult, verify, approve, write, re-ask](docs/architecture/self-healing-loop.svg)
+![The self-healing loop: gap, review, consult, checks, approve, project, ask again](docs/architecture/self-healing-loop.svg)
 
-The plan for the curator, based on how Graphiti, Mem0, Wikidata and others keep a graph honest:
+Built in `apps/agents/agents/keeper/` (spec: ["The Keeper" in docs/agents.md](docs/agents.md#the-keeper)):
 
-1. **Detect gaps** from live traffic (no answer, zero sources, thumbs down) and from a sweeper
-   that looks for stale owners, expired facts and conflicting decisions.
-2. **Consult the right people.** `experts_for_system` names who knows the area, and the matching
-   role agents get consult tasks on the board.
-3. **Verify before writing.** Every claim must cite uids that really exist. The Critic labels each
-   claim as superseding, contradicting or unrelated to what the brain already holds. A lead
-   approves the result.
-4. **Never delete, invalidate.** New knowledge lives in its own `Claim` / `Decision` nodes, so a
-   re-ingest never overwrites it. An outdated fact gets a `valid_to` date and stays for history.
-   Rejected claims are kept with the reason.
-5. **Prove the fix.** The original question is asked again and becomes an eval case, so the
-   brain cannot quietly forget it.
+1. **Gaps.** A failed Ask turn (no answer, or no source) and a thumbs-down each open a gap in
+   `keeper_<slug>`, written after the answer or rating is sent, so it never slows or fails it. The
+   same question again bumps the gap's count. After each build, noticing queries open gaps for
+   `stale_owner` (the declared owners are not the person doing most of the work) and
+   `unowned_hot_system` (a busy system with no declared owner), at most 10 new ones per run.
+2. **Review run.** One per company at a time: 5 gaps on Review now, 3 after a build. Asked gaps
+   come first, then the most seen. Each gap gets a consult for `pm` and for `qa`; then the Keeper
+   decides: a claim, `needs_person` (nobody could ground it) or `dismiss` (noise).
+3. **Fixed checks.** Every evidence uid must exist in the brain, or the claim is rejected (after 2
+   rejections the gap needs a person). A claim the sources contradict becomes
+   `conflicts_with_source`: never written into the brain, and `pm` opens a follow-up to fix the
+   source. A claim is critical when it replaces an earlier claim, touches a high-impact system (top
+   quarter by co-change coupling) or rests on no commit, work item or document.
+4. **Approve or write.** A critical claim waits for a lead (`agents keeper approve|reject`, or the
+   API). Any other is accepted at once. An accepted claim supersedes the earlier one (`valid_to`
+   set) and is projected into the brain. Nothing is deleted.
+5. **Ask again.** Ask reads accepted claims through `keeper_notes` and `get_entity`, cites them,
+   and says that part comes from the Keeper. After each build every accepted claim is checked
+   again: one the sources now contradict is superseded, and one whose evidence is gone goes stale
+   and reopens its gap.
+
+Every step is a line in the Keeper's log: who, what, why, the evidence, and who approved it (a
+lead's name, or "auto"). Without an API key a review only re-projects claims and notices gaps,
+and is recorded as skipped.
 
 The diagrams are Excalidraw scenes: open the `.excalidraw` files in
 [docs/architecture/](docs/architecture/) at [excalidraw.com](https://excalidraw.com) (File → Open)
@@ -98,15 +121,19 @@ make dev          # API on :8000 + app on http://localhost:5173
 
 With a GitHub token, `make sync` builds `brain_falkordb` from the FalkorDB repo itself. With
 `ANTHROPIC_API_KEY` set, `make ask SLUG=synthetic Q="who knows Auth?"` gets an answer from Claude.
+`make keeper-review SLUG=synthetic OFFLINE=1` runs one Keeper review with scripted agents, no key
+needed.
 
 ## The graph
 
 Full model: **[docs/graph-model.md](docs/graph-model.md)**.
 
 Nodes: `Person`, `Team`, `System`, `Change`, `WorkItem` (PRs, issues, tickets, threads),
-`Document`, `Chunk`, `Decision` and `Episode` (written by the agents), `SyncState`.
-Relationships: `AUTHORED`, `REVIEWED`, `COMMENTED_ON`, `MEMBER_OF`, `OWNS`, `TOUCHES`,
-`PART_OF`, `CLOSES`, `MENTIONS`, `BLOCKS`, `ASSIGNED_TO`, `FROM`.
+`Document`, `Chunk`, `SyncState`, and `Claim` (an accepted Keeper claim, projected from the
+ledger; ingest never writes it). Relationships: `AUTHORED`, `REVIEWED`, `COMMENTED_ON`,
+`MEMBER_OF`, `OWNS`, `TOUCHES`, `PART_OF`, `CLOSES`, `MENTIONS`, `BLOCKS`, `ASSIGNED_TO`, `FROM`,
+and `ABOUT` / `EVIDENCE` from a `Claim`. The Keeper's own records (gaps, consults, claims of every
+status, follow-ups, log, review runs) live in the ledger graph `keeper_<slug>`.
 
 ## Every Cypher query
 
@@ -128,7 +155,8 @@ purpose, parameters, returns, example.
 | `tools/open_work_for.cypher` | A person's open tickets |
 | `tools/blocked_on.cypher` | What a person's tickets are waiting on |
 | `tools/waiting_on.cypher` | Other people's tickets blocked by this person |
-| `tools/get_entity.cypher` | Open any node by uid: fields, text and direct neighbours |
+| `tools/get_entity.cypher` | Open any node by uid: fields, text and direct neighbours (a retired Keeper claim is never listed) |
+| `tools/keeper_notes.cypher` | The Keeper's accepted, current claims about a node, each with its evidence |
 | `tools/list_systems.cypher` | All systems with change counts, people and owners |
 | `tools/recent_work_items.cypher` | Most recent PRs, issues and threads, newest first (dashboard overview) |
 | `tools/people_activity.cypher` | People with how many PRs they authored and reviewed, bots excluded (dashboard overview) |
@@ -162,6 +190,13 @@ purpose, parameters, returns, example.
 Relationship types and labels cannot be Cypher parameters, which is why each allowed
 combination has its own small file rather than one query built from strings.
 
+### The Keeper
+
+| Folder | Runs on | Purpose |
+|---|---|---|
+| `keeper/` | `brain_<slug>` | What the Keeper checks a claim against (`evidence`, `source_facts`, `high_impact_systems`), the noticing queries (`notice_stale_owner`, `notice_unowned_hot_system`), and writing claims into the brain (`project_claim`, `retire_claim`) |
+| `ledger/` | `keeper_<slug>` | The ledger: gaps (`open_gap` dedupes), consults, claims, follow-ups, the append-only log and review runs. Every status move is guarded on the current status, so of two racing approvals one wins |
+
 ## Adding a company
 
 **[docs/adding-a-company.md](docs/adding-a-company.md)**: (a) a public GitHub repo (copy the
@@ -193,16 +228,18 @@ diagram is planned, not built.
 ```
 apps/brain/       Python 3.12 (uv): the engine. CLI: brain
   brain/            cli, config, canonical, normalize, loader, pipeline, tools, db, graph_view,
-                    adapters/, testing (pytest graph fixtures)
-  queries/          schema/, load/, tools/, graph/  (every Cypher query)
+                    keeper (the Keeper's reads and writes on brain_<slug>), adapters/,
+                    testing (pytest graph fixtures)
+  queries/          schema/, load/, tools/, graph/, chat/, keeper/, ledger/  (every Cypher query)
   examples/         synthetic_company/ (offline demo data + generator)
   tests/            pytest; graph tests use a real FalkorDB (make up) and throwaway graphs
 apps/agents/      Python: agents that use the brain through named tools. CLI: agents
-  agents/           loop, graph, ask, toolset, traces, roles/, policies/, prompts/, work/, sim/,
-                    acl, llm, evals/ (cases in evals/cases/), testing (fake clients)
+  agents/           loop, graph, ask, toolset, traces, keeper/ (gaps, noticing, review, rules,
+                    ledger store), roles/, policies/, prompts/, work/, sim/, acl, llm,
+                    evals/ (cases in evals/cases/), testing (fake clients)
   tests/            pytest, scripted fake clients
 apps/backend/     Python: HTTP for the UI. CLI: backend
-  backend/          api/ (FastAPI), jobs, registry, onboard, config_diff
+  backend/          api/ (FastAPI), jobs, keeper_runs, registry, onboard, config_diff
   tests/            pytest
 apps/frontend/    SvelteKit app and design system
 companies/        one YAML per company -> graph brain_<slug>

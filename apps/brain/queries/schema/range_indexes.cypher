@@ -22,3 +22,4 @@ CREATE INDEX FOR (n:Chunk) ON (n.uid);
 CREATE INDEX FOR (n:Decision) ON (n.uid);
 CREATE INDEX FOR (n:Episode) ON (n.uid);
 CREATE INDEX FOR (n:SyncState) ON (n.uid);
+CREATE INDEX FOR (n:Claim) ON (n.uid);

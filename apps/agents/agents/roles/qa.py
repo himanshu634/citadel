@@ -1,10 +1,12 @@
 """QA agent: tests finished work against the company's past regressions in that system, fails
 it with the regression the plan misses, and learns a lesson when a failure repeats
-(docs/agents.md, "3. QA agent")."""
+(docs/agents.md, "3. QA agent"). For the Keeper it answers consults on gaps (regression risk, test
+evidence), on the Keeper's ledger store."""
 
 from __future__ import annotations
 
 from agents.roles.base import Ctx, Job, Role, Subject, task_context, tasks, write
+from agents.roles.keeper import consult_job
 from agents.work.store import Row, WorkStore
 from agents.work.submits import SubmitQa
 
@@ -56,12 +58,14 @@ ROLE = Role(
     db_user="citadel_qa",
     read_tools=(
         "get_entity",
+        "keeper_notes",
         "lessons",
         "past_regressions",
         "related_work_items",
         "task_timeline",
         "work_history",
     ),
-    jobs=(Job("test", SubmitQa, _queue, _apply, task_context, after=_learn),),
-    summary="Tests finished tasks against past regressions; learns lessons from repeats.",
+    jobs=(Job("test", SubmitQa, _queue, _apply, task_context, after=_learn), consult_job("qa")),
+    summary="Tests finished tasks against past regressions; learns lessons from repeats; answers "
+    "Keeper consults.",
 )

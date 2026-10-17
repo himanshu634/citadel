@@ -10,15 +10,18 @@ tokens, and the thumbs counts. POST .../traces/{trace_id}/feedback stores a thum
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
-from agents.traces import TraceSummary, summarize, window
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from agents.keeper import gaps
+from agents.traces import Trace, TraceSummary, summarize, window
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query
 
 from backend.api.ask import Asker, get_asker
 from backend.api.deps import company_slug
 from backend.api.models import FeedbackIn, FeedbackOut
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/companies/{slug}/traces", tags=["traces"])
 Slug = Annotated[str, Depends(company_slug)]
 TraceId = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
@@ -34,12 +37,21 @@ def get_summary(
     return summarize(asker.traces(slug).read(since=since), since, until)
 
 
+def note_down(asker: Asker, slug: str, trace: Trace) -> None:
+    """A thumbs-down is a gap for the Keeper. Best effort: never raises."""
+    try:
+        gaps.note_feedback(asker.ledger(slug), trace, trace.feedback.rating, gaps.utc_now())
+    except Exception:
+        log.exception("could not note a gap for trace %s", trace.id)
+
+
 @router.post("/{trace_id}/feedback")
 def post_feedback(
     slug: Slug,
     trace_id: TraceId,
     body: FeedbackIn,
     asker: Annotated[Asker, Depends(get_asker)],
+    background: BackgroundTasks,
 ) -> FeedbackOut:
     try:
         trace = asker.traces(slug).rate(trace_id, body.rating, body.note)
@@ -47,4 +59,5 @@ def post_feedback(
         raise HTTPException(status_code=503, detail="The rating could not be saved.") from exc
     if trace is None or trace.feedback is None:
         raise HTTPException(status_code=404, detail=f"No answer {trace_id} for {slug}")
+    background.add_task(note_down, asker, slug, trace)  # after the response is sent
     return FeedbackOut(trace_id=trace.id, rating=trace.feedback.rating, note=trace.feedback.note)

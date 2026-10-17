@@ -683,6 +683,10 @@ describe('sourceKind', () => {
 		expect(sourceKind(null)).toBe('Document');
 	});
 
+	test('a Keeper claim reads as one, not as a document', () => {
+		expect(sourceKind('Claim')).toBe('Keeper claim');
+	});
+
 	test('a cited MCP result lights nothing in the walk', () => {
 		const steps: WalkStep[] = [
 			{ id: 't1', n: 1, tool: 'related_work_items', input: {}, status: 'done',

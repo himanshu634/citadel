@@ -1,12 +1,15 @@
 """QA policy: the system's past fixes are its regressions; fail on the first one the plan and
-report do not name, pass when all are covered."""
+report do not name, pass when all are covered. Consults are answered as `keeper.consult`."""
 
 from __future__ import annotations
 
 import re
 from typing import Any
 
+from agents.policies import keeper
 from agents.policies.base import Call, Results, uniq
+
+consult = keeper.consult
 
 FIXLIKE = re.compile(r"\b(fix|bug|regress\w*|crash\w*|race|leak|broken|fail\w*)\b", re.I)
 

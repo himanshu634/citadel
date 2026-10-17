@@ -8,11 +8,11 @@ then false); it is never guessed as `empty`.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from agents import llm
 from brain.tools import PersonActivity, RecentWorkItem, Stat, SystemSummary
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from backend.config_diff import ConfigDiff
 from backend.jobs import BuildSnapshot, BuildSummary
@@ -317,3 +317,26 @@ class FeedbackOut(BaseModel):
     trace_id: str
     rating: Literal["up", "down"] | None
     note: str | None = None
+
+
+# --- Keeper (/api/companies/{slug}/keeper/...) -------------------------------------------------
+# Gaps, claims, log entries, follow-ups and reviews are the ledger's own models
+# (agents.keeper.model); only what the API adds is here.
+
+
+class ApprovalIn(BaseModel):
+    """A lead's approve or reject of a pending claim. `by` is the name they type (no sign-in);
+    both are stripped, so a name of only spaces is refused."""
+
+    by: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
+    why: Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] = ""
+
+
+class KeeperEvent(BaseModel):
+    """One review event on the review stream (agents.keeper.review.ReviewEvent)."""
+
+    kind: Literal["start", "step", "done", "stopped", "failed", "skipped"]
+    step: str | None = None  # reproject, notice, pick, consult, pm.consult, keeper.decide, ...
+    gap: str | None = None
+    claim: str | None = None
+    message: str = ""

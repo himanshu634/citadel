@@ -10,6 +10,7 @@ all run exactly as they do for Claude.
         if not results.called("list_systems"):
             return [("list_systems", {})]           # tool calls for this turn
         return {"task": ..., "cites": [...]}        # the submit input: ends the run
+        return None                                 # no decision: the run ends with no answer
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ class Results:
         return out
 
 
-Policy = Callable[[dict[str, Any], Results], "list[Call] | dict[str, Any]"]
+Policy = Callable[[dict[str, Any], Results], "list[Call] | dict[str, Any] | None"]
 
 
 @dataclass
@@ -89,6 +90,9 @@ class ScriptedClient:
             text = BetaTextBlock(type="text", text=f"Could not submit: {rejected}")
             return _Message(content=[text], stop_reason="end_turn")
         out = self.policy(context, results)
+        if out is None:  # no decision: plain text, so the loop nudges once and then gives up
+            text = BetaTextBlock(type="text", text="No decision: nothing in the graph to cite.")
+            return _Message(content=[text], stop_reason="end_turn")
         if isinstance(out, dict):
             calls: list[Call] = [(submit, out)]
         else:

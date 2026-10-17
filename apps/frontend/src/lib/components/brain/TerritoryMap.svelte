@@ -405,7 +405,7 @@ summary instead; the page's search and list are the keyboard way in (see design-
 			{/if}
 		{/each}
 		{#if trail && trailing && !hood}
-			{#each trail.points as point (point.uid)}
+			{#each trail.points as point (point.ns[0])}
 				{@const n = pos.get(point.uid)}
 				{#if n}
 					{@const p = screen(n.x, n.y)}

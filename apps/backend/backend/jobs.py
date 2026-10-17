@@ -17,6 +17,14 @@ place in `stages` goes backwards on the second source. Before it runs, a job lis
 company's one embed stage); `steps` is its length and `step` only moves forward along it.
 Every event carries the step it happened at, so a live stream keeps the count without reading
 the snapshot again.
+
+`on_done(slug)` (the app starts a Keeper review with it) runs in its own daemon thread after a
+build ends `done` (embed stage included), never after a failed or stopped one; its errors are
+logged, and the build stays done. `before_reset(slug)` (the app stops the company's Keeper review
+with it) runs in the worker just before a rebuild drops the graph; its errors are logged and the
+rebuild goes on. `building(slug)` says whether the company has a queued or running job (until
+its embed stage ends): the Keeper refuses to review or decide on a brain that is being rebuilt
+(it exists, but empty, once prepare ran).
 """
 
 from __future__ import annotations
@@ -27,6 +35,7 @@ import os
 import re
 import tempfile
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -258,9 +267,16 @@ def _closing_event(
 
 class JobRunner:
     def __init__(
-        self, max_parallel: int = 2, steps: Steps | None = None, jobs_dir: Path | None = None
+        self,
+        max_parallel: int = 2,
+        steps: Steps | None = None,
+        jobs_dir: Path | None = None,
+        on_done: Callable[[str], None] | None = None,
+        before_reset: Callable[[str], None] | None = None,
     ):
         self.steps: Steps = steps or PipelineSteps()
+        self.on_done = on_done  # called with the slug after a build ends `done` (module doc)
+        self.before_reset = before_reset  # called with the slug before a rebuild's reset
         self._jobs_dir = jobs_dir
         self._slots = threading.Semaphore(max_parallel)
         # One lock for the job table, every snapshot change, its file and the subscriber set.
@@ -335,6 +351,13 @@ class JobRunner:
             if job.snapshot.state == "queued":
                 self._finish(job, "stopped", _closing_event(job.snapshot, "stopped", job.plan))
             return True
+
+    def building(self, slug: str) -> bool:
+        """The slug has a queued or running build or rebuild in this process."""
+        self._path(slug)
+        with self._lock:
+            job = self._jobs.get(slug)
+            return job is not None and job.snapshot.state in ACTIVE
 
     def current(self, slug: str) -> BuildSnapshot | None:
         """The slug's job from this process, else its last snapshot on disk, else None."""
@@ -445,6 +468,7 @@ class JobRunner:
                 check_stop()
                 job.step = "reset"
                 self._emit(job, BuildEvent(slug, "reset", "running"))
+                self._before_reset(slug)
                 self.steps.reset(slug)
                 self._emit(job, BuildEvent(slug, "reset", "done"))
             check_stop()
@@ -459,6 +483,7 @@ class JobRunner:
             report = self.steps.ingest(slug, job.full or snap.kind == "rebuild", on_event)
             totals = {"written": dict(report.load.written), "dropped": dict(report.load.dropped)}
             self._finish(job, "done", BuildEvent(slug, "done", "done", totals=totals))
+            self._after_done(slug)
         except BuildStopped:
             with self._lock:
                 event = _closing_event(snap, "stopped", job.plan, trail=job.trail)
@@ -469,6 +494,33 @@ class JobRunner:
             with self._lock:
                 event = _closing_event(snap, "failed", job.plan, job.step, error, job.trail)
                 self._finish(job, "failed", event, error)
+
+    def _before_reset(self, slug: str) -> None:
+        """Run `before_reset(slug)` here, in the worker. Never raises: the rebuild goes on."""
+        hook = self.before_reset
+        if hook is None:
+            return
+        try:
+            hook(slug)
+        except Exception:
+            log.exception("before_reset of the rebuild of %s failed", slug)
+
+    def _after_done(self, slug: str) -> None:
+        """Run `on_done(slug)` in a daemon thread. Never raises: the build is already done."""
+        hook = self.on_done
+        if hook is None:
+            return
+
+        def call() -> None:
+            try:
+                hook(slug)
+            except Exception:
+                log.exception("on_done after the build of %s failed", slug)
+
+        try:
+            threading.Thread(target=call, name=f"after-build-{slug}", daemon=True).start()
+        except Exception:
+            log.exception("could not start on_done after the build of %s", slug)
 
     # --- snapshot and delivery (callers may or may not hold the lock; it is reentrant) --------
 

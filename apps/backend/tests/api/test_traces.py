@@ -111,3 +111,69 @@ def test_summary_over_a_window(company, runner):
     empty = client.get("/api/companies/other/traces/summary").json()
     assert empty["turns"] == 0 and empty["rates"]["nudge"] is None
     assert client.get(f"/api/companies/{company}/traces/summary?days=0").status_code == 422
+
+
+def test_a_thumbs_down_leaves_a_thumbs_down_gap(company, runner):
+    from agents.keeper.store import MemoryKeeperStore
+
+    ledger = MemoryKeeperStore(company)
+    client = make_client(runner, FakeClient(reply(submit("t1", "Fine.", []))))
+    client.app.state.asker.ledger = lambda slug: ledger
+    trace_id = ask(client)["trace_id"]
+    ledger.gaps.clear()  # the zero-source answer itself opened a failed_question gap
+    url = f"/api/companies/{company}/traces/{trace_id}/feedback"
+
+    assert client.post(url, json={"rating": "up"}).status_code == 200
+    assert ledger.gaps == {}
+    assert client.post(url, json={"rating": "down"}).status_code == 200
+    [gap] = ledger.gaps.values()
+    assert (gap.kind, gap.trace_ids, gap.text) == ("thumbs_down", [trace_id], "Why JWT?")
+
+
+def test_an_unanswered_ask_leaves_a_failed_question_gap(company, runner):
+    from agents.keeper.store import MemoryKeeperStore
+
+    ledger = MemoryKeeperStore(company)
+    client = make_client(runner, FakeClient(reply(submit("t1", "Nothing.", []))))
+    client.app.state.asker.ledger = lambda slug: ledger
+    trace_id = ask(client)["trace_id"]
+    [gap] = ledger.gaps.values()
+    assert (gap.kind, gap.trace_ids) == ("failed_question", [trace_id])
+
+
+def test_a_broken_ledger_does_not_fail_the_answer_or_the_rating(company, runner):
+    class Broken:
+        def write(self, *_a, **_k):
+            raise RuntimeError("down")
+
+    client = make_client(runner, FakeClient(reply(submit("t1", "Nothing.", []))))
+    client.app.state.asker.ledger = lambda slug: Broken()
+    answer = ask(client)
+    assert answer["text"] == "Nothing."
+    url = f"/api/companies/{company}/traces/{answer['trace_id']}/feedback"
+    assert client.post(url, json={"rating": "down"}).status_code == 200
+
+
+def test_the_answer_is_sent_before_the_gap_is_written(company, runner):
+    import threading
+    import time
+
+    gate = threading.Event()
+    wrote = []
+
+    class Slow:
+        def write(self, *_a, **_k):
+            wrote.append("write")
+            gate.wait(5)  # a ledger that hangs
+            return [{"uid": "gap:x"}]
+
+    client = make_client(runner, FakeClient(reply(submit("t1", "Nothing.", []))))
+    client.app.state.asker.ledger = lambda slug: Slow()
+    started = time.perf_counter()
+    try:
+        answer = ask(client)
+        took = time.perf_counter() - started
+    finally:
+        gate.set()
+    assert answer["text"] == "Nothing." and answer["trace_id"]
+    assert took < 2  # the stream ended while the write was still blocked

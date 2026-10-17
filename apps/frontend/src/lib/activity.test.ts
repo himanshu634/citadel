@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { actorName, anchorOf, doingNow, featured, shownRun, stepLine, stepLineRuns, stepsSummary, trailOf } from './activity';
+import { actorName, anchorOf, doingNow, featured, hereLabel, runLabel, shownRun, stepLine, stepLineRuns, stepsSummary, trailOf } from './activity';
 import type { ActivityRun, ActivityStep } from './types';
 
 function step(n: number, tool: string, input: Record<string, unknown>, touched: string[], extra: Partial<ActivityStep> = {}): ActivityStep {
@@ -106,6 +106,44 @@ describe('words', () => {
 		expect(stepsSummary(r, trailOf(r, drawn))).toBe('2 steps · 1 not on the map');
 		const one = run([step(1, 'get_entity', { uid: 'pr:1' }, ['pr:1'])]);
 		expect(stepsSummary(one, trailOf(one, drawn))).toBe('1 step');
+	});
+});
+
+describe('Keeper runs', () => {
+	const review = (steps: ActivityStep[], status: ActivityRun['status'] = 'running'): ActivityRun => ({
+		...run(steps, status, 'keeper:review:1'),
+		source: 'keeper',
+		actor: 'keeper',
+		title: 'Who decides the refund rules?',
+		thread_id: null
+	});
+	it('names who is working on the map by the running step, not the run', () => {
+		const r = review([
+			step(1, 'work_history', { system: 'Billing' }, [], { actor: 'pm' }),
+			step(2, 'experts_for_system', { system: 'Billing' }, [], { actor: 'qa', status: 'running' })
+		]);
+		expect(hereLabel(r)).toBe('qa · Asking who knows Billing best');
+		expect(hereLabel(review([]))).toBe('Keeper · Thinking about the next step');
+		expect(hereLabel(run([], 'running'))).toBe('Ask agent · Thinking about the next step');
+	});
+	it('calls a review a Keeper review', () => {
+		expect(runLabel(review([]))).toBe('Keeper review');
+		expect(runLabel(run([]))).toBe('Ask agent');
+	});
+	it("words the Keeper's submits", () => {
+		const consult = (input: Record<string, unknown>, extra: Partial<ActivityStep> = {}) =>
+			step(1, 'submit_consult', input, [], { kind: 'submit', actor: 'pm', ...extra });
+		expect(stepLine(consult({}, { status: 'running' }))).toBe('Answering the Keeper');
+		expect(stepLine(consult({ can_ground: true, kind: 'owner' }))).toBe('Drafted an owner claim for the Keeper');
+		expect(stepLine(consult({ can_ground: false }))).toBe('Told the Keeper the graph does not support a claim');
+		const decide = (outcome: string) => step(1, 'submit_keeper_decision', { outcome }, [], { kind: 'submit', actor: 'keeper' });
+		expect(stepLine(decide('claim'))).toBe('Decided to write a claim');
+		expect(stepLine(decide('needs_person'))).toBe('Decided the gap needs a person');
+		expect(stepLine(decide('dismiss'))).toBe('Dismissed the gap');
+		expect(stepLine(step(1, 'submit_follow_up', { title: 'Update CODEOWNERS' }, [], { kind: 'submit', actor: 'pm' }))).toBe(
+			'Opened a follow-up: Update CODEOWNERS'
+		);
+		expect(stepLine(step(1, 'keeper_notes', { uid: 'system:Billing' }, []))).toBe("Read the Keeper's notes on Billing");
 	});
 });
 

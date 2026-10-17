@@ -1,11 +1,11 @@
 """What one tool call touched in the graph, as a small subgraph the UI can draw.
 
 Why: the Ask page draws the agent's walk through the company graph, one tool call at a time.
-Only `path_between` and `get_entity` return relationships; the other tools return rows whose
-fields name nodes (a person's teams, an expert's system). `subgraph` turns any tool's rows into
-nodes and relationships with the graph's own uids, so the steps of one answer merge into one
-picture. A relationship the rows only imply (an expert "works on" a system, two systems change
-together) is marked `inferred`, and the UI draws it differently from a stored one.
+Only `path_between`, `get_entity` and `keeper_notes` return relationships; the other tools
+return rows whose fields name nodes (a person's teams, an expert's system). `subgraph` turns any
+tool's rows into nodes and relationships with the graph's own uids, so the steps of one answer
+merge into one picture. A relationship the rows only imply (an expert "works on" a system, two
+systems change together) is marked `inferred`, and the UI draws it differently from a stored one.
 
 Pure: no graph access. Rows are the tool's rows as JSON (what the toolset dumps).
 """
@@ -210,10 +210,25 @@ def _people_activity(b: _Builder, params: Row, rows: list[Row]) -> None:
             b.rel(me, b.team(t), "MEMBER_OF")
 
 
+_LABEL_BY_PREFIX = {"system": "System", "person": "Person", "team": "Team"}
+
+
+def _keeper_notes(b: _Builder, params: Row, rows: list[Row]) -> None:
+    uid = params.get("uid")
+    about = b.node(uid, _LABEL_BY_PREFIX.get(str(uid).split(":")[0], "Node")) if rows else None
+    for r in rows:
+        claim = b.node(r.get("uid"), "Claim", r.get("statement"))
+        b.rel(claim, about, "ABOUT")
+        for e in r.get("evidence") or []:
+            ev = b.node(e.get("uid"), e.get("label") or "Node", e.get("title"), e.get("url"))
+            b.rel(claim, ev, "EVIDENCE")
+
+
 _BY_TOOL: dict[str, Callable[[_Builder, Row, list[Row]], None]] = {
     "experts_for_system": _experts_for_system,
     "get_entity": _get_entity,
     "impact_of": _impact_of,
+    "keeper_notes": _keeper_notes,
     "list_systems": _list_systems,
     "owners_vs_experts": _owners_vs_experts,
     "path_between": _path_between,

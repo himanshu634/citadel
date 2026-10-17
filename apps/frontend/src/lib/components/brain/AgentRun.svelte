@@ -6,10 +6,13 @@ number; the step running now has a ring; a step spread over several territories 
 systems) says "across the graph"; a step that touched nothing the map draws (the answer check, an
 MCP call) has a dash and says so. A node a step names ("Opened PR #10") opens on GitHub (or its
 own site) in a new tab. Links to the chat an Ask run came from.
+
+A Keeper review reads as one ("Keeper review"), with its first gap as the title, and each step
+names who took it (pm, qa or the Keeper), since three agents share the run.
 -->
 <script lang="ts">
 	import { ArrowUpRight } from '@lucide/svelte';
-	import { actorName, stepLineRuns, stepsSummary, type Trail } from '$lib/activity';
+	import { actorName, runLabel, stepLineRuns, stepsSummary, type Trail } from '$lib/activity';
 	import RefText from '../ui/RefText.svelte';
 	import { ago } from '$lib/time';
 	import type { ActivityRun } from '$lib/types';
@@ -29,6 +32,7 @@ own site) in a new tab. Links to the chat an Ask run came from.
 
 	const placed = $derived(new Set(trail.points.flatMap((p) => p.ns)));
 	const going = $derived(run.status === 'running');
+	const review = $derived(run.source === 'keeper');
 	const STATUS: Record<ActivityRun['status'], string> = {
 		running: 'Working now',
 		done: 'Done',
@@ -39,7 +43,11 @@ own site) in a new tab. Links to the chat an Ask run came from.
 
 <section class="run" aria-label="Agent run">
 	<p class="eyebrow">
-		{going ? `${actorName(run.actor)} is working on` : `${actorName(run.actor)}, ${ago(run.started_at, now)}`}
+		{going
+			? review
+				? 'Keeper review, working on'
+				: `${actorName(run.actor)} is working on`
+			: `${runLabel(run)}, ${ago(run.started_at, now)}`}
 	</p>
 	<h2>{run.title}</h2>
 	<p class="meta">
@@ -62,6 +70,7 @@ own site) in a new tab. Links to the chat an Ask run came from.
 					<div class="body">
 						<span class="line"><RefText runs={stepLineRuns(step, urlOf)} /></span>
 						<span class="sub">
+							{#if review}<span class="who">{actorName(step.actor)}</span>{/if}
 							<code>{step.tool}</code>
 							{#if step.error}<span class="error">{step.error}</span>
 							{:else if step.status === 'running'}running
@@ -186,6 +195,10 @@ own site) in a new tab. Links to the chat an Ask run came from.
 	}
 	code {
 		font-family: var(--font-mono);
+	}
+	.who {
+		color: var(--color-text);
+		font-weight: var(--weight-semibold);
 	}
 	.error {
 		color: var(--color-danger);
