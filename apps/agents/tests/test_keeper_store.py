@@ -61,7 +61,7 @@ def set_status(store, uid, frm, to, *, now=T2, reason=None, attempts_inc=0):
 
 def test_names_are_listed():
     assert all(n.startswith("ledger/") for n in READS)
-    assert {"ledger/open_gap", "work/write_episode", "memory/write_episode"} <= set(WRITES)
+    assert {"ledger/open_gap", "ledger/write_episode"} <= set(WRITES)
 
 
 def test_the_same_trace_twice_is_one_sighting(store):
@@ -290,20 +290,18 @@ def test_log_and_read_log(store):
         "log:1"]  # fmt: skip
 
 
-@pytest.mark.parametrize("name", ["work/write_episode", "memory/write_episode"])
-def test_episode_becomes_log_entry(store, name):
+def test_episode_becomes_log_entry(store):
     params = {
         "agent": "agent:keeper",
         "now": 1_792_224_000,  # runner passes Ctx.now, an epoch int
         "run_at": 1_792_224_000,
-        "tick": 0,
         "input": "keeper.decide gap:1",
         "summary": "Claimed the owner of Billing.",
         "tools_called": ["experts_for_system"],
         "actions": ["claim:1", "claim_written"],
         "stop": None,
     }
-    [row] = store.write(name, "citadel_pm", params)
+    [row] = store.write("ledger/write_episode", "citadel_pm", params)
     [entry] = store.read("ledger/read_log", {"limit": 10, "gap": "gap:1"})
     assert entry["uid"] == row["episode"]
     assert (entry["action"], entry["actor"], entry["why"], entry["evidence"]) == (
@@ -314,7 +312,7 @@ def test_episode_becomes_log_entry(store, name):
 
 def test_episode_of_a_claim_job(store):
     params = {"agent": "agent:pm", "now": T1, "input": "pm.follow_up claim:7", "summary": "Done."}
-    store.write("work/write_episode", "citadel_pm", {**params, "actions": []})
+    store.write("ledger/write_episode", "citadel_pm", {**params, "actions": []})
     [entry] = store.read("ledger/read_log", {"limit": 10, "claim": "claim:7"})
     assert (entry["gap"], entry["claim"], entry["why"], entry["evidence"]) == (
         None, "claim:7", "pm.follow_up claim:7: Done.", [])  # fmt: skip
@@ -322,9 +320,9 @@ def test_episode_of_a_claim_job(store):
 
 def test_acl_refused(store):
     with pytest.raises(acl.Refused):
-        open_gap(store, "who owns billing", "t1", user="citadel_risk")
+        open_gap(store, "who owns billing", "t1", user="citadel_loader")
     with pytest.raises(acl.Refused):
-        store.read("ledger/gaps", {"statuses": ["open"], "limit": 1}, db_user="citadel_risk")
+        store.read("ledger/gaps", {"statuses": ["open"], "limit": 1}, db_user="citadel_loader")
     assert open_gap(store, "who owns billing", "t1", user="citadel_brain")[0]["created"]
     assert store.read("ledger/gaps", {"statuses": ["open"], "limit": 1}, db_user="citadel_qa")
 
