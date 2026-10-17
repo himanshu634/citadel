@@ -24,10 +24,10 @@ from agents.keeper.decide import (
     EARLIER_LIMIT,
     BrainFacts,
     _gap,
-    _log,
     _reopen,
     _set_claim,
     brain_present,
+    log,
 )
 from agents.keeper.model import Claim
 from agents.keeper.rules import conflict
@@ -54,7 +54,7 @@ def reproject(store: WorkStore, slug: str, *, brain: BrainFacts, now: str) -> di
         why = f"source: {clash}"
         if _set_claim(store, now, claim.uid, "superseded", frm=["accepted"], why=why,
                       valid_to=now):  # fmt: skip
-            _log(store, now, "keeper", "claim_superseded", gap=claim.gap, claim=claim.uid,
+            log(store, now, "keeper", "claim_superseded", gap=claim.gap, claim=claim.uid,
                  why=why, evidence=[claim.subject])  # fmt: skip
             brain.retire(slug, claim.uid, "superseded", now)  # after the log, as decide does
             out["superseded_by_source"] += 1
@@ -73,7 +73,7 @@ def reproject(store: WorkStore, slug: str, *, brain: BrainFacts, now: str) -> di
         gap = _gap(store, claim.gap) if claim.gap else None
         if gap is not None:
             _reopen(store, now, gap, STALE_WHY, rejected=False, frm=["in_review", "resolved"])
-        _log(store, now, "keeper", "claim_stale", gap=claim.gap, claim=claim.uid, why=STALE_WHY,
+        log(store, now, "keeper", "claim_stale", gap=claim.gap, claim=claim.uid, why=STALE_WHY,
              evidence=claim.evidence)  # fmt: skip
         brain.retire(slug, claim.uid, "stale", now)
         out["stale"] += 1

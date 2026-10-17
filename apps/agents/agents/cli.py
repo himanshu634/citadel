@@ -367,21 +367,28 @@ def keeper_review(
 ) -> None:
     """Run one review: re-project the accepted claims, notice new gaps, then consult and decide
     up to --budget gaps. Events print as lines. Without an API key (and without --offline) only
-    the re-projection and noticing run, and the review is recorded as skipped."""
+    the re-projection and noticing run, and the review is recorded as skipped. Exits 1 when the
+    review fails or another one is already running."""
     from brain import config
 
     from agents.keeper import decide
-    from agents.keeper.review import ReviewEvent, review
+    from agents.keeper.review import ReviewEvent, review, skip_review
 
     store = _keeper_ready(slug)
     budget = config.get_settings().keeper_budget if budget is None else budget
-    if not offline and not _has_api_key():
-        _review_skipped(store, slug, budget)
-        return
 
     def show(e: ReviewEvent) -> None:
         subject = e.claim or e.gap or ""
         typer.echo(f"{e.kind:<8} {e.step or '':<16} {subject:<22} {e.message}".rstrip())
+
+    if not offline and not _has_api_key():
+        r = skip_review(store, slug, trigger="manual", budget=budget, on_event=show)
+        if r.state == "running":
+            fail(f"review {r.uid} is already running")
+        if r.state != "skipped":
+            raise typer.Exit(1)
+        typer.echo("review skipped: no API key (use --offline)")
+        return
 
     try:
         r = review(
@@ -399,41 +406,6 @@ def keeper_review(
         fail(f"review {r.uid} is already running")
     if r.state == "failed":
         raise typer.Exit(1)
-
-
-def _review_skipped(store, slug: str, budget: int) -> None:
-    """The no-key review: re-project and notice (no LLM job), recorded as `skipped`."""
-    from brain import config
-    from redis.exceptions import ResponseError
-
-    from agents.keeper import decide
-    from agents.keeper.gaps import utc_now
-    from agents.keeper.model import review_uid
-    from agents.keeper.notice import notice
-    from agents.keeper.project import reproject
-
-    uid, now = review_uid(), utc_now()
-    start = {"uid": uid, "trigger": "manual", "budget": budget, "now": now}
-    if not store.write("ledger/review_start", decide.DB_USER, start):
-        fail("a review is already running")
-    state, stop = "skipped", "no_api_key"
-    problem = None
-    try:
-        brain = decide.DEFAULT_BRAIN
-        reproject(store, slug, brain=brain, now=now)
-        notice(store, slug, cap=config.get_settings().keeper_notice_cap, brain=brain, now=now)
-    except (decide.BrainUnavailable, ResponseError) as e:
-        state, stop, problem = "stopped", "brain_unavailable", f"the brain is unavailable: {e!r}"
-    except Exception as e:
-        state, stop, problem = "failed", f"{type(e).__name__}: {e}"[:300], f"failed: {e!r}"
-    finally:
-        ended = utc_now()
-        store.write("ledger/review_finish", decide.DB_USER,
-                    {"uid": uid, "state": state, "stop": stop, "now": ended})  # fmt: skip
-        decide._log(store, ended, "keeper", f"review_{state}", why=f"{uid}: {stop}")
-    if problem:
-        fail(f"review {state}: {problem}")
-    typer.echo("review skipped: no API key (use --offline)")
 
 
 @keeper_app.command("gaps")

@@ -46,9 +46,9 @@ from agents.keeper.decide import (
     DB_USER,
     BrainFacts,
     BrainUnavailable,
-    _log,
     _set_gap,
     brain_present,
+    log,
 )
 from agents.keeper.gaps import utc_now
 from agents.keeper.model import Gap, Review, review_uid
@@ -65,6 +65,7 @@ GAP_LIMIT = 10_000  # open gaps read for picking (pick_order needs all of them)
 CONSULTED_BY = ("pm", "qa")
 REQUESTED = "requested"  # stop: should_stop() said so
 BRAIN_UNAVAILABLE = "brain_unavailable"  # stop: brain_<slug> is gone or FalkorDB refused
+NO_API_KEY = "no_api_key"  # stop of a skipped review: no key for the LLM jobs
 
 EventKind = Literal["start", "step", "done", "stopped", "failed", "skipped"]
 
@@ -119,7 +120,7 @@ def review(
         try:
             run = _Run(store, slug, brain or decide.DEFAULT_BRAIN, client_for, graph_run,
                        on_event, should_stop, now)  # fmt: skip
-            _log(store, started, "keeper", "review_start", why=f"{uid}: {trigger}, budget {budget}")
+            log(store, started, "keeper", "review_start", why=f"{uid}: {trigger}, budget {budget}")
             on_event(ReviewEvent("start", message=f"Review started ({trigger}, budget {budget})."))
             run.steps(budget)
             state, stop, message = "done", None, "Review done."
@@ -142,7 +143,56 @@ def review(
         ended = now()
         store.write("ledger/review_finish", DB_USER,
                     {"uid": uid, "state": state, "stop": stop, "now": ended})  # fmt: skip
-        _log(store, ended, "keeper", f"review_{state}", why=f"{uid}: {stop or state}")
+        log(store, ended, "keeper", f"review_{state}", why=f"{uid}: {stop or state}")
+    on_event(ReviewEvent(state, message=message))
+    return Review(uid=uid, slug=slug, trigger=trigger, state=state, budget=budget,
+                  started_at=started, ended_at=ended, stop=stop)  # fmt: skip
+
+
+def skip_review(
+    store: WorkStore,
+    slug: str,
+    *,
+    trigger: Literal["build", "manual", "approval"],
+    budget: int,
+    brain: ReviewBrain | None = None,
+    on_event: Callable[[ReviewEvent], None] = lambda e: None,
+    now: Callable[[], str] = utc_now,
+) -> Review:
+    """The review when there is no API key: only the steps that need no LLM job, `reproject`
+    and `notice`. The review is recorded `skipped` (stop "no_api_key") with a `review_skipped`
+    log line, and the last event has kind "skipped". The same ends as `review` otherwise:
+    `stopped` (brain_unavailable) or `failed`. Returns the running review, with no event and
+    nothing written, when a review is already running."""
+    uid, started = review_uid(), now()
+    start = {"uid": uid, "trigger": trigger, "budget": budget, "now": started}
+    if not store.write("ledger/review_start", DB_USER, start):
+        [current] = store.read("ledger/review_current", {})
+        return Review(**current)
+    brain = brain or decide.DEFAULT_BRAIN
+    state: Literal["skipped", "stopped", "failed"] = "skipped"
+    stop: str | None = NO_API_KEY
+    message = "Review skipped: no API key."
+    try:
+        on_event(ReviewEvent("start", message=f"Review started ({trigger}, no API key)."))
+        counts = reproject(store, slug, brain=brain, now=now())
+        said = ", ".join(f"{n} {k.replace('_', ' ')}" for k, n in counts.items())
+        reprojected = f"Re-projected accepted claims: {said}."
+        on_event(ReviewEvent("step", step="reproject", message=reprojected))
+        cap = get_settings().keeper_notice_cap
+        new = notice(store, slug, cap=cap, brain=brain, now=now())
+        on_event(ReviewEvent("step", step="notice", message=f"Noticed {len(new)} new gap(s)."))
+    except (BrainUnavailable, ResponseError) as e:
+        state, stop = "stopped", BRAIN_UNAVAILABLE
+        message = f"Review stopped: the brain is unavailable ({type(e).__name__}: {e})."
+    except Exception as e:
+        state, stop = "failed", f"{type(e).__name__}: {e}"[:300]
+        message = f"Review failed: {stop}"
+    finally:  # whatever happened above, the review does not stay `running`
+        ended = now()
+        store.write("ledger/review_finish", DB_USER,
+                    {"uid": uid, "state": state, "stop": stop, "now": ended})  # fmt: skip
+        log(store, ended, "keeper", f"review_{state}", why=f"{uid}: {stop}")
     on_event(ReviewEvent(state, message=message))
     return Review(uid=uid, slug=slug, trigger=trigger, state=state, budget=budget,
                   started_at=started, ended_at=ended, stop=stop)  # fmt: skip
@@ -196,7 +246,7 @@ class _Run:
                 params = {"gap": gap, "role": role, "attempt": attempt, "now": now}
                 [row] = self.store.write("ledger/post_consult", DB_USER, params)
                 if row["created"]:
-                    _log(self.store, now, "keeper", "consulted", gap=gap, why=f"asked {role}")
+                    log(self.store, now, "keeper", "consulted", gap=gap, why=f"asked {role}")
             self.event("consult", gap=gap, message=f"Asked {' and '.join(CONSULTED_BY)}.")
 
         queues: dict[str, dict[str, Subject]] = {}
@@ -249,7 +299,7 @@ class _Run:
         now = self.now()
         if not _set_gap(self.store, now, gap, ["in_review"], "open", reason):
             return False
-        _log(self.store, now, "keeper", "gap_released", gap=gap, why=reason)
+        log(self.store, now, "keeper", "gap_released", gap=gap, why=reason)
         return True
 
     # --- one job ------------------------------------------------------------------------------

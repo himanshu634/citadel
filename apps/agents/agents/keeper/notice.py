@@ -23,7 +23,7 @@ from typing import Any, Protocol
 
 from brain import keeper as brain_keeper
 
-from agents.keeper.decide import DB_USER, _log
+from agents.keeper.decide import DB_USER, log
 from agents.keeper.model import NOTICING_KINDS, gap_uid
 from agents.work.store import WorkStore
 
@@ -68,7 +68,7 @@ def notice(
             [opened] = store.write("ledger/open_gap", DB_USER, params)
             if opened["created"]:
                 new.append(opened["uid"])
-                _log(store, now, "keeper", "gap_opened", gap=opened["uid"], why=row["text"],
+                log(store, now, "keeper", "gap_opened", gap=opened["uid"], why=row["text"],
                      evidence=params["about"])  # fmt: skip
     return new
 

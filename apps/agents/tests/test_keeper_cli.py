@@ -92,9 +92,7 @@ def test_review_without_key_skips(env, monkeypatch):
     assert "review skipped: no API key (use --offline)" in result.output
     [r] = store.reviews
     assert (r.state, r.stop) == ("skipped", "no_api_key")
-    assert "review_skipped" in [e.action for e in store.log]
-    assert [g.subject for g in store.gaps.values()] == ["system:Auth"]  # notice ran, no LLM job
-    assert not store.consults
+    assert [g.subject for g in store.gaps.values()] == ["system:Auth"]  # noticed, no LLM job
 
 
 def test_review_with_key_in_environment_runs(env, monkeypatch):

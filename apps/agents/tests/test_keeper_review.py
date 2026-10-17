@@ -8,7 +8,7 @@ import pytest
 from agents.keeper.model import gap_uid
 from agents.keeper.notice import notice
 from agents.keeper.project import reproject
-from agents.keeper.review import ReviewEvent, review
+from agents.keeper.review import ReviewEvent, review, skip_review
 from agents.keeper.store import MemoryKeeperStore
 from agents.policies import offline_client
 from agents.testing import FakeBrainFacts, fake_brain
@@ -401,3 +401,60 @@ def test_reproject_refuses_a_missing_brain():
     with pytest.raises(BrainUnavailable):
         reproject(store, SLUG, brain=brain, now=NOW)
     assert brain.project_calls == 0 and store.log == []
+
+
+# --- no API key -------------------------------------------------------------------------------
+
+
+def run_skip(store, brain, **kw):
+    events: list[ReviewEvent] = []
+    r = skip_review(store, SLUG, trigger="manual", budget=5, brain=brain,
+                    on_event=events.append, now=clock, **kw)  # fmt: skip
+    return r, events
+
+
+def test_skip_review_reprojects_and_notices_without_jobs():
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
+    row = {"subject": "system:Billing", "text": "Billing has no owner.",
+           "about": ["system:Billing"]}  # fmt: skip
+    brain.notices = {"unowned_hot_system": [row]}
+    claim = seed_claim(store)
+    r, events = run_skip(store, brain)
+    assert (r.state, r.stop, r.trigger, r.budget) == ("skipped", "no_api_key", "manual", 5)
+    assert r.ended_at == NOW and store.read("ledger/review_current", {})[0]["state"] == "skipped"
+    assert [p["uid"] for p in brain.projected] == [claim]  # re-projected
+    assert [g.subject for g in store.gaps.values()] == ["system:Billing"]  # noticed
+    assert not store.consults and not store.followups  # no job ran
+    assert actions(store).count("review_skipped") == 1 and "review_done" not in actions(store)
+    assert [e.kind for e in events][0] == "start" and events[-1].kind == "skipped"
+    assert [e.step for e in events if e.kind == "step"] == ["reproject", "notice"]
+
+
+def test_skip_review_returns_the_running_review():
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
+    start = {"uid": "review:abc", "trigger": "build", "budget": 3, "now": NOW}
+    store.write("ledger/review_start", KEEPER, start)
+    r, events = run_skip(store, brain)
+    assert (r.uid, r.state) == ("review:abc", "running") and not events
+    assert actions(store) == [] and len(store.reviews) == 1
+
+
+def test_skip_review_stops_when_the_brain_is_gone():
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts(exists=False)
+    r, events = run_skip(store, brain)
+    assert (r.state, r.stop) == ("stopped", "brain_unavailable")
+    assert events[-1].kind == "stopped" and actions(store) == ["review_stopped"]
+    assert store.read("ledger/review_current", {})[0]["state"] == "stopped"
+
+
+def test_skip_review_fails_on_another_error():
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
+
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    brain.project = boom
+    seed_claim(store)
+    r, events = run_skip(store, brain)
+    assert r.state == "failed" and "RuntimeError: boom" in r.stop
+    assert events[-1].kind == "failed" and actions(store) == ["review_failed"]

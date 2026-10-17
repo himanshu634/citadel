@@ -111,7 +111,7 @@ def apply_decision(
             "needs_person", "needs_person")  # fmt: skip
         rows = _set_gap(store, ctx.now, gap.uid, ["in_review"], to, sub.reason)
         if rows:
-            _log(store, ctx.now, "keeper", action, gap=gap.uid, why=sub.reason,
+            log(store, ctx.now, "keeper", action, gap=gap.uid, why=sub.reason,
                  evidence=sub.cites)  # fmt: skip
         return rows
     if gap.status != "in_review":
@@ -143,7 +143,7 @@ def apply_decision(
         why = f"evidence_missing: {', '.join(missing)}"
         _write_claim(store, ctx.now, claim, status="rejected", why=why)
         _reopen(store, ctx.now, gap, why, rejected=True)
-        _log(store, ctx.now, "keeper", "claim_rejected", gap=gap.uid, claim=claim.uid, why=why,
+        log(store, ctx.now, "keeper", "claim_rejected", gap=gap.uid, claim=claim.uid, why=why,
              evidence=claim.evidence)  # fmt: skip
         return [{"uid": claim.uid, "status": "rejected"}]
 
@@ -151,7 +151,7 @@ def apply_decision(
     if clash:
         _write_claim(store, ctx.now, claim, status="conflicts_with_source", conflict=clash)
         _set_gap(store, ctx.now, gap.uid, ["in_review"], "resolved", f"conflicts: {clash}")
-        _log(store, ctx.now, "keeper", "claim_conflicts_with_source", gap=gap.uid,
+        log(store, ctx.now, "keeper", "claim_conflicts_with_source", gap=gap.uid,
              claim=claim.uid, why=_both_sides(claim, clash), evidence=claim.evidence)  # fmt: skip
         return [{"uid": claim.uid, "status": "conflicts_with_source"}]
 
@@ -162,7 +162,7 @@ def apply_decision(
     )
     _write_claim(store, ctx.now, claim, critical=bool(reasons), critical_reasons=reasons)
     if reasons:
-        _log(store, ctx.now, "keeper", "claim_queued", gap=gap.uid, claim=claim.uid,
+        log(store, ctx.now, "keeper", "claim_queued", gap=gap.uid, claim=claim.uid,
              why=", ".join(reasons), evidence=claim.evidence)  # fmt: skip
         return [{"uid": claim.uid, "status": "pending_approval"}]
 
@@ -215,7 +215,7 @@ def accept(
             gap = _gap(store, stored.gap)
             if gap is not None:
                 _reopen(store, now, gap, why_stale, rejected=False, frm=["in_review", "resolved"])
-        _log(store, now, by, "claim_stale", gap=stored.gap, claim=claim.uid, why=why_stale,
+        log(store, now, by, "claim_stale", gap=stored.gap, claim=claim.uid, why=why_stale,
              evidence=stored.evidence)  # fmt: skip
         return _claim(store, claim.uid)
 
@@ -228,7 +228,7 @@ def accept(
             continue
         if _set_claim(store, now, old["uid"], "superseded", frm=["accepted"],
                       why=f"superseded by {claim.uid}", valid_to=now):  # fmt: skip
-            _log(store, now, by, "claim_superseded", gap=old["gap"], claim=old["uid"],
+            log(store, now, by, "claim_superseded", gap=old["gap"], claim=old["uid"],
                  why=f"superseded by {claim.uid}", evidence=[claim.uid])  # fmt: skip
             # Logged first: the ledger is the truth. A failed retire leaves the old node current
             # in the brain until the next rebuild; re-projection (keeper/project.py) projects only
@@ -237,7 +237,7 @@ def accept(
 
     if stored.gap:
         _set_gap(store, now, stored.gap, ["in_review"], "resolved", f"claim {claim.uid}")
-    _log(store, now, by, action, gap=stored.gap, claim=claim.uid, why=why or stored.why,
+    log(store, now, by, action, gap=stored.gap, claim=claim.uid, why=why or stored.why,
          evidence=stored.evidence)  # fmt: skip
     return _claim(store, claim.uid)
 
@@ -276,7 +276,7 @@ def _undo_accept(
     if auto and claim.gap:
         _set_gap(store, now, claim.gap, ["in_review"], "open", why)
     action = "claim_stale" if auto else "claim_approval_failed"
-    _log(store, now, by, action, gap=claim.gap, claim=claim.uid, why=why,
+    log(store, now, by, action, gap=claim.gap, claim=claim.uid, why=why,
          evidence=claim.evidence)  # fmt: skip
 
 
@@ -303,7 +303,7 @@ def approve(
             raise ClaimNotPending(claim.uid)
         if claim.gap:
             _set_gap(store, now, claim.gap, ["in_review"], "resolved", f"conflicts: {clash}")
-        _log(store, now, by, "claim_conflicts_with_source", gap=claim.gap, claim=claim.uid,
+        log(store, now, by, "claim_conflicts_with_source", gap=claim.gap, claim=claim.uid,
              why=_both_sides(claim, clash), evidence=claim.evidence)  # fmt: skip
         return _claim(store, claim.uid)
     return accept(store, _ctx(now), claim, by, brain, slug=slug, why=why, action="claim_approved")
@@ -328,7 +328,7 @@ def reject(
         gap = _gap(store, claim.gap)
         if gap is not None:
             _reopen(store, now, gap, f"rejected by {by}", rejected=True)
-    _log(store, now, by, "claim_rejected", gap=claim.gap, claim=claim.uid, why=why,
+    log(store, now, by, "claim_rejected", gap=claim.gap, claim=claim.uid, why=why,
          evidence=claim.evidence)  # fmt: skip
     return _claim(store, claim.uid)
 
@@ -351,7 +351,7 @@ def brain_present(brain: BrainFacts, slug: str) -> None:
         raise BrainUnavailable(slug)
 
 
-def _log(store: WorkStore, now: str | float, actor: str, action: str, **fields: Any) -> None:
+def log(store: WorkStore, now: str | float, actor: str, action: str, **fields: Any) -> None:
     entry = {"uid": log_uid(now), "at": now, "actor": actor, "action": action, **fields}
     store.write("ledger/log", DB_USER, entry)
 
