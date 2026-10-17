@@ -1,0 +1,284 @@
+# Golden cases for brain_falkordb, the public FalkorDB/FalkorDB repo (companies/falkordb.yaml).
+# Live data: every sync can change rankings, so anything ranked (experts, impact, activity,
+# owners) is a gold ref read from the graph when the run starts. Literals are only for facts that
+# cannot change: who wrote a merged PR, which issue it closed, bot uids. Several questions are the
+# ones people asked on the Ask page (data/traces/falkordb.jsonl), kept in their words.
+#
+# Schema: evals/cases.py. Needs brain_falkordb synced (make sync SLUG=falkordb); the [semantic]
+# cases also need its chunks embedded with the configured model (make embed SLUG=falkordb).
+
+# --- experts and ownership ------------------------------------------------------------------
+
+- id: query-execution-expert
+  tags: [experts]
+  why: swilly22 and GomezGab lead Query execution (src/execution_plan) on changes and reviews.
+  turns:
+    - question: Who knows the query execution code best?
+      expect:
+        cite_any: [{tool: experts_for_system, params: {system: Query execution}, field: person_uid, top: 2}]
+        tools_any: [experts_for_system]
+        max_steps: 6
+
+- id: ci-expert-not-bot
+  tags: [experts, bots]
+  why: dependabot has about twice DvirDukhan's CI changes, but bots don't count as experts.
+  turns:
+    - question: Who should I ask about the CI pipelines?
+      expect:
+        cite_any: [{tool: experts_for_system, params: {system: CI}, field: person_uid, top: 2}]
+        cite_none: ["person:dependabot[bot]", "person:github-actions[bot]", person:copilot]
+        tools_any: [experts_for_system]
+        max_steps: 6
+
+- id: commands-reviewer
+  tags: [experts]
+  why: AviAvni and DvirDukhan are close on src/commands; either is a fair reviewer.
+  turns:
+    - question: Who should review a change to src/commands?
+      expect:
+        cite_any: [{tool: experts_for_system, params: {system: src/commands}, field: person_uid, top: 2}]
+        tools_any: [experts_for_system]
+        max_steps: 6
+
+- id: declared-owners-vs-workers
+  tags: [ownership]
+  why: CODEOWNERS names only the falkordb-core team, whose members the graph doesn't know; the work is done by a few people.
+  turns:
+    - question: Which code areas have declared owners, and are those owners the ones doing the work?
+      expect:
+        cite_any: [{tool: owners_vs_experts, field: system_uid, top: 3}]
+        tools_any: [owners_vs_experts]
+        text_all: [falkordb-core]
+        max_steps: 6
+
+# --- impact ---------------------------------------------------------------------------------
+
+- id: query-execution-impact
+  tags: [impact]
+  why: Query execution changes almost always come with tests/flow changes.
+  turns:
+    - question: If I change the query execution code, what else is likely to be affected?
+      expect:
+        cite_any: [{tool: impact_of, params: {system: Query execution}, field: system_uid, top: 2}]
+        tools_any: [impact_of]
+        text_all: [tests/flow]
+        max_steps: 6
+
+- id: rdb-serialization-loose-name
+  tags: [impact, naming]
+  why: '"the RDB serialization code" is not a System name; it should be mapped to src/serializers first.'
+  turns:
+    - question: What breaks if I touch the RDB serialization code?
+      expect:
+        cite_any: [{tool: impact_of, params: {system: src/serializers}, field: system_uid, top: 3}, system:src/serializers]
+        tools_any: [impact_of]
+        max_steps: 8
+
+# --- history and why ------------------------------------------------------------------------
+
+- id: unique-constraint-regression
+  tags: [history, why]
+  why: issue 3330 (6.0.0 inserts under a unique constraint 35-120x slower); AviAvni's PR 3334 enforces them by index lookup, not a label scan.
+  turns:
+    - question: Why did node inserts under a unique constraint get so slow in 6.0.0, and who fixed it?
+      expect:
+        cite_any: ["github:FalkorDB/FalkorDB:pr:3334", "github:FalkorDB/FalkorDB:issue:3330"]
+        text_all: [aviavni]
+        text_any: [label scan, index lookup, quadratic]
+        max_steps: 6
+
+- id: parenthesised-where
+  tags: [history, why]
+  why: issues 3331 and 3187 (a parenthesised WHERE fell back to a label scan); PR 3335 fixed both.
+  turns:
+    - question: Why did wrapping a WHERE predicate in parentheses stop the query from using the index?
+      expect:
+        cite_any: ["github:FalkorDB/FalkorDB:pr:3335", "github:FalkorDB/FalkorDB:issue:3331", "github:FalkorDB/FalkorDB:issue:3187"]
+        text_any: [label scan, all node scan, nodebyidseek]
+        max_steps: 6
+
+- id: batch-backport-missed-prs
+  tags: [history, why]
+  why: issue 3191; batch-backport read only the first page (30) of search results until DvirDukhan's PR 3192.
+  turns:
+    - question: Why did batch-backport skip some of the PRs it should have backported?
+      expect:
+        cite_any: ["github:FalkorDB/FalkorDB:pr:3192", "github:FalkorDB/FalkorDB:issue:3191"]
+        text_any: ["30", first page, pagination, paginat]
+        max_steps: 6
+
+# --- semantic search ------------------------------------------------------------------------
+# Worded with no key word of the text that answers: related_work_items and related_documents
+# return none of the cited uids for these exact questions, semantic_search ranks them in its top
+# 8 (checked 2026-10-17 with gemini-embedding-2).
+
+- id: semantic-uniqueness-slowdown
+  tags: [semantic]
+  why: never says unique, constraint, insert, index or 6.0.0; PR 3334 and issue 3330 answer it.
+  turns:
+    - question: Why did adding records under a uniqueness rule get dramatically slower after the big rewrite shipped?
+      expect:
+        cite_any: ["github:FalkorDB/FalkorDB:pr:3334", "github:FalkorDB/FalkorDB:issue:3330"]
+        tools_any: [semantic_search]
+        text_any: [label scan, index, quadratic]
+        max_steps: 6
+
+- id: semantic-container-privileges
+  tags: [semantic]
+  why: never says Docker, root, redis-server or user; PR 3181 and issue 3180 run the server as the falkordb user.
+  turns:
+    - question: Why does our container image stop launching its server process with administrator privileges?
+      expect:
+        cite_any: ["github:FalkorDB/FalkorDB:pr:3181", "github:FalkorDB/FalkorDB:issue:3180"]
+        tools_any: [semantic_search]
+        text_any: [non-root, root, falkordb user]
+        max_steps: 6
+
+- id: semantic-slow-log-crash
+  tags: [semantic]
+  why: never says slow log, panic, multi-byte or 2048; issue 3233 and PR 3234 explain it.
+  turns:
+    - question: What crashed everything when logging a lengthy query containing accented characters?
+      expect:
+        cite_any: ["github:FalkorDB/FalkorDB:issue:3233", "github:FalkorDB/FalkorDB:pr:3234"]
+        tools_any: [semantic_search]
+        text_any: [multi-byte, multibyte, utf-8, utf8, "2048", char boundary]
+        max_steps: 6
+
+- id: semantic-huge-knn
+  tags: [semantic]
+  why: never says vector, k, KNN or crash; issue 3085 (huge k allocated k entries) and PR 3088 (clamp k).
+  turns:
+    - question: What happened when someone asked for an enormous number of nearest neighbours by similarity?
+      expect:
+        cite_any: ["github:FalkorDB/FalkorDB:issue:3085", "github:FalkorDB/FalkorDB:pr:3088"]
+        tools_any: [semantic_search]
+        text_any: [clamp, capacity, allocat, crash]
+        max_steps: 6
+
+# --- docs -----------------------------------------------------------------------------------
+
+- id: project-about
+  tags: [docs]
+  why: asked live twice; the README and CLAUDE.md say it is a graph database (Redis module, Cypher).
+  turns:
+    - question: What is this project is about?
+      expect:
+        cite_any: ["github:FalkorDB/FalkorDB:doc:README.md", "github:FalkorDB/FalkorDB:doc:CLAUDE.md"]
+        text_all: [graph database]
+        text_any: [cypher, redis]
+        max_steps: 5
+
+- id: how-to-profile
+  tags: [docs]
+  why: docs/profiling.md and the profile skill describe profiling with samply.
+  turns:
+    - question: How do I profile FalkorDB to find where a query spends its time?
+      expect:
+        cite_any: ["github:FalkorDB/FalkorDB:doc:docs/profiling.md", "github:FalkorDB/FalkorDB:doc:.claude/skills/profile/SKILL.md"]
+        tools_any: [related_documents, semantic_search]
+        text_all: [samply]
+        max_steps: 5
+
+# --- people and activity (asked live) -------------------------------------------------------
+
+- id: headcount
+  tags: [people, live]
+  why: >-
+    asked live. people_activity returns 100 rows by default, so "100" is the tool's cap, not a
+    count; the graph has 192 people (14 bots, many only filed an issue) and about 74 who wrote
+    or reviewed a PR. A good answer names the few core people and says what it counted.
+  turns:
+    - question: How many engineers are working on the project?
+      expect:
+        cite_any: [{tool: people_activity, field: person_uid, top: 5}]
+        cite_none: ["person:dependabot[bot]", "person:coderabbitai[bot]", "person:copilot-pull-request-reviewer[bot]", person:copilot]
+        tools_any: [people_activity]
+        text_none: [100 engineers, 100 people, 100 contributors]
+        max_steps: 6
+
+- id: no-real-names
+  tags: [people, live, thread, abstain]
+  why: >-
+    asked live. Person nodes hold only GitHub logins (no display name), so the follow-up must
+    say so rather than invent names.
+  turns:
+    - question: Who are the most active contributors?
+      expect:
+        cite_any: [{tool: people_activity, field: person_uid, top: 3}]
+        tools_any: [people_activity]
+        max_steps: 5
+    - question: Give me their names instead of GitHub ids.
+      expect:
+        text_re: "(no|not|n't|without) (a |any )?(real |display |full )?names?|names? (is|are|field is) (empty|missing|not (recorded|stored|available|in))|only (has |have |holds |stores |knows )?(their )?(github )?(logins|ids|usernames|handles)"
+        max_steps: 6
+
+- id: closest-collaborators
+  tags: [people, live]
+  why: >-
+    asked live. AviAvni and DvirDukhan review each other's PRs far more than any other pair
+    (about 3x the next, GomezGab and swilly22). No tool counts pairs, so this needs reviews from
+    person_profile or work_history.
+  turns:
+    - question: Who works most closely with each other, more than anyone else?
+      expect:
+        cite_any: [person:aviavni, person:dvirdukhan]
+        text_all: [aviavni, dvirdukhan]
+        max_steps: 10
+
+- id: most-issues-module
+  tags: [aggregate, live]
+  why: >-
+    asked live; the run hit the step limit. graph/src is linked to far more issues than any
+    other system (about 8x the next). No tool counts issues per system, so this may stay a gap.
+  turns:
+    - question: Which module has the highest number of issues?
+      expect:
+        cite_any: [system:graph/src]
+        text_all: [graph/src]
+        max_steps: 8
+
+# --- abstention -----------------------------------------------------------------------------
+
+- id: no-such-system
+  tags: [abstain]
+  why: FalkorDB has no mobile app in the graph; the answer must say so instead of guessing an owner.
+  turns:
+    - question: Who owns the iOS mobile app?
+      expect:
+        text_re: "((couldn't|could not|can't|cannot|did not|didn't) find|there (is|are) no|no (record|person|one|evidence|match|such|mention|information|data|system)|not (in|found in|present in) the (company |knowledge )?graph|graph (has no|doesn't (show|have|list)|does not (show|have|list)))"
+        cite_none: [{tool: people_activity, field: person_uid, top: 5}]
+        max_steps: 6
+
+- id: no-such-person
+  tags: [abstain]
+  why: nobody called zoe is in the graph.
+  turns:
+    - question: What has zoe been working on lately?
+      expect:
+        text_re: "((couldn't|could not|can't|cannot|did not|didn't) find|there (is|are) no|no (record|person|one|evidence|match|such|mention|information|data)|not (in|found in|present in) the (company |knowledge )?graph|graph (has no|doesn't (show|have|list)|does not (show|have|list)))"
+        cite_none: [{tool: people_activity, field: person_uid, top: 5}]
+        max_steps: 5
+
+# --- conversation ---------------------------------------------------------------------------
+
+- id: greeting
+  tags: [chat, live]
+  why: asked live; a greeting needs an answer, not graph tool calls.
+  turns:
+    - question: Hii
+      expect:
+        max_steps: 0
+
+- id: interview-asks
+  tags: [interview, live]
+  why: >-
+    thumbs-down on trace d425714fc450 ("it is supposed to ask me questions whenever I tell it
+    to"); asked for questions, the brain asks from its open gaps, not a menu of what it can
+    answer, and files nothing before the person replies. Typo kept as asked.
+  turns:
+    - question: Ask me quetions.
+      expect:
+        tools_all: [open_gaps]
+        tools_none: [record_testimony]
+        max_steps: 6
