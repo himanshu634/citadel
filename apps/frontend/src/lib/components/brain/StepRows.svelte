@@ -2,12 +2,14 @@
 @component
 The rows one graph step returned, as `WalkSteps` and `WalkLedger` list them when a step is open:
 paths read as chains of nodes and relationships, other rows as one line (`rowViews`). Rows a
-citation used carry its number, and the rows of the active citation are tinted. Says so when the
-step found nothing, and how many more rows the agent read than are shown.
+citation used carry its number, and the rows of the active citation are tinted. A row or hop whose
+node has a page (a PR, issue, commit, document) links to it, in a new tab. Says so when the step
+found nothing, and how many more rows the agent read than are shown.
 -->
 <script lang="ts">
 	import type { WalkStep } from '$lib/types';
 	import { rowViews } from '$lib/walk';
+	import RefLink from '../ui/RefLink.svelte';
 
 	type Props = {
 		step: WalkStep;
@@ -35,12 +37,12 @@ step found nothing, and how many more rows the agent read than are shown.
 				{#if row.chain}
 					<span class="chain">
 						{#each row.chain as link, j (j)}
-							<span class="hop">{link.title}</span>
+							<span class="hop">{#if link.url}<RefLink href={link.url}>{link.title}</RefLink>{:else}{link.title}{/if}</span>
 							{#if link.rel}<span class="rel">{link.forward ? '' : '← '}{link.rel}{link.forward ? ' →' : ''}</span>{/if}
 						{/each}
 					</span>
 				{:else}
-					<span class="text">{row.text}</span>
+					<span class="text">{#if row.url}<RefLink href={row.url}>{row.text}</RefLink>{:else}{row.text}{/if}</span>
 				{/if}
 				{#each used as n (n)}<span class={['cite', { on: n === active }]}><span class="sr-only">cited as </span>{n}</span>{/each}
 			</li>

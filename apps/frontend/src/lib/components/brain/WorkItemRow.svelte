@@ -1,10 +1,13 @@
 <!--
 @component
 One work item (PR, issue or thread) in a list: kind icon, title, who and when, state badge.
+With a `url` the whole row is one link that opens the item where it lives (GitHub, Linear), in a
+new tab: the number and the title both open it.
 -->
 <script lang="ts">
 	import { CircleDot, GitPullRequest, MessagesSquare } from '@lucide/svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import { siteName } from '$lib/links';
 	import type { WorkItem } from '$lib/types';
 
 	type Props = { item: WorkItem };
@@ -35,14 +38,21 @@ One work item (PR, issue or thread) in a list: kind icon, title, who and when, s
 	);
 </script>
 
-<div class="row">
+<svelte:element
+	this={item.url ? 'a' : 'div'}
+	class={['row', { link: item.url }]}
+	href={item.url}
+	target={item.url ? '_blank' : undefined}
+	rel={item.url ? 'noreferrer' : undefined}
+	title={item.url ? `Open on ${siteName(item.url)}` : undefined}
+>
 	<span class="icon" aria-hidden="true"><Icon /></span>
-	<div class="main">
+	<span class="main">
 		<span class="title">{item.title}</span>
 		<span class="meta">{meta}</span>
-	</div>
+	</span>
 	<Badge {tone}>{item.state}</Badge>
-</div>
+</svelte:element>
 
 <style>
 	.row {
@@ -51,6 +61,16 @@ One work item (PR, issue or thread) in a list: kind icon, title, who and when, s
 		gap: var(--space-3);
 		padding-block: var(--space-3);
 		min-width: 0;
+	}
+	.link {
+		color: inherit;
+		text-decoration: none;
+	}
+	.link:hover .title {
+		color: var(--color-accent);
+		text-decoration: underline;
+		text-decoration-thickness: var(--border-hair);
+		text-underline-offset: 0.2em;
 	}
 	.icon {
 		color: var(--node-work-item);

@@ -11,6 +11,8 @@ export { default as EmptyState } from './components/ui/EmptyState.svelte';
 export { default as Input } from './components/ui/Input.svelte';
 export { default as Menu } from './components/ui/Menu.svelte';
 export { default as NodeChip } from './components/ui/NodeChip.svelte';
+export { default as RefLink } from './components/ui/RefLink.svelte';
+export { default as RefText } from './components/ui/RefText.svelte';
 export { default as Select } from './components/ui/Select.svelte';
 export { default as Splitter } from './components/ui/Splitter.svelte';
 export { default as Stat } from './components/ui/Stat.svelte';

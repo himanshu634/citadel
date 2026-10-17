@@ -3,13 +3,17 @@
 What the Graph page shows about the selected node: its kind and territory, its fields (the
 `get_entity` tool), where its neighbours live, its links by relationship, and its most linked
 neighbours, which select in turn. Why: the map shows shape; this panel says what the node holds.
+Its number, commit, path and the refs in its body open on GitHub (or its own site) in a new tab.
 Counts come from the links the map draws, so they match what is lit; `entity` only adds fields.
 -->
 <script lang="ts">
 	import { ExternalLink, X } from '@lucide/svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import RefLink from '$lib/components/ui/RefLink.svelte';
+	import RefText from '$lib/components/ui/RefText.svelte';
 	import { nodeName, type Neighbourhood } from '$lib/graph';
+	import { NO_REFS, refContext, refUrl, repoOfUid, siteName, textRuns } from '$lib/links';
 	import {
 		LABEL_TYPES,
 		NODE_LABELS,
@@ -64,7 +68,21 @@ Counts come from the links the map draws, so they match what is lit; `entity` on
 	const rest = $derived(hood.byTerritory.slice(5).reduce((s, t) => s + t.count, 0));
 	const widest = $derived(Math.max(1, ...hood.byTerritory.map((t) => t.count)));
 	const date = $derived(entity?.date ? formatDate(entity.date) : null);
-	const body = $derived(entity?.body?.trim() ? entity.body.trim().slice(0, 280) : null);
+	// Cut at a word boundary: a ref cut in half (#3327 -> #33) would link to another item.
+	const body = $derived.by(() => {
+		const text = entity?.body?.trim();
+		if (!text) return null;
+		return text.length > 280 ? text.slice(0, 280).replace(/\s+\S*$/, '') : text;
+	});
+	const href = $derived(refUrl(node.uid, node.url));
+	/** A commit's SHA or a document's path, read from its uid. */
+	const commit = $derived(/:commit:([0-9a-f]+)$/i.exec(node.uid)?.[1] ?? null);
+	const docPath = $derived(/:doc:(.+)$/.exec(node.uid)?.[1] ?? null);
+	// Refs in a GitHub item's body (`#12`, `src/a.py`) belong to its repo.
+	const bodyRefs = $derived.by(() => {
+		const repo = repoOfUid(node.uid);
+		return repo ? refContext([], [repo]) : NO_REFS;
+	});
 
 	function formatDate(iso: string): string {
 		const d = new Date(iso);
@@ -104,9 +122,16 @@ Counts come from the links the map draws, so they match what is lit; `entity` on
 		<h3>Fields</h3>
 		<dl>
 			{#if node.kind}<dt>kind</dt><dd>{kindWord}</dd>{/if}
-			{#if node.number != null}<dt>number</dt><dd class="tabular">{node.number}</dd>{/if}
+			{#if node.number != null}<dt>number</dt>
+				<dd class="tabular">{#if href}<RefLink {href}>#{node.number}</RefLink>{:else}{node.number}{/if}</dd>{/if}
+			{#if commit}<dt>commit</dt>
+				<dd class="mono">{#if href}<RefLink {href}>{commit.slice(0, 10)}</RefLink>{:else}{commit.slice(0, 10)}{/if}</dd>{/if}
+			{#if docPath}<dt>path</dt>
+				<dd class="mono">{#if href}<RefLink {href}>{docPath}</RefLink>{:else}{docPath}{/if}</dd>{/if}
 			{#if date}<dt>date</dt><dd>{date}</dd>{/if}
-			{#if body}<dt>body</dt><dd class="body">{body}{entity && entity.body.length > 280 ? '…' : ''}</dd>{/if}
+			{#if body}<dt>body</dt><dd class="body"
+					><RefText runs={textRuns(body, bodyRefs)} />{entity && entity.body.length > 280 ? '…' : ''}</dd
+				>{/if}
 			<dt>uid</dt>
 			<dd class="mono">{node.uid}</dd>
 		</dl>
@@ -179,10 +204,10 @@ Counts come from the links the map draws, so they match what is lit; `entity` on
 		</section>
 	{/if}
 
-	{#if node.url}
+	{#if href}
 		<footer>
-			<Button href={node.url} target="_blank" rel="noreferrer" size="sm"
-				>Open on GitHub <ExternalLink aria-hidden="true" /></Button
+			<Button {href} target="_blank" rel="noreferrer" size="sm"
+				>Open on {siteName(href)} <ExternalLink aria-hidden="true" /></Button
 			>
 		</footer>
 	{/if}

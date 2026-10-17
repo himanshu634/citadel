@@ -4,6 +4,7 @@ import {
 	CARRY_MAX,
 	STAGE,
 	answerBlocks,
+	answerRefs,
 	answerPlainText,
 	carryOver,
 	checkLine,
@@ -238,6 +239,20 @@ describe('rowViews', () => {
 		const pr = rowViews({ tool: 'work_history', rows: [{ uid: 'x:pr:3', number: 3, title: 'feat: y' }] });
 		expect(pr[0].text).toBe('#3 feat: y');
 	});
+
+	test('a row and a hop carry where their node opens', () => {
+		const [row] = rowViews({ tool: 'work_history', rows: [{ uid: 'github:o/r:pr:3', number: 3, title: 'feat: y', url: null }] });
+		expect(row.url).toBe('https://github.com/o/r/pull/3');
+		const [own] = rowViews({ tool: 'work_history', rows: [{ uid: 'x:pr:3', title: 'y', url: 'https://example.com/3' }] });
+		expect(own.url).toBe('https://example.com/3');
+		const [person] = rowViews({ tool: 'experts_for_system', rows: [{ login: 'carol', person_uid: 'person:carol' }] });
+		expect(person.url).toBeUndefined();
+		const [chain] = rowViews({
+			tool: 'path_between',
+			rows: [{ nodes: [{ uid: 'person:a', name: 'a' }, { uid: 'github:o/r:commit:abc1', name: 'fix' }], rels: [] }]
+		});
+		expect(chain.chain?.map((l) => l.url)).toEqual([undefined, 'https://github.com/o/r/commit/abc1']);
+	});
 });
 
 describe('answerBlocks', () => {
@@ -271,6 +286,56 @@ describe('answerBlocks', () => {
 			},
 			{ kind: 'ol', items: [[{ kind: 'text', text: 'one' }], [{ kind: 'text', text: 'two' }]] }
 		]);
+	});
+});
+
+describe('answerBlocks with refs', () => {
+	const steps = [
+		{ id: 's1', n: 1, tool: 'work_history', status: 'done', rows: [{ uid: 'github:o/r:pr:10', number: 10, title: 'x', url: 'https://github.com/o/r/pull/10' }] }
+	] as unknown as WalkStep[];
+	const refs = answerRefs(steps, [], ['o/r']);
+
+	test('numbers, named refs and paths in code become links; words stay code', () => {
+		const [block] = answerBlocks('Fixed in #10 (see `src/a.py:4`, `identity`) and #11 [1].', refs);
+		expect(block).toEqual({
+			kind: 'p',
+			inlines: [
+				{ kind: 'text', text: 'Fixed in ' },
+				{ kind: 'link', text: '#10', href: 'https://github.com/o/r/pull/10', code: false },
+				{ kind: 'text', text: ' (see ' },
+				{ kind: 'link', text: 'src/a.py:4', href: 'https://github.com/o/r/blob/HEAD/src/a.py#L4', code: true },
+				{ kind: 'text', text: ', ' },
+				{ kind: 'code', text: 'identity' },
+				{ kind: 'text', text: ') and ' },
+				{ kind: 'link', text: '#11', href: 'https://github.com/o/r/issues/11', code: false },
+				{ kind: 'text', text: ' ' },
+				{ kind: 'cite', n: 1 },
+				{ kind: 'text', text: '.' }
+			]
+		});
+	});
+
+	test('a line that starts with #12 keeps it; a heading loses its hashes', () => {
+		const blocks = answerBlocks('#10 fixed it\n\n## Owners', refs);
+		expect(blocks[0]).toEqual({
+			kind: 'p',
+			inlines: [
+				{ kind: 'link', text: '#10', href: 'https://github.com/o/r/pull/10', code: false },
+				{ kind: 'text', text: ' fixed it' }
+			]
+		});
+		expect(blocks[1]).toEqual({ kind: 'p', inlines: [{ kind: 'text', text: 'Owners' }] });
+	});
+
+	test('a synthetic company links only what its walk saw', () => {
+		const synth = answerRefs([{ ...steps[0], rows: [{ uid: 'synthetic:pr:1', number: 1, url: 'https://example.com/1' }] }] as WalkStep[]);
+		expect(answerBlocks('#1 and #2', synth)[0]).toEqual({
+			kind: 'p',
+			inlines: [
+				{ kind: 'link', text: '#1', href: 'https://example.com/1', code: false },
+				{ kind: 'text', text: ' and #2' }
+			]
+		});
 	});
 });
 

@@ -41,6 +41,8 @@ follow-up on another model says so.
 	import { getCompanies } from '$lib/companies.svelte';
 	import { WALK_LIMITS, clampSize, readSplit } from '$lib/splitter';
 	import { askFieldOf } from '$lib/topbar';
+	import { api } from '$lib/api/client';
+	import { githubRepos } from '$lib/links';
 
 	let { data } = $props();
 	const companies = getCompanies();
@@ -67,6 +69,20 @@ follow-up on another model says so.
 	});
 	$effect(() => {
 		void chats.refresh();
+	});
+
+	// The company's GitHub repos, so a bare `#12` in an answer opens there. Best effort: without
+	// them, refs link only to what the answer's walk saw.
+	let repos = $state<string[]>([]);
+	$effect(() => {
+		const s = slug;
+		repos = [];
+		api.sources(s).then(
+			(out) => {
+				if (s === slug) repos = githubRepos(out.sources);
+			},
+			() => {}
+		);
 	});
 
 	// The same list for every company; the pick is kept in this browser.
@@ -331,6 +347,7 @@ follow-up on another model says so.
 					onrate={(rating, note) => thread.rate(i, rating, note)}
 					answeredBy={turn.answer?.model ? (models.nameOf(turn.answer.model) ?? turn.answer.model) : null}
 					switched={was && wrote && was !== wrote ? { from: models.nameOf(was) ?? was, to: models.nameOf(wrote) ?? wrote } : null}
+					{repos}
 				/>
 			{/each}
 		</div>
