@@ -31,6 +31,7 @@ import type {
 	Rating,
 	RepoLookup,
 	Review,
+	SourcesOut,
 	Thread,
 	ThreadPage,
 	ThreadSummary,
@@ -146,14 +147,20 @@ export const api = {
 		(slug: string, cfg: CompanyConfig, opts: { rebuild: true }): Promise<BuildSnapshot>;
 		(slug: string, cfg: CompanyConfig, opts?: { dryRun?: boolean; rebuild?: boolean }): Promise<CompanyDetail>;
 	},
-	/** `full` ignores the sync cursors and loads everything in the window again. */
-	startBuild: (slug: string, full = false) =>
-		request<BuildSnapshot>('POST', `${company(slug)}/builds`, { full }),
+	/** `full` ignores the sync cursors and loads everything in the window again. `sources` limits
+	 * the download to those source keys (loading still walks every source). */
+	startBuild: (slug: string, full = false, sources?: string[]) =>
+		request<BuildSnapshot>('POST', `${company(slug)}/builds`, sources ? { full, sources } : { full }),
 	/** The running build, else the last one. 404 when the company never built. */
 	currentBuild: (slug: string) => request<BuildSnapshot>('GET', `${company(slug)}/builds/current`),
 	stopBuild: (slug: string) => request<BuildSnapshot>('DELETE', `${company(slug)}/builds/current`),
 	/** 503 while FalkorDB is down. */
 	overview: (slug: string) => request<Overview>('GET', `${company(slug)}/overview`),
+	/** Each configured source with its status, the graph's counts per source label, leftovers. */
+	sources: (slug: string) => request<SourcesOut>('GET', `${company(slug)}/sources`),
+	/** Delete a sync record whose source left the config. 409: still configured, or a build runs. */
+	forgetLeftover: (slug: string, key: string) =>
+		request<void>('DELETE', `${company(slug)}/sources/leftovers?key=${encodeURIComponent(key)}`),
 	/** The whole graph for the Graph page; `bots` adds the bot accounts and their links. */
 	graph: (slug: string, bots = false) =>
 		request<GraphView>('GET', `${company(slug)}/graph${bots ? '?bots=true' : ''}`),

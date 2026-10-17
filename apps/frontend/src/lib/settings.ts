@@ -1,13 +1,14 @@
 /**
  * The rules of the Settings page that do not need a browser: whether the draft differs from the
- * saved config, what the rebuild dialog says, and what a refused save means.
+ * saved config and in which tabs, what the save bar says a save will cost, what the rebuild dialog
+ * says, and what a refused save means.
  *
  * Why: "Save" must stay off until something changed, and a save the server refuses (a rebuild is
  * needed, a build is running, the draft is invalid) must each lead to its own message. Pure
  * functions let vitest cover every case; the page only draws what they return.
  */
 import { ApiError, describeError } from './api/client';
-import { cleanDraft } from './onboarding';
+import { SECTIONS, SECTION_KEYS, STEP_NAMES, cleanDraft, type Section } from './onboarding';
 import type { CompanyConfig, ConfigChange, FieldError } from './types';
 
 /** `value` with object keys sorted, so two equal configs print the same text. */
@@ -34,6 +35,58 @@ function canonical(config: CompanyConfig): string {
 /** True when saving `draft` would change something. */
 export function isDirty(draft: CompanyConfig, loaded: CompanyConfig): boolean {
 	return canonical(draft) !== canonical(loaded);
+}
+
+/** The sections (Settings tabs) whose part of the file differs from the saved config, in tab order. */
+export function changedSections(draft: CompanyConfig, loaded: CompanyConfig): Section[] {
+	const a = JSON.parse(canonical(draft)) as Record<string, unknown>;
+	const b = JSON.parse(canonical(loaded)) as Record<string, unknown>;
+	return SECTIONS.filter((s) =>
+		SECTION_KEYS[s].some((key) => JSON.stringify(a[key]) !== JSON.stringify(b[key]))
+	);
+}
+
+/** "Company and Sources": section names joined for a sentence. */
+function sectionList(sections: Section[]): string {
+	const names = sections.map((s) => STEP_NAMES[s]);
+	return names.length < 2 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
+
+/** The save bar's first line: where the unsaved edits are. */
+export function unsavedLine(sections: Section[]): string {
+	return sections.length === 0 ? 'Unsaved changes.' : `Unsaved changes in ${sectionList(sections)}.`;
+}
+
+export interface SaveCost {
+	/** The Save button's words: it names a rebuild before it is pressed. */
+	label: 'Save' | 'Save and rebuild';
+	/** What the save will do, in one sentence. */
+	line: string;
+	rebuild: boolean;
+}
+
+/** What saving the draft will do, from the server's dry run; null while it is not known. */
+export function saveCost(change: ConfigChange | null): SaveCost | null {
+	if (!change || !change.changed) return null;
+	const list = change.refetch.join(', ');
+	if (change.rebuild) {
+		return {
+			label: 'Save and rebuild',
+			rebuild: true,
+			line:
+				change.refetch.length > 0
+					? `Saving downloads ${list} again and rebuilds the graph.`
+					: 'Saving rebuilds the graph from the data already downloaded.'
+		};
+	}
+	return {
+		label: 'Save',
+		rebuild: false,
+		line:
+			change.refetch.length > 0
+				? `Saving starts a build to download ${list}.`
+				: 'Saves at once. The graph is not touched.'
+	};
 }
 
 export interface RebuildDialog {
@@ -94,12 +147,28 @@ export function syncLine(refetch: string[]): string {
 		: 'Saved';
 }
 
+export interface SaveReason {
+	text: string;
+	/** The tab that holds the problem, when there is one to go to. */
+	section: Section | null;
+}
+
+const sectionNamed = (name: string): Section | null =>
+	SECTIONS.find((s) => STEP_NAMES[s] === name) ?? null;
+
 /**
- * The footer line for a save that is shut. The shared gate words its reasons for the wizard's
- * steps ("Sources (step 2): ... to continue."); Settings shows every section on one page.
+ * Why Save is shut, and which tab to go to. The shared gate words its reasons for the wizard's
+ * steps ("Sources (step 2): ... to continue."); Settings shows the sections as tabs.
  */
-export function settingsReason(reason: string | null): string | null {
+export function settingsReason(reason: string | null): SaveReason | null {
 	if (reason === null) return null;
-	if (/^Fix the errors in /.test(reason)) return 'Fix the fields marked above.';
-	return reason.replace(/^[^:]*\(step \d\): /, '').replace(/ to continue\.$/, ' to save.');
+	const errors = /^Fix the errors in (.+) \(step \d\) first\.$/.exec(reason);
+	if (errors) return { text: `Fix the fields marked in ${errors[1]}.`, section: sectionNamed(errors[1]) };
+	if (reason === 'Fix the fields marked above.') {
+		const last = SECTIONS[SECTIONS.length - 1];
+		return { text: `Fix the fields marked in ${STEP_NAMES[last]}.`, section: last };
+	}
+	const step = /^(.+) \(step \d\): (.*)$/.exec(reason);
+	const text = (step ? step[2] : reason).replace(/ to continue\.$/, ' to save.');
+	return { text, section: step ? sectionNamed(step[1]) : null };
 }

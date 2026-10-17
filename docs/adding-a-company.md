@@ -178,5 +178,18 @@ on purpose: offline and live uids differ, so one company with both would hold ev
 
 There is no Jira adapter yet. It would produce the same canonical tickets: Jira statuses map to
 `status_category` through the status category key, priorities to urgent/high/medium/low, "Blocks"
-links to `BLOCKS`, and accounts to logins through `people.aliases`. The full field mapping is in
-[section 6 of the Linear adapter design](superpowers/specs/2026-10-16-linear-adapter-design.md).
+links to `BLOCKS`, and accounts to logins through `people.aliases`. The full field mapping:
+
+| Canonical | Jira Cloud REST v3 |
+|---|---|
+| uid | `jira:<site>:issue:<id>` |
+| `key` / `number` | `key` / its numeric part |
+| `title` / `body` | `fields.summary` / `fields.description` (Atlassian Document Format → plain text) |
+| `state` / `status_category` | `fields.status.name` / `fields.status.statusCategory.key`: `new` → todo, `indeterminate` → in_progress, `done` → done |
+| `priority` | `fields.priority.name`: Highest → urgent, High → high, Medium → medium, Low/Lowest → low |
+| `due_date` | `fields.duedate` |
+| `assignees` / `author_login` | `fields.assignee` / `fields.reporter`. People are `accountId`s, so a company maps them to logins with `people.aliases`. |
+| `container` | `fields.project.key` |
+| BLOCKS | `fields.issuelinks` of type "Blocks", outward |
+| MENTIONS | "Relates" links. PRs come from the dev-status panel API through `url_ref`. |
+| Search | `GET /rest/api/3/search/jql` (the old `/search` is deprecated); auth is email + API token |

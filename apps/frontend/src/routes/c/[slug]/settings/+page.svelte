@@ -1,10 +1,13 @@
 <!--
 @component
-One company's settings (`/c/<slug>/settings`): the three onboarding steps as one form, with the
-graph name read-only. "Save" first asks the server what the change needs (`PUT ?dry_run=1`). A
-change that only edits or adds saves at once; one that alters what belongs in the graph (the start
-date, a removed source, rules) opens a dialog, and only "Save and rebuild" empties and rebuilds the
-graph. A build in progress blocks a save with a message that links to its progress.
+One company's settings (`/c/<slug>/settings`): the three onboarding steps as three tabs (Company,
+Sources, Systems and people) over one draft, with Sync now in the page header. A tab marks its
+unsaved edits and counts its errors. Once something changed, a save bar says where, what saving
+will do (a debounced `PUT ?dry_run=1` as you edit) and names the button for it: "Save" or "Save
+and rebuild". "Save" asks the server again: a change that only edits or adds saves at once; one
+that alters what belongs in the graph (the start date, a removed source, rules) opens a dialog, and
+only "Save and rebuild" there empties and rebuilds the graph. A build in progress blocks a save
+with a message that links to its progress.
 
 Why: the page is one component for every company, so everything it holds belongs to the slug it
 loaded. A switch resets it, and answers that arrive for the company you left are dropped.
@@ -16,15 +19,30 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 	import { resolve } from '$app/paths';
 	import { api, describeError } from '$lib/api/client';
 	import { getCompanies } from '$lib/companies.svelte';
-	import { Banner, Button, Card, CompanyForm, Dialog, EmptyState } from '$lib';
-	import { cleanDraft, debounce, saveGate, visibleErrors, type Gate } from '$lib/onboarding';
+	import { Banner, Button, Card, CompanyForm, Dialog, Tabs } from '$lib';
+	import {
+		SECTIONS,
+		STEP_NAMES,
+		cleanDraft,
+		debounce,
+		errorsIn,
+		firstSectionWithErrors,
+		saveGate,
+		sourceErrors,
+		visibleErrors,
+		type Gate,
+		type Section
+	} from '$lib/onboarding';
 	import { repoChecks } from '$lib/repochecks.svelte';
 	import {
+		changedSections,
 		classifySaveError,
 		isDirty,
 		rebuildDialog,
+		saveCost,
 		settingsReason,
 		syncLine,
+		unsavedLine,
 		type RebuildDialog
 	} from '$lib/settings';
 	import { startSync } from '$lib/sync';
@@ -41,6 +59,9 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 	let form = $state<Form | null>(null);
 	let loadError = $state<string | null>(null);
 	let reload = $state(0);
+	let tab = $state<Section>('company');
+	// Bumped by Discard: the form is mounted again, so its local rows reseed from the saved config.
+	let mount = $state(0);
 
 	// Everything below belongs to the company in `form`. `run` is bumped on every switch, so a
 	// request that finishes afterwards sees it is stale and changes nothing.
@@ -64,6 +85,8 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 		dialog: RebuildDialog;
 	} | null>(null);
 	let dialogOpen = $state(false);
+	/** The dry run's answer and the draft it was asked for. */
+	let estimate = $state.raw<{ key: string; change: ConfigChange } | null>(null);
 
 	// --- Load ----------------------------------------------------------------------------------------
 	$effect(() => {
@@ -78,7 +101,8 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 		validating = true;
 		saving = syncing = running = dialogOpen = false;
 		saved = started = saveError = null;
-		rejected = pending = null;
+		rejected = pending = estimate = null;
+		tab = 'company';
 		let live = true;
 		api.company(slug).then(
 			(answer) => {
@@ -124,10 +148,12 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 		run += 1;
 		version += 1;
 		validate.cancel();
+		askCost.cancel();
 	});
 
 	// --- What the person is told ---------------------------------------------------------------------
 	const key = () => (form ? JSON.stringify(cleanDraft($state.snapshot(form.draft))) : '');
+	const draftKey = $derived(key());
 
 	// The slug is read-only here, and the server says it is "taken" by this very company: not shown.
 	const errors = $derived.by<FieldError[]>(() => {
@@ -155,6 +181,38 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 	const canSave = $derived(!!gateResult && !gateResult.blocked && dirty && !saving);
 	const why = $derived(dirty && !saving ? settingsReason(gateResult?.reason ?? null) : null);
 
+	// --- Per tab: unsaved edits and errors ------------------------------------------------------------
+	const changed = $derived(form ? changedSections(form.draft, form.loaded) : []);
+	const tabs = $derived(
+		SECTIONS.map((s) => {
+			const shown = form ? errorsIn(visibleErrors(form.draft, errors), s).length : 0;
+			const repo = form && s === 'sources' ? sourceErrors(form.draft, (r) => repoChecks.fact(r)).length : 0;
+			return {
+				value: s,
+				label: STEP_NAMES[s],
+				count: s === 'sources' ? form?.draft.sources.length : undefined,
+				dirty: changed.includes(s),
+				errors: shown + repo
+			};
+		})
+	);
+
+	// --- What saving will cost, asked as you edit -------------------------------------------------------
+	const askCost = debounce(async (slug: string, payload: CompanyConfig, asked: string, mine: number) => {
+		try {
+			const change = await api.update(slug, payload, { dryRun: true });
+			if (mine === run) estimate = { key: asked, change };
+		} catch {
+			// A refused dry run says nothing about the cost; Save asks again and explains.
+		}
+	}, 400);
+
+	$effect(() => {
+		if (!form || !canSave) return;
+		askCost(form.slug, JSON.parse(draftKey) as CompanyConfig, draftKey, run);
+	});
+	const cost = $derived(estimate && estimate.key === draftKey ? saveCost(estimate.change) : null);
+
 	// --- Save ------------------------------------------------------------------------------------------
 	function clearMessages() {
 		saved = started = saveError = null;
@@ -174,7 +232,9 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 			dialogOpen = false;
 			pending = null;
 			rejected = { key: JSON.stringify(payload), errors: problem.errors };
-			saveError = 'The server found a problem with these settings. Fix the fields marked above.';
+			const first = firstSectionWithErrors(problem.errors);
+			if (first >= 0) tab = SECTIONS[first];
+			saveError = `The server found a problem with these settings. Fix the fields marked in ${STEP_NAMES[tab]}.`;
 		} else {
 			saveError = problem.message;
 		}
@@ -249,6 +309,14 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 		if (mine === run) saving = false;
 	}
 
+	function discard() {
+		if (saving || !form) return;
+		form.draft = JSON.parse(JSON.stringify(form.loaded)) as CompanyConfig;
+		rejected = null;
+		clearMessages();
+		mount += 1;
+	}
+
 	function cancelRebuild() {
 		if (saving) return;
 		dialogOpen = false;
@@ -275,9 +343,23 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 
 <div class="page">
 	<header class="head">
-		<h1>Settings</h1>
-		{#if company}
-			<p>{company.name}, graph <code>brain_{company.slug}</code>.</p>
+		<div>
+			<h1>Settings</h1>
+			{#if company}
+				<p>{company.name}, graph <code>brain_{company.slug}</code>.</p>
+			{/if}
+		</div>
+		{#if form}
+			<div class="head-actions">
+				{#if started === 'sync'}
+					<p class="done" role="status">
+						<Check aria-hidden="true" />Sync started. <a href={buildPath}>See progress</a>
+					</p>
+				{/if}
+				<Button onclick={syncNow} loading={syncing} disabled={company?.status === 'building'}>
+					<RefreshCw aria-hidden="true" />Sync now
+				</Button>
+			</div>
 		{/if}
 	</header>
 
@@ -293,49 +375,60 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 		{#if apiProblem}
 			<Banner tone="danger" title="Can't reach the Citadel API">{apiProblem}</Banner>
 		{/if}
+		{#if running}
+			<Banner tone="warning" title="A build is running. Wait for it or stop it, then save again.">
+				{#snippet action()}<Button size="sm" href={buildPath}>See progress</Button>{/snippet}
+			</Banner>
+		{/if}
+		{#if saveError}
+			<Banner tone="danger" title="Could not save {f.draft.name.trim() || 'the company'}">
+				{saveError}
+			</Banner>
+		{/if}
 
-		<Card>
-			<form class="form" onsubmit={(event) => { event.preventDefault(); void save(); }} novalidate>
-				<fieldset class="fields" disabled={saving}>
-					{#key f.slug}
-						<CompanyForm bind:draft={f.draft} section="all" {errors} slugLocked />
-					{/key}
-				</fieldset>
+		<form class="form" onsubmit={(event) => { event.preventDefault(); void save(); }} novalidate>
+			<fieldset class="fields" disabled={saving}>
+				<Tabs items={tabs} bind:value={() => tab, (v) => (tab = v as Section)} label="Settings sections">
+					{#snippet panel(value)}
+						<Card>
+							{#key `${f.slug}:${mount}`}
+								<CompanyForm bind:draft={f.draft} section={value as Section} {errors} existing />
+							{/key}
+						</Card>
+					{/snippet}
+				</Tabs>
+			</fieldset>
 
-				{#if running}
-					<Banner tone="warning" title="A build is running. Wait for it or stop it, then save again.">
-						{#snippet action()}<Button size="sm" href={buildPath}>See progress</Button>{/snippet}
-					</Banner>
-				{/if}
-				{#if saveError}
-					<Banner tone="danger" title="Could not save {f.draft.name.trim() || 'the company'}">
-						{saveError}
-					</Banner>
-				{/if}
-				{#if why}<p class="why" role="status">{why}</p>{/if}
-
-				<div class="foot">
-					<Button onclick={syncNow} loading={syncing} disabled={company?.status === 'building'}>
-						<RefreshCw aria-hidden="true" />Sync now
-					</Button>
-					<div class="save">
-						{#if started === 'sync'}
-							<p class="done" role="status">
-								<Check aria-hidden="true" />Sync started. <a href={buildPath}>See progress</a>
+			{#if dirty}
+				<div class="bar" role="region" aria-label="Unsaved changes">
+					<div class="bar-text">
+						<p class="bar-title">{unsavedLine(changed)}</p>
+						{#if why}
+							<p class="why" role="status">
+								{why.text}
+								{#if why.section && why.section !== tab}
+									{@const go = why.section}
+									<button type="button" class="link" onclick={() => (tab = go)}>
+										Go to {STEP_NAMES[go]}
+									</button>
+								{/if}
 							</p>
-						{:else if saved && !dirty}
-							<p class="done" role="status">
-								<Check aria-hidden="true" />{saved}{#if started === 'build'}
-									<a href={buildPath}>See progress</a>{/if}
-							</p>
+						{:else if cost}
+							<p class="cost" class:rebuild={cost.rebuild}>{cost.line}</p>
 						{/if}
-						<Button variant="primary" type="submit" loading={saving && !dialogOpen} disabled={!canSave}>
-							Save
-						</Button>
 					</div>
+					<Button onclick={discard} disabled={saving}>Discard</Button>
+					<Button variant="primary" type="submit" loading={saving && !dialogOpen} disabled={!canSave}>
+						{cost?.label ?? 'Save'}
+					</Button>
 				</div>
-			</form>
-		</Card>
+			{:else if saved}
+				<p class="done" role="status">
+					<Check aria-hidden="true" />{saved}{#if started === 'build'}
+						<a href={buildPath}>See progress</a>{/if}
+				</p>
+			{/if}
+		</form>
 	{/if}
 </div>
 
@@ -368,6 +461,13 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 		flex-direction: column;
 		gap: var(--space-6);
 	}
+	.head {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		justify-content: space-between;
+		gap: var(--space-4);
+	}
 	h1 {
 		font-size: var(--text-2xl);
 		font-variation-settings: 'wdth' var(--width-brand);
@@ -378,6 +478,15 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 		color: var(--color-text-muted);
 		overflow-wrap: anywhere;
 	}
+	.head-actions {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-3);
+	}
+	.head-actions .done {
+		margin-top: 0;
+	}
 	code {
 		font-family: var(--font-mono);
 	}
@@ -387,7 +496,7 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 	.form {
 		display: flex;
 		flex-direction: column;
-		gap: var(--space-6);
+		gap: var(--space-4);
 	}
 	.fields {
 		min-width: 0;
@@ -395,22 +504,47 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 		padding: 0;
 		border: 0;
 	}
-	.why {
+	/* The save bar stays in view while the tab scrolls; it only exists while something changed. */
+	.bar {
+		position: sticky;
+		bottom: var(--space-4);
+		z-index: 2;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-3);
+		padding: var(--space-3) var(--space-4);
+		background: var(--color-surface-raised);
+		border: var(--border-hair) solid var(--color-line-strong);
+		border-radius: var(--radius-md);
+		box-shadow: var(--shadow-overlay);
+	}
+	.bar-text {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		margin-right: auto;
+		min-width: 0;
+	}
+	.bar-title {
+		font-weight: var(--weight-semibold);
+	}
+	.why,
+	.cost {
 		font-size: var(--text-sm);
 		color: var(--color-text-muted);
 	}
-	.foot {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: var(--space-3);
-		flex-wrap: wrap;
+	.cost.rebuild {
+		color: var(--color-warning);
 	}
-	.save {
-		display: flex;
-		align-items: center;
-		gap: var(--space-3);
-		flex-wrap: wrap;
+	.link {
+		padding: 0;
+		border: 0;
+		background: none;
+		color: var(--color-text);
+		font: inherit;
+		text-decoration: underline;
+		cursor: pointer;
 	}
 	.done {
 		display: flex;

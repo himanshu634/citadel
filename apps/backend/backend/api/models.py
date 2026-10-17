@@ -38,6 +38,9 @@ class CompanyDetail(CompanyOut):
 
 class BuildIn(BaseModel):
     full: bool = False  # ignore the sync cursors and load everything in the window again
+    # Download only these source keys (the Sources page's Sync on one row); None = every source.
+    # Loading still walks every source, each from its own cursor.
+    sources: list[str] | None = None
 
 
 class ValidateOut(BaseModel):
@@ -92,6 +95,63 @@ class Overview(BaseModel):
     recent: list[RecentWorkItem]
     systems: list[SystemSummary]
     people: list[PersonActivity]
+
+
+SourceStatus = Literal["synced", "never", "skipped", "blocked"]
+
+
+class KindCount(BaseModel):
+    label: str  # node label: WorkItem, Change, Document, Chunk, Person, Team, System
+    kind: str | None = None  # work items only: pull_request, issue, ticket, thread
+    count: int
+    states: dict[str, int] = {}  # work items only: how many in each state
+
+
+class LabelCounts(BaseModel):
+    """The nodes that carry one `source` label. The label is the adapter type a record came from
+    (two folders of one type share it), a JSONL record's own label (`slack_export`), or `derived`
+    for people, teams and systems made from links."""
+
+    source: str
+    total: int
+    kinds: list[KindCount]
+
+
+class SourceRow(BaseModel):
+    """One `sources:` entry of the company YAML, as the next build will see it."""
+
+    key: str  # the adapter key, which also keys its SyncState
+    type: str
+    location: str  # the repository, folder or workspace it reads
+    reads: list[str]  # GitHub: what to read; Linear: the teams; else empty
+    downloads: bool  # has a download step, so Sync on this row alone means something
+    # blocked: the download fails, so every build fails until fixed; skipped: builds skip it;
+    # synced: loaded at least once; never: not loaded yet.
+    status: SourceStatus
+    problem: str | None = None  # why it is blocked or skipped, with what to do
+    last_run: str | None = None  # SyncState.last_run, ISO
+    records: int | None = None  # records loaded in the last run (not a total)
+    cursor: str | None = None  # the newest record read, ISO; the next sync starts here
+    window_changed: bool = False  # the YAML's window moved since: the next sync reloads it all
+
+
+class SyncRecord(BaseModel):
+    """A SyncState whose key is no longer in the company YAML."""
+
+    key: str
+    adapter: str | None
+    last_run: str | None
+    records: int | None
+    cursor: str | None
+
+
+class SourcesOut(BaseModel):
+    slug: str
+    since: str  # the YAML's window.since
+    built: bool  # the graph exists; false: nothing has been loaded yet
+    sources: list[SourceRow]
+    labels: list[LabelCounts]  # biggest first
+    leftovers: list[SyncRecord]
 
 
 class ToolInfo(BaseModel):

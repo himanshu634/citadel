@@ -34,6 +34,7 @@
 		NodeInspector,
 		Select,
 		SourceCard,
+		SourceRow,
 		Splitter,
 		Stat,
 		StepRows,
@@ -58,6 +59,7 @@
 	import { doingNow, hereLabel, trailOf } from '$lib/activity';
 	import * as walks from './walk-samples';
 	import * as chatSamples from './chat-samples';
+	import * as sourceSamples from './source-samples';
 	import { carryOver, highlightFor } from '$lib/walk';
 	import { WALK_LIMITS, clampSize } from '$lib/splitter';
 	import {
@@ -299,6 +301,15 @@
 	let srcInvalid = $state<SourceConfig>({ type: 'github', repo: 'platform', include: ['commits'] });
 	let srcDocs = $state<SourceConfig>({ type: 'local_docs', path: 'data/inbox/acme_labs/docs' });
 	let srcJsonl = $state<SourceConfig>({ type: 'canonical_jsonl', path: '' });
+	let srcLinear = $state<SourceConfig>({ type: 'linear', workspace: 'synthetic-co', teams: ['IDN', 'PAY'] });
+	let srcLinearEmpty = $state<SourceConfig>({ type: 'linear', workspace: '', teams: [] });
+	let srcLinearBad = $state<SourceConfig>({ type: 'linear', workspace: 'Synthetic Co', teams: ['IDN', 'PAY-1', '9OPS'] });
+	const linearBadErrors = [
+		{ loc: ['sources', 10, 'workspace'], msg: "String should match pattern '^[a-z0-9-]+$'" },
+		{ loc: ['sources', 10, 'teams', 1], msg: "String should match pattern '^[A-Z][A-Z0-9]{0,6}$'" },
+		{ loc: ['sources', 10, 'teams', 2], msg: "String should match pattern '^[A-Z][A-Z0-9]{0,6}$'" }
+	];
+	let srcLinearPublic = $state<SourceConfig>({ type: 'linear', workspace: 'acme', teams: [] });
 	const previewYaml = [
 		'slug: acme_labs',
 		'name: Acme Labs',
@@ -690,7 +701,8 @@
 			One card per source in the add-company form. GitHub: the repository, what to read, and what
 			GitHub said about it (found, rate limited), a note when no token exists, and an error when
 			GitHub cannot find the repository or when it is private while the data permission is not Own. Folder sources take one
-			path.
+			path. Linear: the workspace and its team keys; an error banner while the data permission is
+			Public, and the API's pattern errors as sentences under their field.
 		</p>
 		<div class="sources">
 			<SourceCard bind:source={srcFound} index={0} dataPermission="public" errors={[]} onremove={noop} checks={checksFound} />
@@ -715,13 +727,55 @@
 				onremove={noop}
 				checks={checksFound}
 			/>
+			<SourceCard bind:source={srcLinear} index={8} dataPermission="synthetic" errors={[]} onremove={noop} checks={checksFound} />
+			<SourceCard bind:source={srcLinearEmpty} index={9} dataPermission="own" errors={[{ loc: ['sources', 9, 'workspace'], msg: "String should match pattern '^[a-z0-9-]+$'" }]} onremove={noop} checks={checksFound} />
+			<SourceCard bind:source={srcLinearBad} index={10} dataPermission="own" errors={linearBadErrors} onremove={noop} checks={checksFound} />
+			<SourceCard bind:source={srcLinearPublic} index={11} dataPermission="public" errors={[]} onremove={noop} checks={checksFound} />
+		</div>
+	</Card>
+
+	<Card title="Source row">
+		<p class="note">
+			One source on the Sources page (direction A, the source ledger), a <code>tbody</code> inside
+			the page's table: synced and open (GitHub), two folders sharing one count (the first one's
+			window changed, and it takes a record's own <code>slack_export</code> label), skipped (folder
+			missing), blocked (no key, so every sync fails), never synced with a long name, and one
+			syncing while another is busy.
+		</p>
+		<div class="ledger-sample">
+			<table>
+				<thead>
+					<tr>
+						<th scope="col">Source</th>
+						<th scope="col">Status</th>
+						<th scope="col">Last sync</th>
+						<th scope="col">Read up to</th>
+						<th scope="col">In the graph</th>
+						<th scope="col"><span class="sr-only">Actions</span></th>
+					</tr>
+				</thead>
+				{#each sourceSamples.sampleSources as source, i (source.key)}
+					<SourceRow
+						{source}
+						credit={sourceSamples.sampleLedger.credits.get(source.key)!}
+						since="2026-04-15"
+						open={i < 2}
+						settingsHref="#source-row"
+						onsync={noop}
+						syncing={i === 0}
+						busy={i === 5}
+						locations={sourceSamples.sampleLocations}
+					/>
+				{/each}
+			</table>
 		</div>
 	</Card>
 
 	<Card title="Company form">
 		<p class="note">
-			The fields of a company file. One step at a time in the add-company wizard (company,
-			sources, rules) and all three on one page in Settings, where the graph name is read-only.
+			The fields of a company file. One step at a time, in the add-company wizard (company,
+			sources, rules) and in the Settings tabs. For an existing company (Settings) the graph name
+			is not a field, the data permission is a row of radios and Name to login starts empty.
 			Errors show under their field; the form never calls the API. The last form holds duplicate
 			tags, as a hand-edited file can.
 		</p>
@@ -731,16 +785,20 @@
 				<figcaption>Company step, empty</figcaption>
 			</figure>
 			<figure>
+				<CompanyForm bind:draft={formNew} section="sources" errors={[]} />
+				<figcaption>Sources step, Public data: Linear is off, with the reason</figcaption>
+			</figure>
+			<figure>
 				<CompanyForm bind:draft={formErrors} section="company" errors={formErrorList} />
 				<figcaption>Company step, with errors</figcaption>
 			</figure>
 			<figure>
-				<CompanyForm bind:draft={formLocked} section="company" errors={[]} slugLocked />
-				<figcaption>Company step, graph name locked (an existing company)</figcaption>
+				<CompanyForm bind:draft={formLocked} section="company" errors={[]} existing />
+				<figcaption>Company tab in Settings (an existing company)</figcaption>
 			</figure>
 			<figure>
-				<CompanyForm bind:draft={formAll} section="all" errors={[]} slugLocked />
-				<figcaption>All sections, as in Settings</figcaption>
+				<CompanyForm bind:draft={formAll} section="rules" errors={[]} existing />
+				<figcaption>Systems and people tab in Settings, no names yet</figcaption>
 			</figure>
 		</div>
 	</Card>
@@ -791,8 +849,8 @@
 			bind:value={tab}
 			items={[
 				{ value: 'answer', label: 'Answer' },
-				{ value: 'path', label: 'Graph path' },
-				{ value: 'empty', label: 'Empty state' }
+				{ value: 'path', label: 'Graph path', dirty: true },
+				{ value: 'empty', label: 'Empty state', count: 3, errors: 2 }
 			]}
 		>
 			{#snippet panel(v)}
@@ -1388,6 +1446,25 @@
 		margin-top: var(--space-2);
 		color: var(--color-text-muted);
 		font-size: var(--text-xs);
+	}
+	.ledger-sample {
+		overflow-x: auto;
+		margin-top: var(--space-4);
+		background: var(--color-surface);
+		border: var(--border-hair) solid var(--color-line);
+		border-radius: var(--radius-md);
+	}
+	.ledger-sample table {
+		width: 100%;
+		min-width: 56rem;
+		border-collapse: collapse;
+	}
+	.ledger-sample thead th {
+		padding: var(--space-2) var(--space-4);
+		text-align: left;
+		font-size: var(--text-xs);
+		font-weight: var(--weight-semibold);
+		color: var(--color-text-muted);
 	}
 	.sources {
 		display: grid;

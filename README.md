@@ -75,7 +75,7 @@ Four agents: `brain` answers questions, `keeper` keeps the brain right, `pm` and
 
 ![The self-healing loop: gap, review, consult, checks, approve, project, ask again](docs/architecture/self-healing-loop.svg)
 
-Built in `apps/agents/agents/keeper/` (design: [the Keeper design](docs/superpowers/specs/2026-10-16-keeper-design.md)):
+Built in `apps/agents/agents/keeper/` (spec: ["The Keeper" in docs/agents.md](docs/agents.md#the-keeper)):
 
 1. **Gaps.** A failed Ask turn (no answer, or no source) and a thumbs-down each open a gap in
    `keeper_<slug>`, written after the answer or rating is sent, so it never slows or fails it. The

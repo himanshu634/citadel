@@ -11,6 +11,7 @@ a JSONL export). It has two halves:
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -22,6 +23,16 @@ class SourceUnavailable(Exception):
     """The source cannot be read right now (missing folder, no cache yet). Ingest skips it."""
 
 
+@dataclass(frozen=True)
+class SourceProblem:
+    """Why the next build cannot read a source, found without running one (see `Adapter.check`).
+    `blocks`: the download step fails, so the whole build fails until it is fixed; otherwise
+    ingest only skips this source. `message` names repo-relative paths, never absolute ones."""
+
+    message: str
+    blocks: bool = False
+
+
 class Adapter(Protocol):
     name: str  # the `type` used in companies/<slug>.yaml
     source_model: type[SourceConfig]  # validates that source's entry in the company YAML
@@ -31,6 +42,11 @@ class Adapter(Protocol):
         ...
 
     def fetch(self, company: CompanyConfig, source: Any, cache_dir: Path) -> None: ...
+
+    # Optional (pipeline.configured_sources reads them with getattr):
+    # downloads: bool  -- True when `fetch` does network I/O (default False)
+    # def check(self, company, source, cache_dir) -> SourceProblem | None
+    #     A cheap look (a folder, an env var) at what would stop the next build reading it.
 
     def records(
         self, company: CompanyConfig, source: Any, cache_dir: Path

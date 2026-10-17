@@ -10,16 +10,18 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
+from brain.adapters.base import SourceProblem
 from brain.adapters.linear import fetch as _fetch
 from brain.adapters.linear import transform as _transform
 from brain.adapters.linear.source import LinearSource
 from brain.canonical import CanonicalRecord
-from brain.config import CompanyConfig
+from brain.config import CompanyConfig, get_settings
 
 
 class LinearAdapter:
     name = "linear"
     source_model = LinearSource
+    downloads = True
 
     def key(self, source: LinearSource) -> str:
         return f"{self.name}:{source.workspace}"
@@ -29,6 +31,14 @@ class LinearAdapter:
 
     def fetch(self, company: CompanyConfig, source: LinearSource, cache_dir: Path) -> None:
         _fetch.run(company, source, self.cache_for(source, cache_dir))
+
+    def check(
+        self, company: CompanyConfig, source: LinearSource, cache_dir: Path
+    ) -> SourceProblem | None:
+        """Every build downloads first, and that needs the API key."""
+        if get_settings().linear_api_key:
+            return None
+        return SourceProblem("No Linear API key: set LINEAR_API_KEY in .env", blocks=True)
 
     def records(
         self, company: CompanyConfig, source: LinearSource, cache_dir: Path

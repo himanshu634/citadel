@@ -84,9 +84,10 @@ export function cleanDraft(draft: CompanyConfig): CompanyConfig {
 	out.name = out.name.trim();
 	out.sources = out.sources.map((source) => {
 		const next: SourceConfig = { ...source };
-		for (const field of ['repo', 'path']) {
+		for (const field of ['repo', 'path', 'workspace']) {
 			if (typeof next[field] === 'string') next[field] = next[field].trim();
 		}
+		if (Array.isArray(next.teams)) next.teams = normalizeTeams(next.teams as string[]);
 		return next;
 	});
 	if (out.systems) {
@@ -103,7 +104,8 @@ export function cleanDraft(draft: CompanyConfig): CompanyConfig {
 export const SOURCE_KINDS = [
 	{ type: 'github', title: 'GitHub repository' },
 	{ type: 'local_docs', title: 'Documents folder' },
-	{ type: 'canonical_jsonl', title: 'JSONL records' }
+	{ type: 'canonical_jsonl', title: 'JSONL records' },
+	{ type: 'linear', title: 'Linear workspace' }
 ] as const;
 
 /** What a GitHub source can read, in file order; all are on for a new source. */
@@ -119,7 +121,13 @@ export const GITHUB_PARTS = [
 /** A new, empty source of `type`. */
 export function blankSource(type: string): SourceConfig {
 	if (type === 'github') return { type, repo: '', include: GITHUB_PARTS.map((p) => p.part) };
+	if (type === 'linear') return { type, workspace: '', teams: [] };
 	return { type, path: '' };
+}
+
+/** The field a source of `type` cannot be saved without (a Linear source may list no teams). */
+export function requiredField(type: string): 'repo' | 'workspace' | 'path' {
+	return type === 'github' ? 'repo' : type === 'linear' ? 'workspace' : 'path';
 }
 
 const filled = (value: unknown) => typeof value === 'string' && value.trim() !== '';
@@ -134,7 +142,7 @@ export function incompleteReason(draft: CompanyConfig, section: Section): string
 	}
 	if (section === 'sources') {
 		if (draft.sources.length === 0) return 'Add at least one source to continue.';
-		const empty = draft.sources.some((s) => !filled(s.type === 'github' ? s.repo : s.path));
+		const empty = draft.sources.some((s) => !filled(s[requiredField(s.type)]));
 		return empty ? 'Fill in every source, or remove the ones you do not need.' : null;
 	}
 	const half = (draft.systems?.rules ?? []).some(
@@ -199,6 +207,98 @@ export function repoErrors(draft: CompanyConfig, fact: (repo: string) => RepoFac
 	return out;
 }
 
+// --- Linear (apps/brain/brain/adapters/linear/source.py) ------------------------------------
+
+/** The data permissions a Linear source may be read under; the build refuses it under any other. */
+export const LINEAR_PERMISSIONS: readonly string[] = ['own', 'synthetic'];
+
+export const LINEAR_PERMISSION_MESSAGE =
+	'Linear workspaces are private. Set the data permission to Own or Synthetic, or the build will refuse to read this one.';
+/** Why the "Linear workspace" button is off. */
+export const LINEAR_ADD_REASON =
+	'Linear workspaces are private: set the data permission to Own or Synthetic to add one.';
+
+/** Why a source of `type` cannot be added under `dataPermission`, or null when it can. */
+export function addSourceBlocked(type: string, dataPermission: string): string | null {
+	return type === 'linear' && !LINEAR_PERMISSIONS.includes(dataPermission) ? LINEAR_ADD_REASON : null;
+}
+
+/**
+ * What was typed or pasted into the workspace field. A pasted Linear address is cut down to the
+ * workspace's URL key (`linear.app/acme/team/ENG` gives `acme`); anything else is left alone.
+ */
+export function normalizeWorkspace(text: string): string {
+	const url = /^\s*(https?:\/\/)?(www\.)?linear\.app\//i;
+	if (!url.test(text)) return text;
+	return text.replace(url, '').split(/[/?#]/)[0].trim().toLowerCase();
+}
+
+/** Team keys as the file keeps them: trimmed, in capitals, no empty ones, each once. */
+export function normalizeTeams(teams: string[]): string[] {
+	const keys = teams.map((t) => t.trim().toUpperCase()).filter(Boolean);
+	return keys.filter((key, i) => keys.indexOf(key) === i);
+}
+
+export const WORKSPACE_MESSAGE =
+	'Use the workspace part of a Linear address: lowercase letters, digits and dashes, like acme in linear.app/acme.';
+const TEAM_RULE = 'team keys are a capital letter, then up to six capitals or digits, like ENG.';
+
+/**
+ * The message under a Linear card's workspace field. Pydantic's pattern error becomes a sentence;
+ * an empty field shows none (the footer already asks for it).
+ */
+export function workspaceMessage(errors: FieldError[], index: number, workspace: string): string | undefined {
+	if (workspace.trim() === '') return undefined;
+	const found = errors.filter((e) => startsWith(e.loc, ['sources', index, 'workspace']));
+	if (found.length === 0) return undefined;
+	if (found.some((e) => /pattern/i.test(e.msg))) return WORKSPACE_MESSAGE;
+	return messageAt(found, ['sources', index, 'workspace']);
+}
+
+/**
+ * The message under a Linear card's teams field: the keys that break the pattern, named once in a
+ * single sentence, then any other error of the list (such as it not being a list). Pass `teams`
+ * through `normalizeTeams` first: the API indexes the cleaned list, not a hand-edited file's.
+ */
+export function teamsMessage(errors: FieldError[], index: number, teams: string[]): string | undefined {
+	const prefix = ['sources', index, 'teams'];
+	const found = errors.filter((e) => startsWith(e.loc, prefix));
+	if (found.length === 0) return undefined;
+	const bad = found.filter((e) => typeof e.loc[3] === 'number' && /pattern/i.test(e.msg));
+	const keys = bad.map((e) => teams[e.loc[3] as number]).filter((k) => typeof k === 'string');
+	const parts: string[] = [];
+	if (bad.length > 0) {
+		parts.push(keys.length > 0 ? `${keys.join(', ')}: ${TEAM_RULE}` : `Team ${TEAM_RULE}`);
+	}
+	const other = messageAt(
+		found.filter((e) => !bad.includes(e)),
+		prefix
+	);
+	if (other) parts.push(other);
+	return parts.join(' ');
+}
+
+/** The error for a Linear source under `dataPermission`, or undefined. */
+export function linearErrorFor(dataPermission: string): string | undefined {
+	return LINEAR_PERMISSIONS.includes(dataPermission) ? undefined : LINEAR_PERMISSION_MESSAGE;
+}
+
+/**
+ * Every source error the API cannot see but the build would act on: a private repository, or a
+ * Linear workspace, while the data permission does not allow it. A Linear error sits on the
+ * source's `type`, where its card shows it as a banner.
+ */
+export function sourceErrors(draft: CompanyConfig, fact: (repo: string) => RepoFact): FieldError[] {
+	const out = repoErrors(draft, fact);
+	const msg = linearErrorFor(draft.data_permission);
+	if (msg) {
+		draft.sources.forEach((s, i) => {
+			if (s.type === 'linear') out.push({ loc: ['sources', i, 'type'], msg });
+		});
+	}
+	return out;
+}
+
 /** What a repository's check is in the middle of: nothing answered yet, or a check in flight. */
 type RepoPending = (repo: string) => boolean;
 
@@ -231,7 +331,8 @@ export function visibleErrors(draft: CompanyConfig, errors: FieldError[]): Field
 
 type Why = { kind: 'incomplete'; text: string } | { kind: 'errors' } | { kind: 'checking' };
 
-const STEP_NAMES: Record<Section, string> = {
+/** Each section's name, as the wizard's steps and the Settings tabs show it. */
+export const STEP_NAMES: Record<Section, string> = {
 	company: 'Company',
 	sources: 'Sources',
 	rules: 'Systems and people'
@@ -243,7 +344,7 @@ function why(g: Gate, section: Section): Why | null {
 	if (text) return { kind: 'incomplete', text };
 	if (errorsIn(visibleErrors(g.draft, g.errors), section).length > 0) return { kind: 'errors' };
 	if (section === 'sources') {
-		if (repoErrors(g.draft, g.fact).length > 0) return { kind: 'errors' };
+		if (sourceErrors(g.draft, g.fact).length > 0) return { kind: 'errors' };
 		const asking = g.draft.sources.some(
 			(s) => s.type === 'github' && typeof s.repo === 'string' && g.repoPending(s.repo.trim())
 		);

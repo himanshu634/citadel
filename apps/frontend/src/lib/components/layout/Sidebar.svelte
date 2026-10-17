@@ -41,7 +41,7 @@ keeps it. `--fold-motion` (1, or 0 from AppShell before its first paint) turns t
 			{ label: 'Ask', path: 'ask', icon: MessageSquareText },
 			{ label: 'Graph', path: 'graph', icon: Network },
 			{ label: 'Systems', path: 'systems', icon: Boxes },
-			{ label: 'Sources', icon: BookOpen }
+			{ label: 'Sources', path: 'sources', icon: BookOpen }
 		]
 	};
 	const manage: Group = {

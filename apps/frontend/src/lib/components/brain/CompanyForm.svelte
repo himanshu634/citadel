@@ -1,15 +1,19 @@
 <!--
 @component
-The fields of a company file, for one wizard step (`section` company, sources or rules) or all
-three at once (`all`, for Settings). It edits `draft` in place and never calls the API: the page
-validates and passes the result back as `errors`. An error shows under the field whose path its
-`loc` starts with (`['sources', 0, 'repo']` is the repo input of source card 0); the ones no field
-shows are listed at the foot of their section, so nothing blocks the user without a reason.
+The fields of a company file, for one section (`section` company, sources or rules: a wizard step
+or a Settings tab) or all three at once (`all`). It edits `draft` in place and never calls the
+API: the page validates and passes the result back as `errors`. An error shows under the field
+whose path its `loc` starts with (`['sources', 0, 'repo']` is the repo input of source card 0);
+the ones no field shows are listed at the foot of their section, so nothing blocks the user
+without a reason.
 
 The graph name follows the company name until someone edits it (derived from the two values, so it
-survives leaving and coming back to the step). `slugLocked` shows it read-only, for a company that
-exists. Fixed rows of the "Name to login" table are local state seeded from the draft once;
-Settings should mount a new form when it loads another company.
+survives leaving and coming back to the step). `existing` is a company that exists (Settings): the
+graph name is not a field (the page header says it, and it cannot change), the data permission is
+one row of radios, a section's heading is left to the tab around it, the leads drop the wizard's
+wording, and "Name to login" starts with an Add button instead of a blank row. Fixed rows of that
+table are local state seeded from the draft once; Settings should mount a new form when it loads
+another company.
 -->
 <script lang="ts">
 	import { Plus, Trash2 } from '@lucide/svelte';
@@ -23,6 +27,7 @@ Settings should mount a new form when it loads another company.
 	import {
 		SECTIONS,
 		SOURCE_KINDS,
+		addSourceBlocked,
 		aliasRowsToRecord,
 		blankSource,
 		errorsIn,
@@ -41,10 +46,10 @@ Settings should mount a new form when it loads another company.
 		draft: CompanyConfig;
 		section: Section | 'all';
 		errors: FieldError[];
-		slugLocked?: boolean;
+		existing?: boolean;
 	};
 
-	let { draft = $bindable(), section, errors, slugLocked = false }: Props = $props();
+	let { draft = $bindable(), section, errors, existing = false }: Props = $props();
 
 	// The file always has these two blocks; give the form something to edit when a draft lacks them.
 	if (!draft.systems) draft.systems = { rules: [], fallback: 'depth_2', ignore: [] };
@@ -59,12 +64,14 @@ Settings should mount a new form when it loads another company.
 	const people = $derived(draft.people!);
 
 	const shown = $derived<Section[]>(section === 'all' ? SECTIONS : [section]);
+	// In Settings one section sits in a tab that already names it.
+	const titled = $derived(!existing || section === 'all');
 	const mine = (s: Section) => errorsIn(errors, s);
 
 	// --- Company ---------------------------------------------------------------------------------
 	function setName(value: string) {
 		// Follow only while the graph name is still what the name would give.
-		const following = !slugLocked && draft.slug === slugify(draft.name);
+		const following = !existing && draft.slug === slugify(draft.name);
 		draft.name = value;
 		if (following) draft.slug = slugify(value);
 	}
@@ -85,6 +92,11 @@ Settings should mount a new form when it loads another company.
 	function removeSource(index: number) {
 		draft.sources.splice(index, 1);
 	}
+	// A kind the data permission rules out stays in the row, off, with its reason beside it.
+	const uid = $props.id();
+	const addKinds = $derived(
+		SOURCE_KINDS.map((kind) => ({ ...kind, blocked: addSourceBlocked(kind.type, draft.data_permission) }))
+	);
 
 	// --- Systems and people ----------------------------------------------------------------------
 	const FALLBACKS = [
@@ -95,7 +107,9 @@ Settings should mount a new form when it loads another company.
 	];
 
 	let aliasRows = $state<AliasRow[]>(recordToAliasRows(draft.people?.aliases ?? {}));
-	if (aliasRows.length === 0) aliasRows.push({ name: '', login: '' });
+	// Seeded once, like the rows themselves: a form is mounted for one company.
+	// svelte-ignore state_referenced_locally
+	if (aliasRows.length === 0 && !existing) aliasRows.push({ name: '', login: '' });
 	function syncAliases() {
 		if (draft.people) draft.people.aliases = aliasRowsToRecord(aliasRows);
 	}
@@ -105,7 +119,8 @@ Settings should mount a new form when it loads another company.
 
 	// --- Errors no field shows, per section -------------------------------------------------------
 	const rendered = $derived<Record<Section, Loc[]>>({
-		company: [['slug'], ['name'], ['window', 'since']],
+		// No graph name field for an existing company: a slug error goes to the list at the foot.
+		company: existing ? [['name'], ['window', 'since']] : [['slug'], ['name'], ['window', 'since']],
 		sources: draft.sources.map((_, i) => ['sources', i]),
 		rules: [
 			...(draft.systems?.rules ?? []).flatMap((_, i): Loc[] => [
@@ -134,45 +149,74 @@ Settings should mount a new form when it loads another company.
 
 <div class="form">
 	{#if shown.includes('company')}
-		<section class="group" aria-labelledby="h-company">
-			<div>
-				<h2 id="h-company" tabindex="-1">Company</h2>
-				<p class="lead">Name the company and say what data you are allowed to read.</p>
-			</div>
-			<div class="two">
-				<Input
-					label="Company name"
-					autocomplete="off"
-					bind:value={() => draft.name, setName}
-					hint="Shown in the rail and on every page."
-					error={messageAt(errors, ['name'])}
-				/>
-				<Input
-					label="Graph name"
-					prefix="brain_"
-					autocomplete="off"
-					spellcheck="false"
-					readonly={slugLocked}
-					bind:value={draft.slug}
-					hint={slugLocked
-						? 'A company keeps its graph name.'
-						: 'Lowercase letters, digits and underscores, starting with a letter or digit. It cannot change after the first build.'}
-					error={messageAt(slugErrors, ['slug'])}
-				/>
-			</div>
+		<section class="group" aria-labelledby={titled ? 'h-company' : undefined} aria-label={titled ? undefined : 'Company'}>
+			{#if titled}
+				<div>
+					<h2 id="h-company" tabindex="-1">Company</h2>
+					<p class="lead">Name the company and say what data you are allowed to read.</p>
+				</div>
+			{/if}
+			{#if existing}
+				<div class="narrow-wide">
+					<Input
+						label="Company name"
+						autocomplete="off"
+						bind:value={() => draft.name, setName}
+						hint="Shown in the rail and on every page."
+						error={messageAt(errors, ['name'])}
+					/>
+				</div>
+			{:else}
+				<div class="two">
+					<Input
+						label="Company name"
+						autocomplete="off"
+						bind:value={() => draft.name, setName}
+						hint="Shown in the rail and on every page."
+						error={messageAt(errors, ['name'])}
+					/>
+					<Input
+						label="Graph name"
+						prefix="brain_"
+						autocomplete="off"
+						spellcheck="false"
+						bind:value={draft.slug}
+						hint="Lowercase letters, digits and underscores, starting with a letter or digit. It cannot change after the first build."
+						error={messageAt(slugErrors, ['slug'])}
+					/>
+				</div>
+			{/if}
 			<fieldset class="choices">
 				<legend>Data permission</legend>
-				<div class="cards">
-					{#each PERMISSIONS as p (p.value)}
-						<ChoiceCard
-							name="data_permission"
-							value={p.value}
-							title={p.title}
-							description={p.description}
-							bind:group={draft.data_permission}
-						/>
-					{/each}
-				</div>
+				{#if existing}
+					<div class="radios">
+						{#each PERMISSIONS as p (p.value)}
+							<label class="radio">
+								<input
+									type="radio"
+									name="data_permission"
+									value={p.value}
+									bind:group={draft.data_permission}
+								/>{p.title}
+							</label>
+						{/each}
+					</div>
+					<p class="hint">
+						{PERMISSIONS.find((p) => p.value === draft.data_permission)?.description ?? ''}
+					</p>
+				{:else}
+					<div class="cards">
+						{#each PERMISSIONS as p (p.value)}
+							<ChoiceCard
+								name="data_permission"
+								value={p.value}
+								title={p.title}
+								description={p.description}
+								bind:group={draft.data_permission}
+							/>
+						{/each}
+					</div>
+				{/if}
 				{#if messageAt(errors, ['data_permission'])}
 					<p class="error">{messageAt(errors, ['data_permission'])}</p>
 				{/if}
@@ -182,7 +226,9 @@ Settings should mount a new form when it loads another company.
 					label="Read activity since"
 					type="date"
 					bind:value={draft.window.since}
-					hint="Older activity is skipped. Changing this later rebuilds the graph."
+					hint={existing
+						? 'Older activity is skipped. Changing this rebuilds the graph.'
+						: 'Older activity is skipped. Changing this later rebuilds the graph.'}
 					error={messageAt(errors, ['window', 'since'])}
 				/>
 			</div>
@@ -191,9 +237,9 @@ Settings should mount a new form when it loads another company.
 	{/if}
 
 	{#if shown.includes('sources')}
-		<section class="group" aria-labelledby="h-sources">
+		<section class="group" aria-labelledby={titled ? 'h-sources' : undefined} aria-label={titled ? undefined : 'Sources'}>
 			<div>
-				<h2 id="h-sources" tabindex="-1">Sources</h2>
+				{#if titled}<h2 id="h-sources" tabindex="-1">Sources</h2>{/if}
 				<p class="lead">
 					Where {draft.name.trim() || 'the company'}'s engineering work lives. Each source is
 					downloaded once into a cache, so rebuilding the graph costs no API calls.
@@ -213,24 +259,39 @@ Settings should mount a new form when it loads another company.
 			<div class="add">
 				<span class="label" id="add-source">Add a source</span>
 				<div class="buttons" role="group" aria-labelledby="add-source">
-					{#each SOURCE_KINDS as kind (kind.type)}
-						<Button size="sm" onclick={() => addSource(kind.type)}>
+					{#each addKinds as kind (kind.type)}
+						<Button
+							size="sm"
+							disabled={kind.blocked !== null}
+							aria-describedby={kind.blocked ? `${uid}-${kind.type}-why` : undefined}
+							onclick={() => addSource(kind.type)}
+						>
 							<Plus aria-hidden="true" />{kind.title}
 						</Button>
 					{/each}
 				</div>
+				{#each addKinds as kind (kind.type)}
+					{#if kind.blocked}
+						<p class="hint why" id="{uid}-{kind.type}-why">{kind.blocked}</p>
+					{/if}
+				{/each}
 			</div>
 			{@render looseErrors('sources')}
 		</section>
 	{/if}
 
 	{#if shown.includes('rules')}
-		<section class="group" aria-labelledby="h-rules">
+		<section class="group" aria-labelledby={titled ? 'h-rules' : undefined} aria-label={titled ? undefined : 'Systems and people'}>
 			<div>
-				<h2 id="h-rules" tabindex="-1">Systems and people</h2>
+				{#if titled}<h2 id="h-rules" tabindex="-1">Systems and people</h2>{/if}
 				<p class="lead">
-					Citadel groups changed files into systems and leaves bots out of the people list. The
-					defaults work; refine them now or later in the company's settings.
+					{#if existing}
+						Citadel groups changed files into systems and leaves bots out of the people list.
+						Changing these rebuilds the graph from the data already downloaded.
+					{:else}
+						Citadel groups changed files into systems and leaves bots out of the people list. The
+						defaults work; refine them now or later in the company's settings.
+					{/if}
 				</p>
 			</div>
 
@@ -326,6 +387,7 @@ Settings should mount a new form when it loads another company.
 				{/if}
 				<fieldset class="rules">
 					<legend>Name to login</legend>
+					{#if aliasRows.length > 0}
 					<table>
 						<thead>
 							<tr>
@@ -361,9 +423,12 @@ Settings should mount a new form when it loads another company.
 							{/each}
 						</tbody>
 					</table>
+					{/if}
 					<p class="hint">For people whose commits use a different name than their login.</p>
 					<div>
-						<Button size="sm" onclick={addAliasRow}><Plus aria-hidden="true" />Add row</Button>
+						<Button size="sm" onclick={addAliasRow}>
+							<Plus aria-hidden="true" />{aliasRows.length > 0 ? 'Add row' : 'Add a name'}
+						</Button>
 					</div>
 				</fieldset>
 			</div>
@@ -416,10 +481,48 @@ Settings should mount a new form when it loads another company.
 		font-weight: var(--weight-semibold);
 		font-variation-settings: 'wdth' var(--width-label);
 	}
+	.narrow-wide {
+		max-width: 28rem;
+	}
+	.radios {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+	}
+	.radio {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		min-height: var(--control-md);
+		padding-inline: var(--space-4);
+		border: var(--border-hair) solid var(--color-line-strong);
+		border-radius: var(--radius-md);
+		background: var(--color-surface-raised);
+		font-weight: var(--weight-semibold);
+		cursor: pointer;
+	}
+	.radio:has(input:checked) {
+		border-color: var(--color-accent);
+		background: var(--color-accent-soft);
+	}
+	.radio:has(input:focus-visible) {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 2px;
+	}
+	.radio input {
+		margin: 0;
+		accent-color: var(--color-accent);
+	}
+	.radios + .hint {
+		margin-top: var(--space-2);
+	}
 	.cards {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: var(--space-3);
+	}
+	.why {
+		margin-top: var(--space-2);
 	}
 	.hint,
 	.none {

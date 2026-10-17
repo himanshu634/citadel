@@ -184,6 +184,27 @@ Rules:
   Review now and after each decision. The approver's name is kept in this browser
   (`citadel-keeper-name`). Approve and Reject are secondary: the bar's Review now is the primary.
 
+### The Sources page (design direction A, the source ledger)
+
+- **One row per source in the company file** (`SourceRow`), in file order: source and what it
+  reads, a status badge (Synced, Not synced yet, Skipped = warning, Stops the build = danger), last
+  sync with the records it loaded, how far it has read, and what it put in the graph. A chevron
+  opens the row: counts per kind with node-colour bars and their states, and how it is read (what,
+  window, what the next sync reads, the sync key).
+- **Say why, then where to fix it.** A skipped or blocked source puts its reason under its name
+  (icon plus words in the status colour) and links to Settings, which stays the only editor. One
+  banner over the table sums them up; a blocked source (its download fails, so every sync fails)
+  comes before skipped ones.
+- **Counts are per `source` label, never guessed per source.** Two sources of one type share one
+  count and say so. A label a JSONL record chose itself (`slack_export`) counts with the JSONL
+  sources. People, teams and systems made from links get their own sunken row, credited to no
+  source.
+- **Sync** on a row downloads only that source and shows only for sources with a download step
+  (GitHub, Linear); loading always walks every source. A running build disables every Sync.
+- **Leftovers**: sync records whose source left the file are listed under the table; Remove asks
+  first and keeps every node.
+- Below the table's width (56rem) the table scrolls inside its box; the page does not.
+
 ### The Ask page (design direction J + L)
 
 - **One lane per question** (`AskLane`). A strip across the top (`Q1`, the question, how it went),
@@ -233,6 +254,15 @@ Rules:
 - **How it answered** (`TurnTimeline`) sits folded under each lane's answer: the ledger already
   shows the work while it happens, so the timeline never opens by itself here.
 
+### Settings
+
+- **One tab per part of the company file** (Company, Sources, Systems and people) over one draft;
+  Sync now sits in the page head, since it saves nothing.
+- **A save bar appears once something changed** and sticks to the bottom of the view. It says
+  which tabs hold edits, then either why Save is shut (with "Go to <tab>" when the problem is on
+  another tab) or what saving will do, from a dry run as you edit. The button names the cost:
+  "Save" or "Save and rebuild". Discard puts back the saved config.
+
 ## 7. Components
 
 Import from `$lib` (`import { Button, Card } from '$lib'`). Interactive primitives with focus
@@ -253,7 +283,7 @@ not add another component library.
 | `Checkbox`   | One yes/no with its label beside it. Checked is an ink box with a check, never accent, so it does not compete with the one accent block. |
 | `TagInput`   | Several short values in one field. Enter or comma adds, paste splits, Backspace on empty removes the last; each tag has "Remove <tag>". `mono` for paths and ids. A comma inside `{}` stays in the tag (`*.{ts,tsx}`). Rules live in `src/lib/tags.ts`. |
 | `Stepper`    | The steps of a flow. The current step is the one solid accent block with square corners; done steps show a check in an ink circle, later steps their number. |
-| `Tabs`       | The selected tab is the solid accent block with square corners.                                |
+| `Tabs`       | The selected tab is the solid accent block with square corners. A tab can carry a count, an error count in words on the danger tint, and a dot for unsaved edits (named for screen readers). Panels stay mounted and are only hidden, so typing survives a switch. |
 | `Menu`       | Pick one of a set or run a command. Selected item shows a check.                               |
 | `Tooltip`    | Extra hint only. Never the only place information lives. `detail` adds a mono second line (an id).                                       |
 | `Dialog`     | Confirm destructive or blocking actions, or a short task that keeps the page behind it (add a company). The confirming action is last and named for what it does. `initialFocus` puts focus in the first field; `placement="top"` pins the top edge of a dialog whose body grows while you type. |
@@ -272,8 +302,9 @@ not add another component library.
 | `ChatList` | The Ask page's past chats, newest first, in a column left of the thread (above it below 1400px). Each row is a link: the first question on one line, then "n questions · 5 min ago". The open chat has the surface fill and a hairline; a chat still answering shows a spinner and "answering", a failed one says "failed" in danger text, a stopped one says "stopped". Delete is a ghost icon shown on hover or focus (always on touch) and asks once inline (Delete / Keep). Shared per company: there are no users. |
 | `TurnTimeline` | How one answer came about (on the Ask page, folded under the lane's answer): one summary line ("How it answered · 3 responses · 5 tool calls · 17,340 tokens") on the sunken fill that folds open (its `running` prop opens it while an answer runs; the Ask page leaves it folded). Inside, each Claude response is a hairline-ruled block: model, ms and stop reason in meta, its reasoning folded, its text, then every tool call as a row: status icon (success, danger, spinner), a badge for where it ran (Graph tool, Answer check, Server tool neutral; MCP with the server name in accent), the call in mono and its rows count or status. MCP and server calls fold open to their result. |
 | `EntityRow`, `WorkItemRow`, `ActivityBars` | List and comparison patterns for people, teams, systems and work items. |
-| `CompanyForm` | The fields of a company file for one wizard step or all three (Settings). Edits the draft; the page validates and hands back `errors`, which show under the field their `loc` names. Errors no field shows are listed at the foot of the step, so nothing blocks without a reason. Rules in `src/lib/onboarding.ts`. |
-| `SourceCard` | One source of a company. GitHub: repository, what to read, token note with "Check again", GitHub's answer; an error only when the repository is private while the data is not `own`. Not found, rate limits and outages are warnings with "Check again", never blockers; Continue waits while a check is unanswered. |
+| `CompanyForm` | The fields of a company file for one wizard step or all three. With `existing` (Settings, one tab per section) the graph name is not a field, the data permission is a row of radios, the tab names the section, and Name to login starts with an Add button. Edits the draft; the page validates and hands back `errors`, which show under the field their `loc` names. Errors no field shows are listed at the foot of the step, so nothing blocks without a reason. Rules in `src/lib/onboarding.ts`. |
+| `SourceRow` | One source on the Sources page (section 6): a `tbody` with the row and its detail, inside the page's table. Status is a badge word; a skipped or blocked source says why under its name and links to Settings; Sync only for sources with a download step; the chevron is a button with `aria-expanded`. |
+| `SourceCard` | One source of a company. GitHub: repository, what to read, token note with "Check again", GitHub's answer; an error only when the repository is private while the data is not `own`. Not found, rate limits and outages are warnings with "Check again", never blockers; Continue waits while a check is unanswered. Linear: workspace (`linear.app/` prefix; a pasted address is cut to its key) and team keys (put in capitals; none means every team), a hint naming `LINEAR_API_KEY`; a danger banner while the data is `public` (the build refuses it), which also shuts Continue and Save. The API's pattern errors show as sentences under their field, the bad team keys named once; an empty workspace shows none (the footer asks for it). Folders: one path. In "Add a source" a kind the data permission rules out (Linear under `public`) stays visible but off, its reason in text beside the row. |
 | `ConfigPreview` | The YAML the server will write, with the top-level keys of the current step marked (bar, tint and a line of words). Shows the last valid text while the form has errors, and says so. |
 | `BuildProgress` | One build: "Step n of N" from the plan, an ink progress meter (the one accent block of the view is the primary button), a table with a cell per source and stage, and the plain log. Each cell is icon plus word plus count or message; a skipped source is one merged cell saying why. Rules live in `src/lib/buildProgress.ts`. |
 | `AddCompanyDialog` | Add a company from one public GitHub repository: one field (a link or `owner/name`), then what Citadel will make (company, graph, window). Private repos are refused in the field's error; no token, GitHub down and a company that already reads the repo or its owner are banners with their one action. "Advanced setup" opens the step-by-step form at `/new`. Rules in `src/lib/addCompany.svelte.ts`. |
