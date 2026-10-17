@@ -564,3 +564,44 @@ export interface Feedback {
 	rating: Rating | null;
 	note: string | null;
 }
+
+// --- Agent activity (GET /api/companies/{slug}/activity; agents/activity.py) -----------------
+
+/** One tool call of a run, with the company-graph nodes it touched. */
+export interface ActivityStep {
+	/** 1-based, in the order the agent ran them. */
+	n: number;
+	/** `brain` for Ask; `keeper`, `pm`, `qa` once Keeper reviews are listed. */
+	actor: string;
+	tool: string;
+	kind: CallKind;
+	input: Record<string, unknown>;
+	status: 'running' | 'done' | 'failed';
+	count: number | null;
+	error: string | null;
+	/** brain_<slug> uids, in the order the step returned them. */
+	touched: string[];
+}
+
+/** One run of one agent: today an Ask turn. Times are ISO strings. */
+export interface ActivityRun {
+	/** `ask:<thread id>:<turn n>`. */
+	id: string;
+	source: 'ask';
+	actor: string;
+	/** What the run was for: the question. */
+	title: string;
+	status: ChatStatus;
+	started_at: string;
+	ended_at: string | null;
+	/** An Ask run reopens in its chat. */
+	thread_id: string | null;
+	steps: ActivityStep[];
+}
+
+export interface Activity {
+	/** Newest first. */
+	runs: ActivityRun[];
+	/** Some run is still going, so the page keeps watching. */
+	running: boolean;
+}

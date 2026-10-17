@@ -152,6 +152,27 @@ Rules:
 - No motion: the layout is worked out before the map is shown (in a worker), and panning to a
   selection jumps.
 
+### The Systems page and the agent trail (design direction A)
+
+- The Systems page is the Graph page's map with an agent's run drawn over it. It answers "where is
+  an agent working, and what has it done on the graph" (canvas: Systems · Agent at work).
+- **The agent is ink, never accent or status.** Each step sits on the node it was about (the system
+  it read, the node it opened), else on the first drawn node it returned when all it returned
+  sits in one territory. A step spread over several (listing the systems) gets no point: its nodes
+  are lit and the rail says "across the graph". Its number is an ink
+  disc (`--color-text` with `--color-surface` text). One ink line joins the steps in order.
+  Steps in a row on one node share a disc ("1, 2").
+- While the run is going, the agent's node has an ink ring, its territory an ink outline, and an
+  ink label says who and what ("Ask agent · Reading recent work on Auth"). Nothing moves on its
+  own: the trail grows as steps land, and the map is not laid out again.
+- The nodes a run touched stay bright and the rest dim, as a selection does. A selection still
+  wins over the trail.
+- The rail lists every step, numbered as on the map. A ring is the step running now. A dash marks
+  a step with nothing on the map (the answer check, an MCP call), and it says "not on the map".
+- The page opens on a running run, else the newest. A run that starts takes the map back from a
+  run picked in "Other runs". Runs are read every 1.5 s while one is going, every 6 s otherwise,
+  every 20 s in a hidden tab.
+
 ### The Ask page (design direction J + L)
 
 - **One lane per question** (`AskLane`). A strip across the top (`Q1`, the question, how it went),
@@ -246,9 +267,10 @@ not add another component library.
 | `BuildProgress` | One build: "Step n of N" from the plan, an ink progress meter (the one accent block of the view is the primary button), a table with a cell per source and stage, and the plain log. Each cell is icon plus word plus count or message; a skipped source is one merged cell saying why. Rules live in `src/lib/buildProgress.ts`. |
 | `AddCompanyDialog` | Add a company from one public GitHub repository: one field (a link or `owner/name`), then what Citadel will make (company, graph, window). Private repos are refused in the field's error; no token, GitHub down and a company that already reads the repo or its owner are banners with their one action. "Advanced setup" opens the step-by-step form at `/new`. Rules in `src/lib/addCompany.svelte.ts`. |
 | `CompanyRail` | One tile per company brain; one click switches company and keeps the section you are on. Monogram 15px at width 118; ink for the current tile (section 3). Tooltip shows the name and `brain_<slug>` in mono. The + opens `AddCompanyDialog`. |
-| `TerritoryMap` | The whole company graph as territories (section 6, The graph map). Canvas plus an HTML label layer; drag pans, scroll zooms (`scrollZoom={false}` where it sits in a scrolling page; pinch and the buttons still zoom), click selects. Colours are read from the tokens and re-read when the theme changes. |
+| `TerritoryMap` | The whole company graph as territories (section 6, The graph map). Canvas plus an HTML label layer; drag pans, scroll zooms (`scrollZoom={false}` where it sits in a scrolling page; pinch and the buttons still zoom), click selects. Colours are read from the tokens and re-read when the theme changes. With `trail` (and `here`) it draws an agent's run over the map (section 6, The Systems page). |
+| `AgentRun` | One agent run in the Systems page's rail: who and when, the question, a status (Working now in ink, Done, Stopped, Failed in danger), "n steps · m not on the map", then every step numbered as on the map, its tool and rows. Links to the chat an Ask run came from. |
 | `NodeInspector` | The selected node: kind, territory and state, its fields (`get_entity`), where its neighbours live, its links by relationship, and its most linked neighbours, which select in turn. Counts come from the links the map draws. "Open on GitHub" only when the node has a url. |
-| `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". The sidebar folds to icons (`--sidebar-folded`) from the top bar's fold button or the `[` key; the choice is kept in `citadel-sidebar`. `/graph` and `/ask` are bleed pages: no width cap, no padding. |
+| `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". The sidebar folds to icons (`--sidebar-folded`) from the top bar's fold button or the `[` key; the choice is kept in `citadel-sidebar`. `/graph`, `/ask` and `/systems` are bleed pages: no width cap, no padding. |
 
 Adding a component:
 

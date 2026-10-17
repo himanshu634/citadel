@@ -6,6 +6,11 @@ between them. Drag to pan, scroll or use the buttons to zoom, click a node to se
 selection lights the node's neighbours and links and dims everything else, and outlines the
 territories it reaches in ink.
 
+A `trail` (the Systems page) draws an agent's run over the map: an ink line through the node each
+step sat on, numbered in order, the nodes it touched kept bright and the rest dimmed. While the
+run is going, the node it is on now gets an ink ring with `here` beside it, and its territory an
+ink outline. Ink, never the accent or a status colour (design-system.md, Agent trail).
+
 Why a canvas: thousands of nodes and links are too many for DOM elements. Labels are an HTML
 layer on top, so they use the wide type. The canvas is hidden from assistive tech, which reads a
 summary instead; the page's search and list are the keyboard way in (see design-system.md, Graph).
@@ -15,6 +20,7 @@ summary instead; the page's search and list are the keyboard way in (see design-
 	import { quadtree } from 'd3-quadtree';
 	import { untrack } from 'svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import type { Trail } from '$lib/activity';
 	import { neighbourhood, nodeName, routes, type MapLayout, type PlacedNode } from '$lib/graph';
 	import { LABEL_TYPES, NODE_LABELS, type GraphLabel, type GraphView } from '$lib/types';
 
@@ -28,9 +34,22 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		onselect?: (uid: string | null) => void;
 		/** Scroll zooms the map. Off where the map sits inside a scrolling page; the buttons stay. */
 		scrollZoom?: boolean;
+		/** An agent's run drawn over the map. */
+		trail?: Trail | null;
+		/** What the agent is doing now, beside its ring (only while `trail.current` is set). */
+		here?: string | null;
 	};
 
-	let { view, layout, selected = null, keep = null, onselect, scrollZoom = true }: Props = $props();
+	let {
+		view,
+		layout,
+		selected = null,
+		keep = null,
+		onselect,
+		scrollZoom = true,
+		trail = null,
+		here = null
+	}: Props = $props();
 
 	let canvas = $state<HTMLCanvasElement>();
 	let size = $state({ width: 0, height: 0 });
@@ -58,6 +77,11 @@ summary instead; the page's search and list are the keyboard way in (see design-
 			.addAll(layout.nodes.filter((n) => !shown || shown.has(n.uid)))
 	);
 	const names = $derived(new Map(view.territories.map((t) => [t.id, t])));
+	/** A trail with points dims what it did not touch (a selection still wins). */
+	const trailing = $derived(trail !== null && trail.points.length > 0);
+	const hereTerritory = $derived(
+		trail?.current ? (view.nodes[index.get(trail.current) ?? -1]?.territory ?? null) : null
+	);
 	const summary = $derived(
 		`Map of ${view.nodes.length.toLocaleString('en')} nodes in ${view.territories.length} territories.` +
 			' Use Find or List to pick a node.'
@@ -92,6 +116,22 @@ summary instead; the page's search and list are the keyboard way in (see design-
 			const sy = n.y * transform.k + transform.y;
 			const pad = 48;
 			if (sx < pad || sy < pad || sx > width - pad || sy > height - pad) {
+				moved = { k: transform.k, x: width / 2 - n.x * transform.k, y: height / 2 - n.y * transform.k };
+			}
+		});
+	});
+
+	// On a zoomed or panned map, the agent's node is brought back into view when it moves off it.
+	$effect(() => {
+		const uid = trail?.current ?? null;
+		const { width, height } = size;
+		if (!uid || !width || !height) return;
+		untrack(() => {
+			const n = pos.get(uid);
+			if (!n || moved === null) return;
+			const sx = n.x * transform.k + transform.x;
+			const sy = n.y * transform.k + transform.y;
+			if (sx < 0 || sy < 0 || sx > width || sy > height) {
 				moved = { k: transform.k, x: width / 2 - n.x * transform.k, y: height / 2 - n.y * transform.k };
 			}
 		});
@@ -138,7 +178,7 @@ summary instead; the page's search and list are the keyboard way in (see design-
 	let frame = 0;
 	$effect(() => {
 		// Read everything the drawing depends on, then draw once per animation frame.
-		const deps = [canvas, size.width, size.height, transform, palette, view, layout, pos, shown, keptView, roads, hood, reached, hover, selected];
+		const deps = [canvas, size.width, size.height, transform, palette, view, layout, pos, shown, keptView, roads, hood, reached, hover, selected, trail, trailing, hereTerritory];
 		void deps;
 		cancelAnimationFrame(frame);
 		frame = requestAnimationFrame(draw);
@@ -163,14 +203,15 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		layout.territories.forEach((t, i) => {
 			const path = new Path2D(t.outline);
 			const on = reached?.has(t.id) ?? false;
+			const home = !dim && t.id === hereTerritory;
 			ctx.globalAlpha = dim && !on ? 0.45 : 1;
 			if (t.id !== 'none') {
 				ctx.fillStyle = i % 2 ? palette.t2 : palette.t1;
 				ctx.fill(path);
 			}
 			ctx.setLineDash(t.id === 'none' ? [5 / k, 4 / k] : []);
-			ctx.strokeStyle = dim && on ? palette.ink : palette.line;
-			ctx.lineWidth = (dim && on ? 1.4 : 1) / k;
+			ctx.strokeStyle = (dim && on) || home ? palette.ink : palette.line;
+			ctx.lineWidth = (home ? 2 : dim && on ? 1.4 : 1) / k;
 			ctx.stroke(path);
 		});
 		ctx.setLineDash([]);
@@ -224,14 +265,36 @@ summary instead; the page's search and list are the keyboard way in (see design-
 			.filter((v) => (!shown || shown.has(v.uid)) && pos.has(v.uid))
 			.map((v) => [v.label, pos.get(v.uid)!] as const)
 			.sort((a, b) => a[1].r - b[1].r);
+		const faint = (uid: string) =>
+			dim ? !hood?.uids.has(uid) : trailing ? !trail?.lit.has(uid) : false;
 		for (const [label, n] of order) {
-			ctx.globalAlpha = dim && !hood?.uids.has(n.uid) ? 0.18 : 1;
+			ctx.globalAlpha = faint(n.uid) ? (dim ? 0.18 : 0.3) : 1;
 			ctx.fillStyle = palette[label] ?? palette.ink;
 			ctx.beginPath();
 			ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
 			ctx.fill();
 		}
 		ctx.globalAlpha = 1;
+
+		// The trail: one ink line through the steps' nodes, in order (numbers are HTML labels).
+		if (trail && trailing && !dim) {
+			const stops = trail.points.map((p) => at(p.uid)).filter((n) => n !== undefined);
+			ctx.strokeStyle = palette.ink;
+			ctx.lineWidth = 2 / k;
+			ctx.lineJoin = 'round';
+			ctx.globalAlpha = 0.7;
+			ctx.beginPath();
+			stops.forEach((n, i) => (i ? ctx.lineTo(n.x, n.y) : ctx.moveTo(n.x, n.y)));
+			ctx.stroke();
+			ctx.globalAlpha = 1;
+			const now = trail.current ? at(trail.current) : undefined;
+			if (now) {
+				ctx.lineWidth = 2.5 / k;
+				ctx.beginPath();
+				ctx.arc(now.x, now.y, now.r + 14 / k, 0, Math.PI * 2);
+				ctx.stroke();
+			}
+		}
 
 		for (const [uid, width, gap] of [
 			[hover, 1.5, 3],
@@ -341,6 +404,26 @@ summary instead; the page's search and list are the keyboard way in (see design-
 				</span>
 			{/if}
 		{/each}
+		{#if trail && trailing && !hood}
+			{#each trail.points as point (point.uid)}
+				{@const n = pos.get(point.uid)}
+				{#if n}
+					{@const p = screen(n.x, n.y)}
+					<span class="mark" style:left="{p.left}px" style:top="{p.top}px">{point.ns.join(', ')}</span>
+				{/if}
+			{/each}
+			{#if trail.current && here}
+				{@const n = pos.get(trail.current)}
+				{#if n}
+					{@const p = screen(n.x, n.y)}
+					<span
+						class={['here', { start: p.left < size.width * 0.35, end: p.left > size.width * 0.65 }]}
+						style:left="{p.left}px"
+						style:top="{p.top - n.r * transform.k - 26}px">{here}</span
+					>
+				{/if}
+			{/if}
+		{/if}
 		{#if hovered}
 			{@const n = pos.get(hovered.uid)}
 			{@const p = n ? screen(n.x, n.y) : { left: -999, top: -999 }}
@@ -455,6 +538,46 @@ summary instead; the page's search and list are the keyboard way in (see design-
 	.node.selected {
 		background: var(--color-text);
 		color: var(--color-surface);
+	}
+	.mark {
+		position: absolute;
+		transform: translate(-50%, -50%);
+		min-width: var(--space-5);
+		height: var(--space-5);
+		padding: 0 var(--space-1);
+		box-sizing: border-box;
+		border-radius: var(--radius-full);
+		background: var(--color-text);
+		color: var(--color-surface);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-bold);
+		font-variation-settings: 'wdth' var(--width-label);
+		line-height: var(--space-5);
+		text-align: center;
+		white-space: nowrap;
+	}
+	.here {
+		position: absolute;
+		transform: translate(-50%, -100%);
+		padding: var(--space-1) var(--space-2);
+		border-radius: var(--radius-full);
+		background: var(--color-text);
+		color: var(--color-surface);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-semibold);
+		font-variation-settings: 'wdth' var(--width-label);
+		line-height: var(--leading-tight);
+		white-space: nowrap;
+		max-width: 60%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	/* Near an edge the label hangs inward, so it stays on the map. */
+	.here.start {
+		transform: translate(calc(-1 * var(--space-4)), -100%);
+	}
+	.here.end {
+		transform: translate(calc(-100% + var(--space-4)), -100%);
 	}
 	.zoom {
 		position: absolute;

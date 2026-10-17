@@ -18,6 +18,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from backend.api import (
+    activity,
     ask,
     builds,
     checks,
@@ -54,6 +55,7 @@ def create_app(runner: JobRunner | None = None, asker: Asker | None = None) -> F
         return JSONResponse(status_code=503, content={"detail": "FalkorDB is not reachable"})
 
     app.include_router(companies.router, prefix="/api")
+    app.include_router(activity.router, prefix="/api")
     app.include_router(builds.router, prefix="/api")
     app.include_router(checks.router, prefix="/api")
     app.include_router(onboard.router, prefix="/api")

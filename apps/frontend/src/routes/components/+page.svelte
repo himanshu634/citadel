@@ -14,6 +14,7 @@
 		Card,
 		Checkbox,
 		ChoiceCard,
+		AgentRun,
 		ChatList,
 		CitedAnswer,
 		CompanyForm,
@@ -50,6 +51,8 @@
 	import { RepoChecks, type RepoResult } from '$lib/repochecks.svelte';
 	import * as builds from './build-samples';
 	import { syntheticGraph } from './graph-samples';
+	import { doneRun, failedRun, runningRun } from './activity-samples';
+	import { doingNow, trailOf } from '$lib/activity';
 	import * as walks from './walk-samples';
 	import * as chatSamples from './chat-samples';
 	import { carryOver, highlightFor } from '$lib/walk';
@@ -403,6 +406,11 @@
 
 	// The graph map and inspector, on the synthetic company's real graph view.
 	const mapLayout = layoutMap(syntheticGraph, { ticks: 300 });
+	const mapTerritory = new Map(syntheticGraph.nodes.map((n) => [n.uid, n.territory]));
+	const drawnUid = (uid: string) => mapTerritory.get(uid) ?? null;
+	const runningTrail = trailOf(runningRun, drawnUid);
+	const doneTrail = trailOf(doneRun, drawnUid);
+	const failedTrail = trailOf(failedRun, drawnUid);
 	let mapSelected = $state<string | null>('person:alice');
 	const graphNode = (uid: string) => syntheticGraph.nodes.find((n) => n.uid === uid);
 	const territoryOf = (uid: string) =>
@@ -1135,6 +1143,48 @@
 		</div>
 	</Card>
 
+	<Card title="Agent trail">
+		<p class="note">
+			The Systems page: an agent's run drawn over the territory map. Each step sits on the node it
+			was about, numbered, joined by an ink line; nodes it touched stay bright. While the run is
+			going, an ink ring and a label mark where the agent is now, and its territory is outlined.
+		</p>
+		<div class="map-sample">
+			<TerritoryMap
+				view={syntheticGraph}
+				layout={mapLayout}
+				trail={runningTrail}
+				here="Ask agent · {doingNow(runningRun)}"
+				scrollZoom={false}
+			/>
+		</div>
+		<h3 class="sub">Run finished</h3>
+		<div class="map-sample short">
+			<TerritoryMap view={syntheticGraph} layout={mapLayout} trail={doneTrail} scrollZoom={false} />
+		</div>
+	</Card>
+
+	<Card title="Agent run">
+		<p class="note">
+			The Systems page's rail: one run's steps, numbered as on the map. A ring is the step
+			running now; a dash is a step with nothing on the map.
+		</p>
+		<div class="runs">
+			<div>
+				<h3 class="sub">Working now</h3>
+				<AgentRun run={runningRun} trail={runningTrail} href="#agent-run" />
+			</div>
+			<div>
+				<h3 class="sub">Done</h3>
+				<AgentRun run={doneRun} trail={doneTrail} href="#agent-run" />
+			</div>
+			<div>
+				<h3 class="sub">Failed, no steps</h3>
+				<AgentRun run={failedRun} trail={failedTrail} />
+			</div>
+		</div>
+	</Card>
+
 	<Card title="Node inspector">
 		<p class="note">
 			What the Graph page says about a selected node. Counts come from the links the map draws;
@@ -1203,6 +1253,11 @@
 	}
 	.map-sample.short {
 		height: 18rem;
+	}
+	.runs {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+		gap: var(--space-6);
 	}
 	.inspectors {
 		display: grid;
