@@ -217,8 +217,7 @@
   tags: [people, live]
   why: >-
     asked live. AviAvni and DvirDukhan review each other's PRs far more than any other pair
-    (about 3x the next, GomezGab and swilly22). No tool counts pairs, so this needs reviews from
-    person_profile or work_history.
+    (about 3x the next, GomezGab and swilly22). collaborators ranks the pairs in one call.
   turns:
     - question: Who works most closely with each other, more than anyone else?
       expect:
@@ -229,8 +228,8 @@
 - id: most-issues-module
   tags: [aggregate, live]
   why: >-
-    asked live; the run hit the step limit. graph/src is linked to far more issues than any
-    other system (about 8x the next). No tool counts issues per system, so this may stay a gap.
+    asked live; the run hit the step limit. graph/src is mentioned by far more issues than any
+    other system (about 8x the next). issues_by_system ranks them in one call.
   turns:
     - question: Which module has the highest number of issues?
       expect:

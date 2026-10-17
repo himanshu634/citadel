@@ -184,6 +184,8 @@ purpose, parameters, returns, example.
 | `tools/keeper_notes.cypher` | The Keeper's accepted, current claims about a node, each with its evidence |
 | `tools/list_systems.cypher` | All systems with change counts, people and owners |
 | `tools/recent_work_items.cypher` | Most recent PRs, issues and threads, newest first (dashboard overview) |
+| `tools/collaborators.cypher` | Pairs of people ranked by PRs one reviewed of the other's, with shared issue threads, bots excluded |
+| `tools/issues_by_system.cypher` | Issues and tickets per system (text names it, or closed by a PR that changed it), open/closed, ranked |
 | `tools/people_activity.cypher` | People with how many PRs they authored and reviewed, bots excluded (dashboard overview) |
 | `tools/graph_stats.cypher` | Node and relationship counts per type |
 

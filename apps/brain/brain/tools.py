@@ -358,6 +358,47 @@ class PersonActivity(_Model):
     reviews: int
 
 
+class PersonRef(_Model):
+    login: str
+    person_uid: str
+
+
+class CollaboratorsParams(_Model):
+    login: str | None = Field(
+        None, description="Only this person's pairs, e.g. 'erin' (default: everyone)."
+    )
+    since_days: int | None = Field(None, description="Only count reviews from the last N days.")
+    limit: int = Field(10, ge=1, le=100)
+
+
+class Collaborators(_Model):
+    people: list[PersonRef]  # the pair; with a login, that person first
+    reviews: int  # distinct PRs one of them reviewed of the other's
+    a_reviewed_b: int  # PRs of people[1] that people[0] reviewed
+    b_reviewed_a: int
+    shared_threads: int  # issues, tickets and threads both commented on (not ranked)
+    examples: list[LinkRef]  # latest reviewed PRs
+    shared_examples: list[LinkRef]
+
+
+class IssuesBySystemParams(_Model):
+    state: Literal["open", "closed"] | None = Field(
+        None, description="Only count issues in this state (default: both)."
+    )
+    limit: int = Field(10, ge=1, le=100)
+
+
+class SystemIssues(_Model):
+    system: str
+    system_uid: str
+    issues: int  # mentioned + fixed_in
+    open: int
+    closed: int
+    mentioned: int  # issues whose text names a path in the system (the ranking)
+    fixed_in: int  # other issues closed by a PR that changed the system
+    examples: list[LinkRef]  # latest issues, mentioned first
+
+
 class NoParams(_Model):
     pass
 
@@ -470,6 +511,11 @@ def _no_semantic_hits(slug: str, model: str) -> None:
 
 def _person(p: dict[str, Any]) -> dict[str, Any]:
     return {"person_uid": person_uid(p["login"]), "limit": p["limit"]}
+
+
+def _pairs(p: dict[str, Any]) -> dict[str, Any]:
+    login = p.pop("login", None)
+    return {**_since(p), "person_uid": person_uid(login) if login else None}
 
 
 # --- registry ---------------------------------------------------------------------------------
@@ -605,6 +651,22 @@ TOOLS: dict[str, Tool] = {
             ListParams,
             PersonActivity,
         ),
+        Tool(
+            "collaborators",
+            "Who works most closely together: pairs of people ranked by PRs one reviewed of "
+            "the other's, with example PRs. Give a login for that person's closest "
+            "collaborators.",
+            CollaboratorsParams,
+            Collaborators,
+            _pairs,
+        ),
+        Tool(
+            "issues_by_system",
+            "Which systems (modules, code areas) have the most issues: open and closed issue "
+            "counts per system, ranked, with example issues.",
+            IssuesBySystemParams,
+            SystemIssues,
+        ),
         Tool("graph_stats", "Node and relationship counts in the company graph.", NoParams, Stat),
         Tool(
             "keeper_notes",
@@ -711,6 +773,16 @@ def recent_work_items(slug: str, limit: int = 10) -> list[RecentWorkItem]:
 
 def people_activity(slug: str, limit: int = 100) -> list[PersonActivity]:
     return call(slug, "people_activity", limit=limit)
+
+
+def collaborators(
+    slug: str, login: str | None = None, since_days: int | None = None, limit: int = 10
+) -> list[Collaborators]:
+    return call(slug, "collaborators", login=login, since_days=since_days, limit=limit)
+
+
+def issues_by_system(slug: str, state: str | None = None, limit: int = 10) -> list[SystemIssues]:
+    return call(slug, "issues_by_system", state=state, limit=limit)
 
 
 def graph_stats(slug: str) -> list[Stat]:

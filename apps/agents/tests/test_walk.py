@@ -188,3 +188,27 @@ def test_keeper_notes_link_the_claim_to_its_node_and_evidence():
         ("claim:1a2b3c4d5e6f", "ABOUT", "system:Auth", False),
         ("claim:1a2b3c4d5e6f", "EVIDENCE", "synthetic:pr:2", False),
     }
+
+
+def test_collaborators_link_both_people_to_each_example_pr():
+    row = {
+        "people": [{"login": "alice", "person_uid": "person:alice"},
+                   {"login": "carol", "person_uid": "person:carol"}],
+        "reviews": 3,
+        "examples": [{"uid": "synthetic:pr:10", "number": 10, "title": "refactor(auth)"}],
+    }  # fmt: skip
+    nodes, rs = walk.subgraph("collaborators", {}, [row])
+    assert {n["uid"] for n in nodes} == {"person:alice", "person:carol", "synthetic:pr:10"}
+    assert ("person:alice", "worked_on", "synthetic:pr:10", True) in rels(rs)
+    assert ("person:carol", "worked_on", "synthetic:pr:10", True) in rels(rs)
+
+
+def test_issues_by_system_links_example_issues_to_their_system():
+    row = {"system": "graph/src", "system_uid": "system:graph/src",
+           "examples": [{"uid": "x:issue:1", "number": 1, "title": "crash"}]}  # fmt: skip
+    nodes, rs = walk.subgraph("issues_by_system", {}, [row])
+    assert {n["uid"]: n["label"] for n in nodes} == {
+        "system:graph/src": "System",
+        "x:issue:1": "WorkItem",
+    }
+    assert ("x:issue:1", "MENTIONS", "system:graph/src", True) in rels(rs)

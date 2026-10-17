@@ -360,6 +360,11 @@ const SAID: Record<string, (p: Record<string, unknown>) => Said> = {
 	owners_vs_experts: () => ['Comparing declared owners with who does the work', 'Compared declared owners with who does the work'],
 	recent_work_items: () => ['Reading the latest work', 'Read the latest work'],
 	people_activity: () => ['Listing people and their activity', 'Listed people and their activity'],
+	collaborators: (p) =>
+		p.login
+			? [`Finding who works most with ${str(p.login)}`, `Found who works most with ${str(p.login)}`]
+			: ['Finding who works most closely together', 'Found who works most closely together'],
+	issues_by_system: () => ['Counting issues per system', 'Counted issues per system'],
 	graph_stats: () => ['Counting what the graph holds', 'Counted what the graph holds'],
 	submit_answer: () => ['Checking the answer against what was found', 'Checked the answer against what was found'],
 	// Ask interviewing the person about the brain's gaps.
