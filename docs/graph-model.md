@@ -22,6 +22,7 @@ graph LR
   WorkItem -- CLOSES --> WorkItem
   WorkItem -- BLOCKS --> WorkItem
   WorkItem -- MENTIONS --> WorkItem
+  WorkItem -- SUPERSEDED_BY --> WorkItem
   WorkItem -- MENTIONS --> System
   Document -- MENTIONS --> WorkItem
   Document -- MENTIONS --> System
@@ -50,7 +51,7 @@ accessor.
 | `Team` | `name` | CODEOWNERS `@org/team`, JSONL; uid `team:<name>` |
 | `System` | `name`, `path_rule` | file paths mapped by the company's `systems.rules`; uid `system:<name>` |
 | `Change` | `sha`, `date`, `ts`, `kind` (feat/fix/perf/ci/build/docs/refactor/other), `subject` | commits |
-| `WorkItem` | `kind` (pull_request/issue/ticket/thread), `number`, `title`, `body`, `state`, `created_at`, `closed_at`, `merged_at`, `labels`, `container`; tickets also `key`, `status_category` (backlog/todo/in_progress/done/canceled), `priority` (urgent/high/medium/low), `priority_rank` (1-4, 5 = none; null for PRs and issues), `due_date`, `due_ts` | PRs, issues, tickets, chat threads |
+| `WorkItem` | `kind` (pull_request/issue/ticket/thread), `number`, `title`, `body`, `state`, `created_at`, `closed_at`, `merged_at`, `labels`, `container`; tickets also `key`, `status_category` (backlog/todo/in_progress/done/canceled), `priority` (urgent/high/medium/low), `priority_rank` (1-4, 5 = none; null for PRs and issues), `due_date`, `due_ts`; `unresolved_refs` (refs ingest could not link); archived items also `archived`, `archived_at`, `archive_request`, `ref`, and `superseded_by` when replaced (a `Document` can be archived too) | PRs, issues, tickets, chat threads |
 | `Document` | `path`, `title`, `body`, `updated_at` | repo markdown, published docs folders |
 | `Chunk` | `kind` (`comment` / `work_item` / `document`), `text`, `idx`, `text_hash`, `ts`, `embedding` (vector), `embedded_hash`, `embed_model`; comments also `comment_uid`, `author_uid`, `created_at`; work-item chunks `created_at` | text for semantic search, one `FROM` its source; see below |
 | `Claim` | `kind` (owner/expert/decision/fact/link), `subject` (the uid it is about), `statement` (also `title`), `value` (e.g. the owner's uid), `status`, `valid_from`, `valid_to`, `author`, `approved_by` (a lead's typed name, or `auto`) | an accepted Keeper claim, projected from the ledger (`queries/keeper/project_claim.cypher`). Ingest never writes it |

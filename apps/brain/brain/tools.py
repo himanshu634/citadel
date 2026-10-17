@@ -316,6 +316,10 @@ class Entity(_Model):
     url: str | None
     date: str | None
     body: str
+    archived: bool | None = None
+    archived_at: str | None = None
+    unresolved_refs: list[str] = []
+    superseded_by: str | None = None
     neighbour_count: int
     neighbours: list[Neighbour]
 

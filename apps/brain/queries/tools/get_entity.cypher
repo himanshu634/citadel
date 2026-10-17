@@ -3,6 +3,8 @@
 //          chunks), so an agent can read a PR, issue, document, person or system and follow links.
 // params:  $uid, $limit (int, max neighbours)
 // returns: uid, label, title, kind, state, url, date, body (first 2000 chars),
+//          archived (true for an item loaded from before the window, else null), archived_at,
+//          unresolved_refs (refs not yet linked, [] if none), superseded_by (uid or null),
 //          neighbour_count, neighbours ([{rel, direction 'out'|'in', uid, label, title, url}],
 //          ordered by rel then uid, capped at $limit). A Claim neighbour is listed only while
 //          it is current (status 'accepted', no valid_to): a retired Keeper claim is never shown.
@@ -28,4 +30,6 @@ RETURN n.uid AS uid, labels(n)[0] AS label,
        n.state AS state, n.url AS url,
        coalesce(n.created_at, n.merged_at, n.date, n.updated_at) AS date,
        left(coalesce(n.body, n.text, ''), 2000) AS body,
+       n.archived AS archived, n.archived_at AS archived_at,
+       coalesce(n.unresolved_refs, []) AS unresolved_refs, n.superseded_by AS superseded_by,
        size(all_neighbours) AS neighbour_count, all_neighbours[0..$limit] AS neighbours

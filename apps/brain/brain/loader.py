@@ -199,6 +199,7 @@ def load(slug: str, records: Iterable[CanonicalRecord], origin: str | None = Non
                 "priority_rank": _priority_rank(w),
                 "due_date": w.due_date.isoformat() if w.due_date else None,
                 "due_ts": day_epoch(w.due_date),
+                "unresolved_refs": w.unresolved_refs,
             }
             for w in of(WorkItem)
         ],
@@ -492,6 +493,27 @@ def set_embeddings(slug: str, rows: list[dict[str, Any]], model: str) -> int:
 def clear_embedded(slug: str) -> int:
     """Mark every chunk as pending for the embed stage. Returns the chunks marked."""
     return _n(db.run(slug, "load/clear_embedded"))
+
+
+# --- archive (items older than the ingest window, loaded on demand) -------------------------
+
+
+def mark_archived(slug: str, rows: list[dict[str, Any]]) -> int:
+    """Flag loaded nodes as archived: rows of {uid, ref, archived_at, request}. Returns the
+    nodes marked (WorkItem or Document; a uid that is not in the graph marks nothing)."""
+    return sum(n for _, n in _batches(slug, "load/archive_mark", rows, {}))
+
+
+def resolve_refs(slug: str) -> int:
+    """Link every item's unresolved ref to the archived node carrying that `ref` (MENTIONS) and
+    drop the ref from the item. Returns the edges made; a second call makes none."""
+    return _n(db.run(slug, "load/archive_resolve"))
+
+
+def mark_superseded(slug: str, uid: str, by_uid: str) -> bool:
+    """Record that `by_uid` supersedes `uid` (SUPERSEDED_BY edge + `superseded_by` property).
+    False when either node is missing."""
+    return _n(db.run(slug, "load/archive_supersede", {"uid": uid, "by_uid": by_uid})) > 0
 
 
 # --- sync state -------------------------------------------------------------------------------
