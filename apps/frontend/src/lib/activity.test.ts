@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { actorName, anchorOf, doingNow, featured, shownRun, stepLine, stepsSummary, trailOf } from './activity';
+import { actorName, anchorOf, doingNow, featured, shownRun, stepLine, stepLineRuns, stepsSummary, trailOf } from './activity';
 import type { ActivityRun, ActivityStep } from './types';
 
 function step(n: number, tool: string, input: Record<string, unknown>, touched: string[], extra: Partial<ActivityStep> = {}): ActivityStep {
@@ -81,6 +81,19 @@ describe('words', () => {
 		expect(stepLine(step(1, 'work_history', { system: 'Auth' }, []))).toBe('Read recent work on Auth');
 		expect(stepLine(step(1, 'work_history', { system: 'Auth' }, [], { status: 'running' }))).toBe('Reading recent work on Auth');
 		expect(stepLine(step(1, 'search', {}, [], { kind: 'mcp' }))).toBe('Called search');
+	});
+	it('links the nodes a step names', () => {
+		expect(stepLineRuns(step(1, 'get_entity', { uid: 'github:o/r:pr:10' }, []))).toEqual([
+			{ text: 'Opened ' },
+			{ text: 'PR #10', href: 'https://github.com/o/r/pull/10' }
+		]);
+		const own = (uid: string) => (uid === 'synthetic:pr:3' ? 'https://example.com/3' : null);
+		expect(stepLineRuns(step(1, 'path_between', { from_uid: 'person:alice', to_uid: 'synthetic:pr:3' }, []), own)).toEqual([
+			{ text: 'Found how alice and ' },
+			{ text: 'PR #3', href: 'https://example.com/3' },
+			{ text: ' connect' }
+		]);
+		expect(stepLineRuns(step(1, 'work_history', { system: 'Auth' }, []))).toEqual([{ text: 'Read recent work on Auth' }]);
 	});
 	it('says what the agent is doing now', () => {
 		expect(doingNow(run([step(1, 'impact_of', { system: 'Auth' }, [], { status: 'running' })], 'running'))).toBe(

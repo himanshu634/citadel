@@ -5,7 +5,9 @@ in plain words ("Read recent work on Auth"), with a mark for how it ended (done,
 nothing, failed, not run), the rows it returned and how long it took. A step that found nothing or
 failed says so under its row and is never folded away. Once the answer is in (`settled`), repeated
 calls of one tool fold into one row ("Read recent work on 4 systems: …"). Open a row to see the
-call and its rows (`StepRows`). Hovering or focusing a row reports its steps (`onhover`) so the
+call and its rows (`StepRows`). A node a sentence names ("Opened PR #10") opens on GitHub (or its
+own site) in a new tab: the sentence sits beside the row's toggle, whose hit area covers the row,
+and its links sit above that. Hovering or focusing a row reports its steps (`onhover`) so the
 walk beside it can light what they added; leaving the list clears it. The last row is the newest
 answer check; a pass after the answer was sent back says how many times. Rules in `ledgerItems`
 and `checkLine` (src/lib/walk.ts).
@@ -13,7 +15,8 @@ and `checkLine` (src/lib/walk.ts).
 <script lang="ts">
 	import { Check, ChevronRight, CircleAlert, CircleDashed, LoaderCircle, Minus } from '@lucide/svelte';
 	import type { WalkStep } from '$lib/types';
-	import { checkLine, ledgerItems, stepCall, type LedgerItem } from '$lib/walk';
+	import { checkLine, ledgerItems, ledgerRuns, stepCall, type LedgerItem } from '$lib/walk';
+	import RefText from '../ui/RefText.svelte';
 	import StepRows from './StepRows.svelte';
 
 	type Props = {
@@ -63,24 +66,31 @@ and `checkLine` (src/lib/walk.ts).
 		{@const key = keyOf(item)}
 		{@const isOpen = open === key}
 		<li class={['item', item.state, { open: isOpen }]}>
-			<button
-				type="button"
-				class="row"
-				aria-expanded={isOpen}
-				aria-controls="{id}-{key}"
-				disabled={item.state === 'running'}
-				onclick={() => ontoggle?.(key)}
+			<!-- The toggle's ::after covers the row, so a click anywhere opens it; links sit above. -->
+			<div
+				class={['row', { live: item.state !== 'running' }]}
+				role="presentation"
 				onmouseenter={() => onhover?.(item.steps)}
 				onmouseleave={() => onhover?.(null)}
-				onfocus={() => onhover?.(item.steps)}
-				onblur={() => onhover?.(null)}
 			>
 				{@render mark(item.state)}
-				<span class="sentence">{item.sentence}</span>
+				<span class="sentence" id="{id}-{key}-s"><RefText runs={ledgerRuns(item)} /></span>
 				<span class="meta tabular">{meta(item)}</span>
 				<span class="ms tabular">{item.ms != null ? `${item.ms} ms` : ''}</span>
-				<ChevronRight class="chev" aria-hidden="true" />
-			</button>
+				<button
+					type="button"
+					class="toggle"
+					aria-expanded={isOpen}
+					aria-controls="{id}-{key}"
+					aria-labelledby="{id}-{key}-s"
+					disabled={item.state === 'running'}
+					onclick={() => ontoggle?.(key)}
+					onfocus={() => onhover?.(item.steps)}
+					onblur={() => onhover?.(null)}
+				>
+					<ChevronRight class="chev" aria-hidden="true" />
+				</button>
+			</div>
 			{#if item.state === 'empty'}
 				<p class="why empty">Found nothing.</p>
 			{:else if item.state === 'failed'}
@@ -128,24 +138,51 @@ and `checkLine` (src/lib/walk.ts).
 		padding-bottom: var(--space-2);
 	}
 	.row {
+		position: relative;
 		display: flex;
 		align-items: center;
 		gap: var(--space-3);
 		width: 100%;
 		min-height: var(--control-md);
 		padding: var(--space-1) var(--space-2);
-		border: 0;
 		border-radius: var(--radius-md);
-		background: none;
 		color: var(--color-text);
-		font: inherit;
 		text-align: left;
 	}
-	button.row:not(:disabled) {
+	.row.live {
 		cursor: pointer;
 	}
-	button.row:not(:disabled):hover {
+	.row.live:hover {
 		background: var(--color-surface-sunken);
+	}
+	.toggle {
+		display: grid;
+		flex: none;
+		place-items: center;
+		padding: 0;
+		border: 0;
+		background: none;
+		color: inherit;
+		cursor: inherit;
+	}
+	/* The toggle's hit area is the whole row; its focus ring draws round the row too. */
+	.toggle::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		border-radius: var(--radius-md);
+	}
+	.toggle:focus-visible {
+		outline: none;
+	}
+	.toggle:focus-visible::after {
+		outline: var(--border-focus) solid var(--color-focus);
+		outline-offset: -2px;
+	}
+	/* Links in the sentence sit above the toggle's hit area. */
+	.sentence :global(a) {
+		position: relative;
+		z-index: 1;
 	}
 	.mark {
 		display: grid;
@@ -209,7 +246,7 @@ and `checkLine` (src/lib/walk.ts).
 		color: var(--color-text-muted);
 		transition: transform var(--duration-fast) var(--ease-out);
 	}
-	.row:disabled :global(.chev) {
+	.toggle:disabled :global(.chev) {
 		visibility: hidden;
 	}
 	.open .row :global(.chev) {

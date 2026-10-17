@@ -6,6 +6,7 @@
  * decisions here makes them testable, and keeps the page a thin layer of fetch and markup. The
  * state comes from `company.status`, never from `build`, which may be a finished build.
  */
+import { refUrl } from './links';
 import { buildingLabel } from './topbar';
 import { NODE_PLURALS } from './types';
 import type {
@@ -92,6 +93,8 @@ export function workItemOf(item: RecentWorkItem): WorkItem {
 	if (item.author != null) out.author = item.author;
 	if (item.last_at != null) out.date = item.last_at;
 	if (item.systems.length > 0) out.system = item.systems.join(', ');
+	const url = refUrl(item.uid, item.url);
+	if (url) out.url = url;
 	return out;
 }
 

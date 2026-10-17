@@ -15,11 +15,12 @@ overview (`viewOf`). The layout runs in a worker (`graphLayout.ts`), because it 
 	import { resolve } from '$app/paths';
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
-	import { Banner, Button, Checkbox, EmptyState, NodeInspector, TerritoryMap } from '$lib';
+	import { Banner, Button, Checkbox, EmptyState, NodeInspector, RefLink, TerritoryMap } from '$lib';
 	import { api, describeError } from '$lib/api/client';
 	import { getCompanies } from '$lib/companies.svelte';
 	import { kept, neighbourhood, nodeName, search, tally, type MapLayout } from '$lib/graph';
 	import { cachedLayout, computeLayout } from '$lib/graphLayout';
+	import { refUrl } from '$lib/links';
 	import { buildingTitle, viewOf } from '$lib/overview';
 	import {
 		LABEL_TYPES,
@@ -355,12 +356,16 @@ overview (`viewOf`). The layout runs in a worker (`graphLayout.ts`), because it 
 								</thead>
 								<tbody>
 									{#each rows.slice(0, shownRows) as r (r.uid)}
+										{@const href = refUrl(r.uid, r.url)}
 										<tr class={{ current: r.uid === selected }}>
 											<td>
-												<button type="button" aria-current={r.uid === selected ? 'true' : undefined} onclick={() => select(r.uid)}>
-													<span class="dot" style:--node="var(--node-{LABEL_TYPES[r.label]})" aria-hidden="true"></span>
-													{nodeName(r)}
-												</button>
+												<span class="name-cell">
+													<button type="button" aria-current={r.uid === selected ? 'true' : undefined} onclick={() => select(r.uid)}>
+														<span class="dot" style:--node="var(--node-{LABEL_TYPES[r.label]})" aria-hidden="true"></span>
+														{nodeName(r)}
+													</button>
+													{#if href}<RefLink icon {href} label={nodeName(r)} />{/if}
+												</span>
 											</td>
 											<td>{kind(r.label)}{r.is_bot ? ', bot' : ''}</td>
 											<td>{territoryName.get(r.territory)}</td>
@@ -611,6 +616,11 @@ overview (`viewOf`). The layout runs in a worker (`graphLayout.ts`), because it 
 	.num {
 		text-align: right;
 		font-variant-numeric: tabular-nums;
+	}
+	.name-cell {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-1);
 	}
 	td button {
 		display: inline-flex;

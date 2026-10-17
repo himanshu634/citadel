@@ -113,6 +113,7 @@ The map is laid out once per graph; only the trail moves.
 		picked = { id, featuredAt: featured(runs ?? [])?.id ?? null };
 	}
 	const territoryOf = $derived(new Map((graph?.nodes ?? []).map((n) => [n.uid, n.territory])));
+	const urls = $derived(new Map((graph?.nodes ?? []).map((n) => [n.uid, n.url])));
 	const trail = $derived(run && graph ? trailOf(run, (uid) => territoryOf.get(uid) ?? null) : null);
 	const here = $derived(run?.status === 'running' ? `${actorName(run.actor)} · ${doingNow(run)}` : null);
 	const others = $derived((runs ?? []).filter((r) => r.id !== run?.id));
@@ -191,7 +192,7 @@ The map is laid out once per graph; only the trail moves.
 					{:else if !runs}
 						<p class="note">Reading the agents' runs</p>
 					{:else if run && trail}
-						<AgentRun {run} {trail} href={chatHref(run.thread_id)} />
+						<AgentRun {run} {trail} href={chatHref(run.thread_id)} urlOf={(uid) => urls.get(uid) ?? null} />
 						{#if others.length}
 							<div class="earlier">
 								<h2>Other runs</h2>
