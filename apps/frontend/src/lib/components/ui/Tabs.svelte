@@ -1,14 +1,16 @@
 <!--
 @component
 Tabs on bits-ui. The selected tab is the solid accent block (the H signature), so the selected
-state shows as fill plus weight, not colour alone.
+state shows as fill plus weight, not colour alone. A tab can say it holds unsaved edits (a dot,
+named for screen readers) and how many errors it holds (a count in words). Every panel stays
+mounted and is only hidden, so what a person typed in one tab survives a switch.
 -->
 <script lang="ts">
 	import { Tabs } from 'bits-ui';
 	import type { Snippet } from 'svelte';
 
 	type Props = {
-		items: { value: string; label: string; count?: number }[];
+		items: { value: string; label: string; count?: number; dirty?: boolean; errors?: number }[];
 		value?: string;
 		/** Accessible name for the tab list. */
 		label: string;
@@ -24,6 +26,12 @@ state shows as fill plus weight, not colour alone.
 			<Tabs.Trigger value={item.value} class="tabs-trigger">
 				{item.label}
 				{#if item.count !== undefined}<span class="tabs-count tabular">{item.count}</span>{/if}
+				{#if item.errors}
+					<span class="tabs-errors tabular">{item.errors} {item.errors === 1 ? 'error' : 'errors'}</span>
+				{/if}
+				{#if item.dirty}
+					<span class="tabs-dirty" aria-hidden="true"></span><span class="sr-only">(unsaved changes)</span>
+				{/if}
 			</Tabs.Trigger>
 		{/each}
 	</Tabs.List>
@@ -74,6 +82,20 @@ state shows as fill plus weight, not colour alone.
 	:global(.tabs-count) {
 		font-size: var(--text-xs);
 		opacity: 0.8;
+	}
+	:global(.tabs-errors) {
+		padding: 0 var(--space-2);
+		border-radius: var(--radius-sm);
+		background: var(--color-danger-soft);
+		color: var(--color-danger);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-semibold);
+	}
+	:global(.tabs-dirty) {
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: var(--radius-full);
+		background: currentColor;
 	}
 	:global(.tabs-panel:focus-visible) {
 		outline-offset: 4px;

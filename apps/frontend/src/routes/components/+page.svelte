@@ -765,8 +765,9 @@
 
 	<Card title="Company form">
 		<p class="note">
-			The fields of a company file. One step at a time in the add-company wizard (company,
-			sources, rules) and all three on one page in Settings, where the graph name is read-only.
+			The fields of a company file. One step at a time, in the add-company wizard (company,
+			sources, rules) and in the Settings tabs. For an existing company (Settings) the graph name
+			is not a field, the data permission is a row of radios and Name to login starts empty.
 			Errors show under their field; the form never calls the API. The last form holds duplicate
 			tags, as a hand-edited file can.
 		</p>
@@ -784,12 +785,12 @@
 				<figcaption>Company step, with errors</figcaption>
 			</figure>
 			<figure>
-				<CompanyForm bind:draft={formLocked} section="company" errors={[]} slugLocked />
-				<figcaption>Company step, graph name locked (an existing company)</figcaption>
+				<CompanyForm bind:draft={formLocked} section="company" errors={[]} existing />
+				<figcaption>Company tab in Settings (an existing company)</figcaption>
 			</figure>
 			<figure>
-				<CompanyForm bind:draft={formAll} section="all" errors={[]} slugLocked />
-				<figcaption>All sections, as in Settings</figcaption>
+				<CompanyForm bind:draft={formAll} section="rules" errors={[]} existing />
+				<figcaption>Systems and people tab in Settings, no names yet</figcaption>
 			</figure>
 		</div>
 	</Card>
@@ -840,8 +841,8 @@
 			bind:value={tab}
 			items={[
 				{ value: 'answer', label: 'Answer' },
-				{ value: 'path', label: 'Graph path' },
-				{ value: 'empty', label: 'Empty state' }
+				{ value: 'path', label: 'Graph path', dirty: true },
+				{ value: 'empty', label: 'Empty state', count: 3, errors: 2 }
 			]}
 		>
 			{#snippet panel(v)}

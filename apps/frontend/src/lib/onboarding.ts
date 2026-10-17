@@ -331,7 +331,8 @@ export function visibleErrors(draft: CompanyConfig, errors: FieldError[]): Field
 
 type Why = { kind: 'incomplete'; text: string } | { kind: 'errors' } | { kind: 'checking' };
 
-const STEP_NAMES: Record<Section, string> = {
+/** Each section's name, as the wizard's steps and the Settings tabs show it. */
+export const STEP_NAMES: Record<Section, string> = {
 	company: 'Company',
 	sources: 'Sources',
 	rules: 'Systems and people'
