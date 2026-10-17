@@ -186,11 +186,19 @@ export function codeRef(text: string): CodeRef | null {
 	return null;
 }
 
-/** Where a file path opens: the document the walk saw at that path, else the file in the repo. */
+/** Files that live at a repo's root, so a bare name of one can open there. */
+const ROOT_FILE = /^(README|CONTRIBUTING|CHANGELOG|LICENSE|SECURITY|CODE_OF_CONDUCT)(\.\w+)?$|^(Makefile|Dockerfile|CODEOWNERS)$/;
+
+/**
+ * Where a file path opens: the document the walk saw at that path, else the file in the repo.
+ * A bare name (`query.c`) opens only when the walk saw it or it lives at the root: the file may
+ * sit in any folder, and a guessed root path would be a dead link.
+ */
 export function codeUrl(ref: CodeRef, ctx: RefContext): string | null {
 	const clean = ref.file.replace(/^\.?\//, '');
 	const doc = ctx.files.get(clean);
 	if (doc && ref.line === undefined) return doc;
+	if (!clean.includes('/') && !doc && !ROOT_FILE.test(clean)) return null;
 	return ctx.repo ? fileUrl(ctx.repo, clean, ref.line, ref.end) : null;
 }
 

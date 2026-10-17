@@ -123,6 +123,15 @@ describe('numberUrl and codeUrl', () => {
 		expect(codeUrl({ file: 'docs/a.md', line: 2 }, withDoc)).toBe(`${GH}/blob/HEAD/docs/a.md?plain=1#L2`);
 		expect(codeUrl({ file: 'src/a.py' }, NO_REFS)).toBeNull();
 	});
+	test('a bare name opens only if the walk saw it or it lives at the root', () => {
+		const repo = refContext([], ['o/r']);
+		expect(codeUrl({ file: 'query.c', line: 120 }, repo)).toBeNull();
+		expect(codeUrl({ file: 'README.md' }, repo)).toBe(`${GH}/blob/HEAD/README.md`);
+		expect(codeUrl({ file: 'Makefile', line: 3 }, repo)).toBe(`${GH}/blob/HEAD/Makefile#L3`);
+		const seen = refContext([{ uid: 'github:o/r:doc:NOTES.md', url: `${GH}/blob/main/NOTES.md` }]);
+		expect(codeUrl({ file: 'NOTES.md' }, seen)).toBe(`${GH}/blob/main/NOTES.md`);
+		expect(codeUrl({ file: 'NOTES.md', line: 2 }, seen)).toBe(`${GH}/blob/HEAD/NOTES.md?plain=1#L2`);
+	});
 });
 
 describe('textRuns', () => {

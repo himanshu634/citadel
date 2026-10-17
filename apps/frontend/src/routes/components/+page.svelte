@@ -1262,7 +1262,7 @@
 		<div class="runs">
 			<div>
 				<h3 class="sub">Working now</h3>
-				<AgentRun run={runningRun} trail={runningTrail} href="#agent-run" />
+				<AgentRun run={runningRun} trail={runningTrail} href="#agent-run" urlOf={(uid) => syntheticGraph.nodes.find((n) => n.uid === uid)?.url ?? null} />
 			</div>
 			<div>
 				<h3 class="sub">Done</h3>
