@@ -3,10 +3,11 @@
     uv run python -m agents.evals.report FILE [FILE ...]
 
 Files are grouped by company (the `slug` in each file's meta line). Within a company the first
-file is the baseline and the next is compared with it, case by case. The output is a headline
-table (one row per company), then per company: pass rates by tag, by case, and the failed runs
-with the checks that failed. A run that raised (an API or graph error) is counted apart from a
-graded failure, because an outage is not an agent miss.
+file is the baseline and the next is compared with it, case by case. Two files of one model and
+effort (the same model before and after a change) are labelled "(before)" and "(after)". The
+output is a headline table (one row per company), then per company: pass rates by tag, by case,
+and the failed runs with the checks that failed. A run that raised (an API or graph error) is
+counted apart from a graded failure, because an outage is not an agent miss.
 """
 
 from __future__ import annotations
@@ -29,11 +30,12 @@ class ResultFile:
     path: Path
     meta: dict[str, Any]
     runs: list[dict[str, Any]] = field(default_factory=list)
+    suffix: str = ""  # " (before)" / " (after)" when both files of a company share a label
 
     @property
     def label(self) -> str:
         model = str(self.meta.get("model", "?")).removeprefix("claude-")
-        return f"{model} {self.meta.get('effort', '?')}"
+        return f"{model} {self.meta.get('effort', '?')}{self.suffix}"
 
     @property
     def errors(self) -> int:
@@ -203,6 +205,9 @@ def render(paths: list[Path]) -> str:
     for p in paths:
         f = load(p)
         by_slug.setdefault(f.meta.get("slug") or p.parent.name, []).append(f)
+    for files in by_slug.values():
+        if len(files) > 1 and files[0].label == files[1].label:
+            files[0].suffix, files[1].suffix = " (before)", " (after)"
     parts = [headline(by_slug), ""]
     parts += [company(slug, files) for slug, files in by_slug.items()]
     return "\n".join(parts).rstrip() + "\n"
