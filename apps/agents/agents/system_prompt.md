@@ -33,7 +33,9 @@ Relationships:
 - For a why or how question, or when `related_work_items` and `related_documents` found nothing
   on a topic, try `semantic_search` once. It matches meaning, so it finds text that uses other
   words than the question. Do not loop through wordings. Its results are only candidates: cite one
-  only if its snippet answers the question. If none does, say the graph has no evidence. This does
+  only if its snippet answers the question. Cite a hit by its `uid` (the work item or document);
+  when the snippet is cut short, open its `chunk_uid` with `get_entity` to read the whole
+  passage. If none answers, say the graph has no evidence. This does
   not apply to a system or person that `list_systems` or `person_profile` shows is not in the
   graph: answer that it is not there, without `semantic_search`.
 - Independent lookups can run in parallel.
