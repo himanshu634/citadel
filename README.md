@@ -1,9 +1,9 @@
-# Company Brain
+# Citadel: Company Brain and its Keeper
 
-**A living memory of how your company builds software, one that agents can query and that
-repairs itself.**
+**A living memory of how your company builds software that agents can query, and the Keeper: the
+agent that repairs it.**
 
-Entry for *Graph Hacks: Context for AI Agents* (FalkorDB × WeMakeDevs, Oct 15–18 2026).
+Citadel is our entry for *Graph Hacks: Context for AI Agents* (FalkorDB × WeMakeDevs, Oct 15–18 2026).
 Tracks: **Company Brain** and **Agent Memory & Coordination**.
 
 ## The problem
@@ -23,6 +23,32 @@ expert claims disagrees with the declared owners (CODEOWNERS) or with who does m
 the source is kept, the claim is set aside, and the `pm` agent opens a follow-up to fix the
 source.
 
+## Meet the Keeper
+
+Most knowledge bases rot: an answer is wrong, someone shrugs, and the next person gets the same
+wrong answer. The Keeper is the agent that stops this. It watches every question the brain gets:
+
+- **It notices what the brain could not answer.** A question with no answer or no source, a
+  thumbs-down, or an owner who no longer does the work becomes a gap in its ledger.
+- **It asks other agents, then checks them.** `pm` and `qa` answer with draft claims that cite
+  real nodes. Fixed rules in code, not the model, decide what gets in: the evidence must exist,
+  the sources win, and a critical claim waits for a lead to approve it.
+- **It writes back, and shows its work.** An accepted claim becomes a dated `Claim` node linked to
+  its evidence. The next answer cites it and says it comes from the Keeper. Every step is in the
+  log: who, what, why, and who approved it.
+
+In the app, the Systems page shows each Keeper review step by step on the agent trail, with
+**Review now**, the claims waiting for a lead, and the log in its rail. Try it without an API key:
+
+```bash
+make synthetic                                  # the offline demo company
+make keeper-review SLUG=synthetic OFFLINE=1     # one review with scripted agents
+make keeper-gaps SLUG=synthetic                 # what it found
+make keeper-log SLUG=synthetic                  # what it did, and why
+```
+
+How a gap becomes a claim: [The self-healing loop](#the-self-healing-loop).
+
 ## What we are building
 
 | Part | What it does | Status |
@@ -30,9 +56,9 @@ source.
 | **The Brain** | One FalkorDB graph per company (`brain_<slug>`), built from GitHub, Linear, docs and chat exports: people, teams, systems, changes, work items, documents | Built |
 | **Named graph tools** | 17 read queries, each a reviewed `.cypher` file with typed params. Agents pick a tool and fill its params; no LLM ever writes Cypher | Built |
 | **Ask** (`brain` agent) | A Claude agent that answers from the tools and may cite only the nodes it has seen. Every turn is traced (no-answer, zero-source, thumbs). It answers from the sources first and says when a part comes from the Keeper | Built |
-| **Keeper** (`keeper` agent) | Turns failed questions, thumbs-down answers and what it notices after a build into gaps, consults `pm` and `qa`, checks their claims against the sources and a fixed critical rule, asks a lead to approve the critical ones, writes the rest into the brain, and logs every step | Built: CLI and HTTP API |
+| **Keeper** (`keeper` agent) | Turns failed questions, thumbs-down answers and what it notices after a build into gaps, consults `pm` and `qa`, checks their claims against the sources and a fixed critical rule, asks a lead to approve the critical ones, writes the rest into the brain, and logs every step | Built: CLI, HTTP API and app |
 | **`pm` and `qa` agents** | Answer the Keeper's consults with draft claims that cite real nodes; `pm` opens a follow-up for each new owner, expert or decision claim, and for each claim the sources contradict. They never message each other: the Keeper's ledger graph is the only channel ([spec](docs/agents.md)) | Built |
-| **Keeper in the app** | Keeper reviews as steps on the Systems page's agent trail, with Review now, the approvals card and the log in its rail | Planned (lands with the Systems page) |
+| **Keeper in the app** | Keeper reviews as steps on the Systems page's agent trail, with Review now, the approvals card and the log in its rail | Built |
 | **MCP server** | The same named tools for any outside agent (Claude, an IDE, a Slack bot), read-only, plus one gated `propose_claim` write | Planned |
 
 ## How it works
