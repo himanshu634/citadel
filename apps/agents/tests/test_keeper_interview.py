@@ -99,7 +99,8 @@ def test_a_reply_becomes_a_pending_claim_and_the_gap_waits_in_review(store, brai
     claim = store.claims[row.claim]
     assert (claim.status, claim.critical, claim.author) == ("pending_approval", True, "person")
     assert claim.critical_reasons[0] == FROM_PERSON
-    assert (claim.gap, claim.value, claim.evidence) == (g, "person:erin", ["fake:pr:3"])
+    assert (claim.gap, claim.value) == (g, "person:erin")
+    assert claim.evidence == ["system:Billing", "fake:pr:3"]  # the subject, then the cites
     assert status(store, g) == "in_review"
     assert [(e.actor, e.action, e.claim) for e in store.log] == [("ask", "claim_queued", row.claim)]
     assert brain.project_calls == 0  # Ask never writes the brain
@@ -139,6 +140,17 @@ def test_a_lead_approval_resolves_the_gap_and_a_rejection_reopens_it(store, brai
     reject(store, SLUG, two.claim, "Dana", "Not true.")
     after = store.read("ledger/get_gap", {"uid": g2})[0]
     assert (after["status"], after["attempts"]) == ("open", 1)
+
+
+def test_a_reply_with_no_cites_is_accepted_when_a_lead_approves(store, brain, interview):
+    """The person's word is the evidence: the subject is kept as evidence, so projection does
+    not take the claim for one whose evidence is gone (stale)."""
+    g = seed(store, "stale_owner", "system:Billing")
+    row = interview.record_testimony(SLUG, gap=g, kind="fact", subject_uid="system:Billing",
+                                     statement="Billing runs nightly.")  # fmt: skip
+    assert "no_source_evidence" in row.critical_reasons
+    assert approve(store, SLUG, row.claim, "Dana", None, brain=brain).status == "accepted"
+    assert status(store, g) == "resolved"
 
 
 def test_the_conflict_with_the_sources_is_said_but_the_lead_still_decides(store, brain,

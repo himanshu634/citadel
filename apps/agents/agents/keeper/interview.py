@@ -204,7 +204,9 @@ class Interview:
             statement=statement.strip(),
             value=value,
             about=about,
-            evidence=cites,
+            # The person's word is about the subject; keeping it as evidence means projection
+            # never takes a reply without cites for a claim whose evidence is gone (stale).
+            evidence=list(dict.fromkeys([subject_uid, *cites])),
             critical=True,
             critical_reasons=reasons,
             author="person",
@@ -224,7 +226,7 @@ class Interview:
         store.write("ledger/log", WRITER, {
             "uid": log_uid(now), "at": now, "actor": "ask", "action": "claim_queued",
             "why": ", ".join(reasons), "gap": claim.gap, "claim": claim.uid,
-            "evidence": cites})  # fmt: skip
+            "evidence": claim.evidence})  # fmt: skip
         return TestimonyRow(
             claim=claim.uid, status=claim.status, critical_reasons=reasons, conflict=clash
         )
