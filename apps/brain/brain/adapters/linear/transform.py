@@ -20,12 +20,12 @@ assignees, no links), dated at that run's start so it passes the ingest cursor.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from brain.adapters.base import SourceUnavailable
 from brain.adapters.linear.fetch import check_permission
-from brain.adapters.runs import completed_pages, read_json, run_id_of
+from brain.adapters.runs import completed_pages, nodes, read_json, run_id_of, run_started
 from brain.canonical import (
     CLOSED_STATUS,
     CanonicalRecord,
@@ -34,6 +34,8 @@ from brain.canonical import (
     Person,
     Team,
     WorkItem,
+    person_uid,
+    team_uid,
     url_ref,
 )
 from brain.config import CompanyConfig
@@ -57,10 +59,6 @@ REMOVED_STATE = "Removed from Linear"  # state of a tombstone (see the module do
 
 def issue_uid(id: str) -> str:
     return f"linear:issue:{id}"
-
-
-def _nodes(conn: dict[str, Any] | None) -> list[dict[str, Any]]:
-    return (conn or {}).get("nodes") or []
 
 
 def _login(user: dict[str, Any] | None) -> str | None:
@@ -110,14 +108,14 @@ def _ticket(node: dict[str, Any]) -> WorkItem:
         closed_at=node.get("completedAt") or node.get("canceledAt"),
         author_login=_login(node.get("creator")),
         assignees=[assignee] if assignee else [],
-        labels=[label["name"] for label in _nodes(node.get("labels"))],
+        labels=[label["name"] for label in nodes(node.get("labels"))],
         container=node["team"]["key"],
     )
 
 
 def _removed(ticket: WorkItem, run_id: str) -> WorkItem:
     """Tombstone of a ticket that left Linear (or the configured teams) before run `run_id`."""
-    at = datetime.strptime(run_id, "%Y%m%dT%H%M%S").replace(tzinfo=UTC)
+    at = run_started(run_id)
     return ticket.model_copy(
         update={
             "state": REMOVED_STATE,
@@ -141,8 +139,6 @@ def _link(rel: str, from_uid: str, to_uid: str) -> Link:
 
 
 def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRecord]:
-    from brain.adapters.base import SourceUnavailable  # local: avoid an import cycle
-
     meta = read_json(cache / "meta.json")
     if meta is None:
         raise SourceUnavailable(f"no Linear cache at {cache}; run `make fetch` first")
@@ -150,7 +146,8 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
 
     for team in read_json(cache / "teams.json", []):
         yield Team(name=team["name"], source=SOURCE)
-        for member in _nodes(team.get("members")):
+        team_id = team_uid(team["name"])
+        for member in nodes(team.get("members")):
             login = _login(member)
             if login is None:
                 continue
@@ -158,9 +155,9 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
             if member.get("active"):
                 yield Link(
                     rel="MEMBER_OF",
-                    from_uid=Person(login=login).uid,
+                    from_uid=person_uid(login),
                     from_label="Person",
-                    to_uid=Team(name=team["name"]).uid,
+                    to_uid=team_id,
                     to_label="Team",
                     source=SOURCE,
                 )
@@ -179,7 +176,7 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
             continue
         yield ticket
 
-        for comment in _nodes(node.get("comments")):
+        for comment in nodes(node.get("comments")):
             author = _login(comment.get("user"))
             if author is None:
                 continue  # deleted user: no one to credit
@@ -193,16 +190,16 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
                 body=(comment.get("body") or "")[:MAX_BODY],
             )
 
-        for rel in _nodes(node.get("relations")):
+        for rel in nodes(node.get("relations")):
             other = issue_uid(rel["relatedIssue"]["id"])
             if rel["type"] == "blocks":
                 blocks.add((ticket.uid, other))
             elif rel["type"] == "related":
                 mentions.add((ticket.uid, other))
-        for rel in _nodes(node.get("inverseRelations")):
+        for rel in nodes(node.get("inverseRelations")):
             if rel["type"] == "blocks":
                 blocks.add((issue_uid(rel["issue"]["id"]), ticket.uid))
-        for attachment in _nodes(node.get("attachments")):
+        for attachment in nodes(node.get("attachments")):
             if attachment.get("url"):
                 mentions.add((ticket.uid, url_ref(attachment["url"])))
 

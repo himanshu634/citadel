@@ -9,7 +9,6 @@ FalkorDB (`make up`) and are skipped without one.
 from __future__ import annotations
 
 import hashlib
-import math
 import os
 import re
 from pathlib import Path
@@ -49,8 +48,7 @@ class FakeEmbedder:
         vec = [0.0] * self.dim
         for word in re.findall(r"\w+", text.lower()):
             vec[int(hashlib.sha256(word.encode()).hexdigest(), 16) % self.dim] += 1.0
-        norm = math.sqrt(sum(x * x for x in vec))
-        return [x / norm for x in vec] if norm else vec
+        return embeddings._normalised(vec)
 
     def passages(self, texts: list[str]) -> list[list[float]]:
         return [self._embed(t) for t in texts]
@@ -113,7 +111,7 @@ def synthetic_company(
 def write_company(cfg: CompanyConfig) -> Path:
     """Write cfg as companies/<slug>.yaml under the current repo root (tests point
     `config.REPO_ROOT` at a temp folder first)."""
-    path = config.companies_dir() / f"{cfg.slug}.yaml"
+    path = config.company_path(cfg.slug)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(cfg.model_dump(mode="json"), sort_keys=False))
     return path
@@ -130,14 +128,20 @@ def load_company(cfg: CompanyConfig) -> None:
     loader.load(cfg.slug, normalize(records, cfg))
 
 
+def _fresh_graph(slug: str, **kw) -> str:
+    """Load the synthetic company (`synthetic_company(slug, **kw)`) into an empty brain_<slug>;
+    skips the test when FalkorDB is down."""
+    if not falkordb_up():
+        pytest.skip("FalkorDB not reachable (make up)")
+    db.delete_graph(slug)
+    load_company(synthetic_company(slug, **kw))
+    return slug
+
+
 @pytest.fixture(scope="session")
 def synthetic_graph():
     """brain_test_synthetic loaded once per test run; deleted afterwards."""
-    if not falkordb_up():
-        pytest.skip("FalkorDB not reachable (make up)")
-    slug = "test_synthetic"
-    db.delete_graph(slug)
-    load_company(synthetic_company(slug))
+    slug = _fresh_graph("test_synthetic")
     yield slug
     db.delete_graph(slug)
 
@@ -145,11 +149,7 @@ def synthetic_graph():
 @pytest.fixture(scope="session")
 def ticket_graph():
     """brain_test_tickets_synth: the synthetic company plus its ten tickets; deleted afterwards."""
-    if not falkordb_up():
-        pytest.skip("FalkorDB not reachable (make up)")
-    slug = "test_tickets_synth"
-    db.delete_graph(slug)
-    load_company(synthetic_company(slug, with_tickets=True))
+    slug = _fresh_graph("test_tickets_synth", with_tickets=True)
     yield slug
     db.delete_graph(slug)
 
@@ -160,11 +160,7 @@ def embedded_graph_built():
     built once per run; deleted afterwards. The fake is the process embedder only while
     embedding, so the session default (no embedder) holds for every other test. Tests ask for
     `embedded_graph`, which also sets the fake for the question side."""
-    if not falkordb_up():
-        pytest.skip("FalkorDB not reachable (make up)")
-    slug = "test_embedded"
-    db.delete_graph(slug)
-    load_company(synthetic_company(slug))
+    slug = _fresh_graph("test_embedded")
     embeddings.set_embedder(FakeEmbedder())
     try:
         report = embeddings.embed_pending(slug)

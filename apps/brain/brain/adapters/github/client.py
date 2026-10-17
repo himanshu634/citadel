@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 
+from brain.adapters.runs import parse_ts
 from brain.config import get_settings
 
 API = "https://api.github.com/graphql"
@@ -122,7 +123,7 @@ class GithubClient:
     def _respect_rate_limit(self, rl: dict[str, Any] | None) -> None:
         if not rl or rl["remaining"] > LOW_BUDGET:
             return
-        reset = datetime.fromisoformat(rl["resetAt"].replace("Z", "+00:00"))
+        reset = parse_ts(rl["resetAt"])
         wait = max(0, (reset - datetime.now(UTC)).total_seconds()) + 5
         self._log(f"  github rate limit low ({rl['remaining']} left); sleeping {wait:.0f}s")
         time.sleep(wait)

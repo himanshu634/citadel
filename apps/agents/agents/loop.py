@@ -165,7 +165,7 @@ def add_brain_loop(
 
     def run_tools(state: AgentState) -> dict[str, Any]:
         uses = [b for b in state["messages"][-1]["content"] if b["type"] == "tool_use"]
-        seen = dict(state.get("seen") or {})
+        submits = [u for u in uses if u["name"] == submit]
         results: list[dict[str, Any]] = []
         new_seen: dict[str, dict[str, Any]] = {}
         trace: list[dict[str, Any]] = []
@@ -176,7 +176,7 @@ def add_brain_loop(
             writer({"kind": "step_done", **entry})
 
         # Graph tools first, so a submit_answer in the same turn can cite their results.
-        for use in sorted(uses, key=lambda u: u["name"] == submit):
+        for use in uses:
             if use["name"] == submit:
                 continue
             started = time.perf_counter()
@@ -199,11 +199,9 @@ def add_brain_loop(
                     "uids": sorted(out.seen),
                 }
             )
-        seen.update(new_seen)
+        seen = {**(state.get("seen") or {}), **new_seen}
         answer = None
-        for use in uses:
-            if use["name"] != submit:
-                continue
+        for use in submits:
             problem = check(use.get("input") or {}, seen)
             if problem:
                 results.append(result_block(use["id"], problem, True))
@@ -291,6 +289,8 @@ def check_answer(answer: dict[str, Any], seen: dict[str, Any]) -> str | None:
 
 
 RESULT_PREVIEW = 2000  # characters of an MCP or server tool result kept for the history
+# Block types that are tool calls -> their kind (None: graph or submit, decided by name).
+_CALL_KINDS = {"tool_use": None, "mcp_tool_use": "mcp", "server_tool_use": "server"}
 
 
 def llm_event(content: list[dict[str, Any]], msg: Any, ms: int, submit: str) -> dict[str, Any]:
@@ -306,11 +306,9 @@ def llm_event(content: list[dict[str, Any]], msg: Any, ms: int, submit: str) -> 
     }
     calls: list[dict[str, Any]] = []
     for b in content:
-        kind = {"tool_use": None, "mcp_tool_use": "mcp", "server_tool_use": "server"}.get(
-            b["type"], "skip"
-        )
-        if kind == "skip":
+        if b["type"] not in _CALL_KINDS:
             continue
+        kind = _CALL_KINDS[b["type"]]
         call = {
             "id": b["id"],
             "tool": b["name"],
@@ -319,8 +317,9 @@ def llm_event(content: list[dict[str, Any]], msg: Any, ms: int, submit: str) -> 
             "input": b.get("input") or {},
         }
         if kind and (res := results.get(b["id"])):
-            call["error"] = _result_text(res) if res.get("is_error") else None
-            call["result"] = _result_text(res)[:RESULT_PREVIEW]
+            text = _result_text(res)
+            call["error"] = text if res.get("is_error") else None
+            call["result"] = text[:RESULT_PREVIEW]
         calls.append(call)
     usage = msg.usage
     return {

@@ -42,7 +42,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -57,9 +56,9 @@ from agents.keeper.review import ReviewEvent, review, skip_review
 from agents.keeper.store import KeeperStore
 from agents.toolset import Runner
 from agents.work.store import WorkStore
-from brain.config import get_settings
 
 from backend import registry
+from backend.fanout import Subscriber, Subscription, deliver
 
 log = logging.getLogger(__name__)
 
@@ -79,7 +78,7 @@ def keeper_store(slug: str) -> WorkStore:
 
 def has_api_key() -> bool:
     """A key in .env (Settings) or in the environment, as `agents keeper review` checks."""
-    return bool(get_settings().anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY"))
+    return llm.has_api_key()
 
 
 def claude_for(role: str, job: str) -> Any:
@@ -145,13 +144,6 @@ class _Run:
     result: Review | None = None
 
 
-@dataclass(eq=False)
-class _Subscriber:
-    slug: str
-    loop: asyncio.AbstractEventLoop
-    queue: asyncio.Queue[ReviewEvent | None]  # None: the run is over
-
-
 class KeeperRuns:
     def __init__(
         self,
@@ -178,7 +170,7 @@ class KeeperRuns:
         self._lock = threading.RLock()  # the run table, each run's events and the subscribers
         self._runs: dict[str, _Run] = {}  # the latest run per slug started by this process
         self._pending: dict[str, int] = {}  # slug -> budget of a build review to run next
-        self._subscribers: set[_Subscriber] = set()
+        self._subscribers: set[Subscriber[ReviewEvent]] = set()  # None on a queue: the run is over
 
     @property
     def brain(self) -> BrainFacts:
@@ -225,8 +217,8 @@ class KeeperRuns:
         with self._lock:
             if self.building(slug):
                 raise BrainBuilding(slug)
-            run = self._runs.get(slug)
-            if run is not None and not run.ended:
+            run = self._live(slug)
+            if run is not None:
                 if trigger == "build":
                     self._pending[slug] = budget
                 return run
@@ -247,8 +239,8 @@ class KeeperRuns:
     def stop(self, slug: str) -> bool:
         """Ask the slug's running review to stop at its next job. False when none runs here."""
         with self._lock:
-            run = self._runs.get(slug)
-            if run is None or run.ended:
+            run = self._live(slug)
+            if run is None:
                 return False
             run.stop.set()
             return True
@@ -260,22 +252,21 @@ class KeeperRuns:
         the reset may go ahead."""
         with self._lock:
             self._pending.pop(slug, None)  # the rebuild's own hook reviews after it
-            run = self._runs.get(slug)
-            if run is not None and not run.ended:
+            run = self._live(slug)
+            if run is not None:
                 run.rebuilt.set()
         if self.stop(slug) and not self.wait(slug, self.rebuild_wait):
             log.warning("the Keeper review of %s did not stop before its rebuild", slug)
 
     def running(self, slug: str) -> bool:
         with self._lock:
-            run = self._runs.get(slug)
-            return run is not None and not run.ended
+            return self._live(slug) is not None
 
     def is_running(self, slug: str, uid: str) -> bool:
         """This process is running the slug's review `uid` now."""
         with self._lock:
-            run = self._runs.get(slug)
-            return run is not None and not run.ended and run.uid == uid
+            run = self._live(slug)
+            return run is not None and run.uid == uid
 
     def current(self, slug: str) -> Review | None:
         """The ledger's latest review of the slug (running or not), else None."""
@@ -290,10 +281,10 @@ class KeeperRuns:
             return True
         return run.done.wait(timeout)
 
-    def subscribe(self, slug: str) -> Subscription:
+    def subscribe(self, slug: str) -> Subscription[ReviewEvent]:
         """The events of the slug's latest run in this process: the ones so far, then the live
         ones, then the end. Call it from the event loop that will iterate it; `aclose` it."""
-        sub = _Subscriber(slug, asyncio.get_running_loop(), asyncio.Queue())
+        sub: Subscriber[ReviewEvent] = Subscriber(slug, asyncio.get_running_loop(), asyncio.Queue())
         with self._lock:
             run = self._runs.get(slug)
             for event in run.events if run is not None else []:
@@ -302,7 +293,7 @@ class KeeperRuns:
                 sub.queue.put_nowait(None)
             else:
                 self._subscribers.add(sub)
-        return Subscription(self, sub)
+        return Subscription(lambda: self._unsubscribe(sub), sub.queue)
 
     def recover(self) -> None:
         """On startup: a review still `running` in a company's ledger whose heartbeat is stale
@@ -330,30 +321,24 @@ class KeeperRuns:
 
         try:
             store = self.store_for(run.slug)
-            brain = self._brain_for(run)
+            common: dict[str, Any] = {
+                "budget": budget,
+                "trigger": trigger,
+                "brain": self._brain_for(run),  # DEFAULT_BRAIN also notices
+                "on_event": on_event,
+                "uid": run.uid,
+            }
             if self.has_key():
                 run.result = review(
                     store,
                     run.slug,
-                    budget=budget,
-                    trigger=trigger,
                     client_for=self.client_for,
                     graph_run=self.graph_run,
-                    brain=brain,  # type: ignore[arg-type]  # DEFAULT_BRAIN also notices
-                    on_event=on_event,
                     should_stop=run.stop.is_set,
-                    uid=run.uid,
+                    **common,
                 )
             else:
-                run.result = skip_review(
-                    store,
-                    run.slug,
-                    trigger=trigger,
-                    budget=budget,
-                    brain=brain,  # type: ignore[arg-type]
-                    on_event=on_event,
-                    uid=run.uid,
-                )
+                run.result = skip_review(store, run.slug, **common)
         except Exception as exc:
             log.exception("Keeper review of %s failed", run.slug)
             if not any(e.kind in ENDS for e in run.events):  # subscribers must hear an end
@@ -364,7 +349,7 @@ class KeeperRuns:
                 run.ended = True
                 for sub in list(self._subscribers):
                     if sub.slug == run.slug:
-                        self._deliver(sub, None)
+                        deliver(sub, None)
                         self._subscribers.discard(sub)
                 run.done.set()
             run.started.set()
@@ -388,37 +373,14 @@ class KeeperRuns:
         with self._lock:
             run.events.append(event)
             for sub in list(self._subscribers):
-                if sub.slug == run.slug:
-                    self._deliver(sub, event)
+                if sub.slug == run.slug and not deliver(sub, event):
+                    self._subscribers.discard(sub)
 
-    def _deliver(self, sub: _Subscriber, item: ReviewEvent | None) -> None:
-        try:
-            sub.loop.call_soon_threadsafe(sub.queue.put_nowait, item)
-        except RuntimeError:  # its event loop is closed: nobody is listening any more
-            self._subscribers.discard(sub)
+    def _live(self, slug: str) -> _Run | None:
+        """The slug's run in this process while it has not ended. Call it holding the lock."""
+        run = self._runs.get(slug)
+        return run if run is not None and not run.ended else None
 
-    def _unsubscribe(self, sub: _Subscriber) -> None:
+    def _unsubscribe(self, sub: Subscriber[ReviewEvent]) -> None:
         with self._lock:
             self._subscribers.discard(sub)
-
-
-class Subscription:
-    """What `subscribe` returns: an async iterator of one run's events that stops at its end.
-    Not an async generator, so `aclose()` unregisters even when it was never iterated (as
-    `jobs.Subscription`)."""
-
-    def __init__(self, runs: KeeperRuns, sub: _Subscriber):
-        self._runs = runs
-        self._sub = sub
-
-    def __aiter__(self) -> Subscription:
-        return self
-
-    async def __anext__(self) -> ReviewEvent:
-        item = await self._sub.queue.get()
-        if item is None:
-            raise StopAsyncIteration
-        return item
-
-    async def aclose(self) -> None:
-        self._runs._unsubscribe(self._sub)

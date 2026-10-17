@@ -105,8 +105,9 @@ def _linear_names(login: str, aliases: dict[str, str]) -> list[str]:
 
 def _check_lookup(
     lookup: dict[str, Any], company: CompanyConfig, source: LinearSource, data: SeedData
-) -> tuple[dict[str, dict], dict[str, str]]:
-    """Return (team key -> team, login -> user id), or raise one error listing every gap."""
+) -> tuple[dict[str, dict], dict[str, dict[str, str]], dict[str, str]]:
+    """Return (team key -> team, team key -> state type -> state id, login -> user id), or
+    raise one error listing every gap."""
     url_key = lookup["viewer"]["organization"]["urlKey"]
     if url_key != source.workspace:
         raise LinearError(
@@ -114,6 +115,7 @@ def _check_lookup(
             f"but the company config says {source.workspace!r}"
         )
     teams = {t["key"]: t for t in lookup["teams"]["nodes"]}
+    states = {key: _first_state_ids(team) for key, team in teams.items()}
     users = {u["displayName"]: u["id"] for u in lookup["users"]["nodes"] if u["active"]}
 
     problems = [
@@ -125,7 +127,7 @@ def _check_lookup(
             if ticket.container not in data.teams:
                 problems.append(f"ticket {ticket.key} is in unknown team {ticket.container}")
             continue
-        if STATE_TYPE[ticket.status_category] not in _first_state_ids(team):
+        if STATE_TYPE[ticket.status_category] not in states[team["key"]]:
             problems.append(f"team {team['key']} has no {STATE_TYPE[ticket.status_category]} state")
 
     logins: dict[str, str] = {}
@@ -141,7 +143,7 @@ def _check_lookup(
         raise LinearError(
             f"Linear workspace {source.workspace!r} is not ready:\n  " + "\n  ".join(problems)
         )
-    return teams, logins
+    return teams, states, logins
 
 
 def seed(
@@ -159,8 +161,7 @@ def seed(
             f"(companies/{company.slug}.yaml has {company.data_permission})"
         )
     lookup = client.query("seed_lookup", {})
-    teams, logins = _check_lookup(lookup, company, source, data)
-    states = {key: _first_state_ids(team) for key, team in teams.items()}
+    teams, states, logins = _check_lookup(lookup, company, source, data)
 
     state = read_json(state_path, {})
     issues: dict[str, str] = state.setdefault("issues", {})

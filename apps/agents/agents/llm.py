@@ -8,11 +8,13 @@ key from Settings is passed on explicitly; when it is unset the SDK resolves cre
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from functools import cache
 from typing import Any
 
 import anthropic
+from brain import config
 from brain.config import get_settings
 
 from agents.mcp import McpTokenMissing
@@ -58,6 +60,12 @@ def fallback_params(model: str) -> dict[str, Any]:
     if model.startswith("claude-haiku"):
         return {}
     return {"betas": [FALLBACK_BETA], "fallbacks": "default"}
+
+
+def has_api_key() -> bool:
+    """A key in .env (Settings) or in the environment. The SDK may find other credentials (an
+    `ant auth login` profile); the Keeper and the evals only run on a key they can see."""
+    return bool(config.get_settings().anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY"))
 
 
 @cache

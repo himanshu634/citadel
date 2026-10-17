@@ -19,12 +19,13 @@ share this code.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
 OVERLAP = timedelta(hours=1)  # re-fetch a little before the last run's start, to be safe
+RUN_ID_FORMAT = "%Y%m%dT%H%M%S"  # a run's id is its start time (UTC), so ids sort by time
 
 
 class PagedClient(Protocol):
@@ -80,7 +81,7 @@ def fetch_paged(
             lower = max(lower, parse_ts(state["complete_until"]) - OVERLAP)
         started = datetime.now(UTC)
         run = {
-            "id": started.strftime("%Y%m%dT%H%M%S"),
+            "id": started.strftime(RUN_ID_FORMAT),
             "started": iso(started),
             "lower": iso(lower),
             "cursor": None,
@@ -97,8 +98,8 @@ def fetch_paged(
             page_vars["since"] = run["lower"]
         data = client.query(query, page_vars)
         conn = connection(data)
-        nodes = conn["nodes"]
-        write_json(folder / f"{run['id']}_{run['page']:04d}.json", nodes)
+        page_nodes = conn["nodes"]
+        write_json(folder / f"{run['id']}_{run['page']:04d}.json", page_nodes)
         written += 1
         run["page"] += 1
         run["cursor"] = conn["pageInfo"]["endCursor"]
@@ -106,9 +107,9 @@ def fetch_paged(
         write_json(folder / "state.json", state)  # checkpoint after every page
 
         reached_bottom = stop_when_older and any(
-            parse_ts(n[stop_when_older]) < lower for n in nodes
+            parse_ts(n[stop_when_older]) < lower for n in page_nodes
         )
-        if not conn["pageInfo"]["hasNextPage"] or reached_bottom or not nodes:
+        if not conn["pageInfo"]["hasNextPage"] or reached_bottom or not page_nodes:
             break
 
     if not incremental:  # this run covers the whole window: older runs are redundant
@@ -134,3 +135,21 @@ def completed_pages(folder: Path) -> list[Path]:
     state = read_json(folder / "state.json", {"completed_runs": []})
     done = set(state["completed_runs"])
     return sorted(p for p in folder.glob("*_*.json") if run_id_of(p) in done)
+
+
+def completed_nodes(folder: Path) -> Iterator[tuple[str, dict[str, Any]]]:
+    """(run id, node) for every node of every completed page, oldest run first."""
+    for page in completed_pages(folder):
+        run_id = run_id_of(page)
+        for node in json.loads(page.read_text()):
+            yield run_id, node
+
+
+def run_started(run_id: str) -> datetime:
+    """When run `run_id` started (UTC)."""
+    return datetime.strptime(run_id, RUN_ID_FORMAT).replace(tzinfo=UTC)
+
+
+def nodes(conn: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The `nodes` of a GraphQL connection; [] when the connection or its nodes are null."""
+    return (conn or {}).get("nodes") or []

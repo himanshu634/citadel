@@ -15,16 +15,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from agents.history import NEVER, Thread, ThreadPage, ThreadSummary
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
+from agents.history import NEVER, ChatTurn, Thread, ThreadPage, ThreadSummary
+from fastapi import APIRouter, HTTPException, Path, Query, Response
 
-from backend.api.ask import Asker, get_asker
-from backend.api.deps import company_slug
+from backend.api.ask import Asker, AskerDep
+from backend.api.deps import Slug
 
 router = APIRouter(prefix="/companies/{slug}", tags=["threads"])
-Slug = Annotated[str, Depends(company_slug)]
 ThreadId = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
-AskerDep = Annotated[Asker, Depends(get_asker)]
 CUT_OFF = "The answer ended before it finished."
 
 
@@ -47,20 +45,19 @@ def get_thread(slug: Slug, thread_id: ThreadId, asker: AskerDep) -> Thread:
     if thread is None:
         raise HTTPException(status_code=404, detail=f"No chat {thread_id} for {slug}")
     running = asker.busy(thread_id)
+    rated: dict[str, list[ChatTurn]] = {}  # trace id -> the turns that answered with it
     for turn in thread.turns:
         if turn.status == "running" and not running:
             turn.status, turn.error = "stopped", CUT_OFF
+        if (trace_id := (turn.answer or {}).get("trace_id")) is not None:
+            rated.setdefault(trace_id, []).append(turn)
     if thread.last_status == "running" and not running:
         thread.last_status = "stopped"
-    ratings = {
-        t.id: t.feedback
-        for t in asker.traces(slug).read()
-        if t.thread_id == thread_id and t.feedback is not None
-    }
-    for turn in thread.turns:
-        trace_id = (turn.answer or {}).get("trace_id")
-        if trace_id in ratings:
-            turn.rating, turn.note = ratings[trace_id].rating, ratings[trace_id].note
+    if rated:  # no turn has a trace: the trace file is not read
+        for t in asker.traces(slug).read():
+            if t.id in rated and t.thread_id == thread_id and t.feedback is not None:
+                for turn in rated[t.id]:
+                    turn.rating, turn.note = t.feedback.rating, t.feedback.note
     return thread
 
 

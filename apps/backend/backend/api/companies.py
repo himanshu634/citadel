@@ -10,33 +10,27 @@ the files. A Settings save that changes what the graph holds needs the user's co
 from __future__ import annotations
 
 import logging
-import re
-import threading
 from typing import Annotated, NamedTuple
 
 import yaml
 from agents import checkpoint
-from brain import config, db
+from brain import config, db, pipeline
 from brain.config import CompanyConfig
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import JSONResponse
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from backend import config_diff, registry
-from backend.api.deps import company_slug, get_runner, start_lock
+from backend.api.deps import Runner, Slug, StartLock
 from backend.api.models import CompanyDetail, CompanyOut, ConfigChange, Status, ValidateOut
-from backend.jobs import ACTIVE, BuildSnapshot, BuildSummary, JobRunner, JobRunning
+from backend.jobs import BuildSnapshot, BuildSummary, JobRunner, JobRunning, is_active
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/companies", tags=["companies"])
 
 GRAPH_DOWN = (RedisConnectionError, RedisTimeoutError)  # refused, or no answer to the connect
-
-
-Runner = Annotated[JobRunner, Depends(get_runner)]
-StartLock = Annotated[threading.Lock, Depends(start_lock)]
 
 
 def status_of(slug: str) -> tuple[Status, str | None]:
@@ -74,7 +68,7 @@ def company_status(runner: JobRunner, slug: str, graph: bool = True) -> CompanyS
             reachable = True
         except GRAPH_DOWN:
             log.warning("FalkorDB is not reachable; status of %s from its builds only", slug)
-    if snap is not None and snap.state in ACTIVE:
+    if is_active(snap):
         return CompanyStatus("building", last_synced_at, None, build, reachable)
     if snap is not None and snap.state == "failed":
         return CompanyStatus("failed", last_synced_at, snap.error, build, reachable)
@@ -85,7 +79,7 @@ def company_out(
     runner: JobRunner, company: CompanyConfig | registry.InvalidCompany, graph: bool = True
 ) -> CompanyOut:
     """A company as the list, the detail routes and the /api/events stream report it."""
-    if not re.fullmatch(config.SLUG_RE, company.slug):  # a hand-named file, e.g. Acme-Labs.yaml
+    if not config.valid_slug(company.slug):  # a hand-named file, e.g. Acme-Labs.yaml
         # It has no graph or builds to ask about (the slug cannot name them): just invalid.
         return CompanyOut(
             slug=company.slug,
@@ -136,6 +130,12 @@ def read_config(slug: str) -> CompanyConfig:
         raise HTTPException(status_code=422, detail=registry.describe(exc)) from exc
 
 
+def source_keys(slug: str) -> set[str]:
+    """The keys of the company's configured sources; 422 when its file does not validate."""
+    read_config(slug)
+    return set(pipeline.planned_sources(slug)[1])
+
+
 @router.get("")
 def list_companies(runner: Runner) -> list[CompanyOut]:
     out: list[CompanyOut] = []
@@ -166,7 +166,7 @@ def _left_behind(runner: JobRunner, slug: str) -> bool:
 def slug_taken(runner: JobRunner, slug: object) -> str | None:
     """Why the slug cannot be used for a new company, or None when it is free (or invalid: the
     field errors say why)."""
-    if not isinstance(slug, str) or not re.fullmatch(config.SLUG_RE, slug):
+    if not isinstance(slug, str) or not config.valid_slug(slug):
         return None
     if registry.exists(slug):
         return _already_a_company(slug)
@@ -208,7 +208,7 @@ def create_company(draft: Annotated[dict, Body()], runner: Runner):
 
 
 @router.get("/{slug}")
-def get_company(slug: Annotated[str, Depends(company_slug)], runner: Runner) -> CompanyDetail:
+def get_company(slug: Slug, runner: Runner) -> CompanyDetail:
     return _detail(read_config(slug), runner)
 
 
@@ -218,7 +218,7 @@ def get_company(slug: Annotated[str, Depends(company_slug)], runner: Runner) -> 
     responses={202: {"model": BuildSnapshot}, 409: {}, 422: {}},
 )
 def save_company(
-    slug: Annotated[str, Depends(company_slug)],
+    slug: Slug,
     draft: Annotated[dict, Body()],
     runner: Runner,
     lock: StartLock,
@@ -243,8 +243,7 @@ def save_company(
     with lock:  # check, write and start as one step; POST /builds takes the same lock
         # Read again under the lock: a save that finished a moment ago changed the file.
         change = config_diff.diff(read_config(slug), cfg)
-        snap = runner.current(slug)
-        if snap is not None and snap.state in ACTIVE:
+        if is_active(runner.current(slug)):
             raise HTTPException(status_code=409, detail=str(JobRunning(slug)))
         if change.rebuild and not rebuild:
             required = ConfigChange(slug=slug, **change.model_dump())

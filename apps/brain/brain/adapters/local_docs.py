@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from brain.adapters.base import SourceProblem, SourceUnavailable
+from brain.adapters.base import FolderAdapter, first_heading
 from brain.canonical import CanonicalRecord, Document
 from brain.config import CompanyConfig, PathSource
 
@@ -20,9 +20,9 @@ SUFFIXES = {".md", ".markdown", ".txt"}
 
 def doc_title(path: Path, body: str) -> str:
     """First markdown heading, else the file name."""
-    for line in body.splitlines():
-        if line.startswith("# "):
-            return line[2:].strip()
+    heading = first_heading(body)
+    if heading is not None:
+        return heading
     return path.stem.replace("-", " ").replace("_", " ")
 
 
@@ -30,29 +30,14 @@ class LocalDocsSource(PathSource):
     type: Literal["local_docs"]
 
 
-class LocalDocsAdapter:
+class LocalDocsAdapter(FolderAdapter):
     name = "local_docs"
     source_model = LocalDocsSource
-
-    def key(self, source: LocalDocsSource) -> str:
-        return f"{self.name}:{source.path.as_posix()}"
-
-    def fetch(self, company: CompanyConfig, source: LocalDocsSource, cache_dir: Path) -> None:
-        """Nothing to download: the files are already local."""
-
-    def check(
-        self, company: CompanyConfig, source: LocalDocsSource, cache_dir: Path
-    ) -> SourceProblem | None:
-        if company.resolve(source.path).is_dir():
-            return None
-        return SourceProblem(f"Folder {source.path.as_posix()} does not exist")
 
     def records(
         self, company: CompanyConfig, source: LocalDocsSource, cache_dir: Path
     ) -> Iterator[CanonicalRecord]:
-        folder = company.resolve(source.path)
-        if not folder.is_dir():
-            raise SourceUnavailable(f"folder {folder} does not exist")
+        folder = self.folder(company, source)
         for path in sorted(folder.rglob("*")):
             if path.suffix.lower() not in SUFFIXES or not path.is_file():
                 continue

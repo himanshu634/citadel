@@ -7,19 +7,23 @@ job runner and the lock around starting a build live on the app, so tests can ha
 
 from __future__ import annotations
 
-import re
 import threading
+from collections.abc import AsyncIterator
+from typing import Annotated
 
-from brain import config
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
+from sse_starlette import EventSourceResponse
 
 from backend import registry
 from backend.jobs import JobRunner
 
+PING_SECONDS = 15  # every SSE stream pings this often, so proxies keep it open
+
 
 def company_slug(slug: str) -> str:
-    """The path slug if it names a company file, else 404."""
-    if not re.fullmatch(config.SLUG_RE, slug) or not registry.exists(slug):
+    """The path slug if it names a company file, else 404 (`registry.exists` checks the
+    pattern too)."""
+    if not registry.exists(slug):
         raise HTTPException(status_code=404, detail=f"No company {slug}")
     return slug
 
@@ -32,3 +36,13 @@ def start_lock(request: Request) -> threading.Lock:
     """Held while a route checks for a running build, writes the YAML and starts a job, so a
     Settings save can never write a file under a build that started a moment earlier."""
     return request.app.state.start_lock
+
+
+def sse(events: AsyncIterator[dict]) -> EventSourceResponse:
+    """An SSE response for `events`, with the shared ping."""
+    return EventSourceResponse(events, ping=PING_SECONDS)
+
+
+Slug = Annotated[str, Depends(company_slug)]
+Runner = Annotated[JobRunner, Depends(get_runner)]
+StartLock = Annotated[threading.Lock, Depends(start_lock)]

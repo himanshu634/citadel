@@ -13,15 +13,13 @@ from typing import Annotated, Any
 
 from brain import db, tools
 from brain.embeddings import EmbeddingUnavailable
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 from pydantic import ValidationError
 
-from backend.api.deps import company_slug
+from backend.api.deps import Slug
 from backend.api.models import ToolInfo, ToolList, ToolResult
 
 router = APIRouter(prefix="/companies/{slug}/tools", tags=["tools"])
-
-Slug = Annotated[str, Depends(company_slug)]
 
 
 @router.get("")

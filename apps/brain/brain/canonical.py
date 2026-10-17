@@ -15,8 +15,9 @@ Identity rules:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -78,6 +79,13 @@ def _latest(*dts: datetime | None) -> datetime | None:
     return max(present) if present else None
 
 
+def _with_uid(data: Any, field: str, make: Callable[[str], str]) -> Any:
+    """`data` with uid = make(data[field]) when it is a dict with that field and no uid yet."""
+    if isinstance(data, dict) and not data.get("uid") and data.get(field):
+        data = {**data, "uid": make(data[field])}
+    return data
+
+
 # --- nodes ------------------------------------------------------------------------------------
 
 
@@ -96,9 +104,7 @@ class Person(Record):
     @model_validator(mode="before")
     @classmethod
     def _derive_uid(cls, data: dict) -> dict:
-        if isinstance(data, dict) and not data.get("uid") and data.get("login"):
-            data = {**data, "uid": person_uid(data["login"])}
-        return data
+        return _with_uid(data, "login", person_uid)
 
 
 class Team(Record):
@@ -107,9 +113,7 @@ class Team(Record):
     @model_validator(mode="before")
     @classmethod
     def _derive_uid(cls, data: dict) -> dict:
-        if isinstance(data, dict) and not data.get("uid") and data.get("name"):
-            data = {**data, "uid": team_uid(data["name"])}
-        return data
+        return _with_uid(data, "name", team_uid)
 
 
 class System(Record):
@@ -119,9 +123,7 @@ class System(Record):
     @model_validator(mode="before")
     @classmethod
     def _derive_uid(cls, data: dict) -> dict:
-        if isinstance(data, dict) and not data.get("uid") and data.get("name"):
-            data = {**data, "uid": system_uid(data["name"])}
-        return data
+        return _with_uid(data, "name", system_uid)
 
 
 ChangeKind = Literal["feat", "fix", "perf", "ci", "build", "docs", "refactor", "other"]

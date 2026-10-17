@@ -86,19 +86,24 @@ def _github_repos(cfg: CompanyConfig) -> list[str]:
     return [s.repo.lower() for s in cfg.sources if s.type == "github"]
 
 
-def _valid_companies() -> list[CompanyConfig]:
+def valid_companies() -> list[CompanyConfig]:
+    """Every company whose file validates, in registry order."""
     return [c for c in registry.list_companies() if isinstance(c, CompanyConfig)]
 
 
-def company_reading(repo: str) -> CompanyConfig | None:
-    """The company that already has `owner/name` as a source (any letter case)."""
-    return next((c for c in _valid_companies() if repo.lower() in _github_repos(c)), None)
+def company_reading(
+    repo: str, companies: list[CompanyConfig] | None = None
+) -> CompanyConfig | None:
+    """The company that already has `owner/name` as a source (any letter case). `companies`
+    defaults to `valid_companies()`; pass it to read the registry once for several lookups."""
+    known = valid_companies() if companies is None else companies
+    return next((c for c in known if repo.lower() in _github_repos(c)), None)
 
 
-def company_of_owner(owner: str) -> CompanyConfig | None:
-    """A company that reads any repository of `owner`."""
+def company_of_owner(
+    owner: str, companies: list[CompanyConfig] | None = None
+) -> CompanyConfig | None:
+    """A company that reads any repository of `owner` (`companies` as in `company_reading`)."""
     prefix = owner.lower() + "/"
-    return next(
-        (c for c in _valid_companies() if any(r.startswith(prefix) for r in _github_repos(c))),
-        None,
-    )
+    known = valid_companies() if companies is None else companies
+    return next((c for c in known if any(r.startswith(prefix) for r in _github_repos(c))), None)

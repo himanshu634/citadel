@@ -29,6 +29,7 @@ import anthropic
 from brain.config import REPO_ROOT, get_settings
 from langgraph.checkpoint.memory import InMemorySaver
 
+from agents import llm
 from agents.ask import ask_traced
 from agents.evals import cases as cases_mod
 from agents.evals.cases import Case, GoldResolver
@@ -287,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
 def _not_ready(slug: str) -> str | None:
     from brain import db
 
-    if not get_settings().anthropic_api_key and not os.environ.get("ANTHROPIC_API_KEY"):
+    if not llm.has_api_key():
         return "ANTHROPIC_API_KEY is not set (.env); evals call the API."
     try:
         if not db.graph_exists(slug):

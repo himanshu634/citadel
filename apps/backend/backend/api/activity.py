@@ -17,16 +17,14 @@ from typing import Annotated
 from agents.activity import Activity, ActivityRun, runs_from_reviews, runs_from_thread
 from agents.history import NEVER
 from agents.keeper.model import Review, ReviewStep
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 
-from backend.api.ask import Asker, get_asker
-from backend.api.deps import company_slug
+from backend.api.ask import Asker, AskerDep
+from backend.api.deps import Slug
 from backend.api.keeper import Keeper
 from backend.keeper_runs import KeeperRuns
 
 router = APIRouter(prefix="/companies/{slug}", tags=["activity"])
-Slug = Annotated[str, Depends(company_slug)]
-AskerDep = Annotated[Asker, Depends(get_asker)]
 
 
 @router.get("/activity")

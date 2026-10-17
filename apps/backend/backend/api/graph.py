@@ -11,17 +11,15 @@ from typing import Annotated
 
 from brain import db, graph_view
 from brain.graph_view import GraphView
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 
-from backend.api.deps import company_slug
+from backend.api.deps import Slug
 
 router = APIRouter(prefix="/companies/{slug}", tags=["graph"])
 
 
 @router.get("/graph")
-def get_graph(
-    slug: Annotated[str, Depends(company_slug)], bots: Annotated[bool, Query()] = False
-) -> GraphView:
+def get_graph(slug: Slug, bots: Annotated[bool, Query()] = False) -> GraphView:
     if not db.graph_exists(slug):
         return graph_view.build(slug, [], [], bots=bots)
     return graph_view.load(slug, bots=bots)
