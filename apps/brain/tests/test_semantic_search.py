@@ -12,7 +12,8 @@ def test_finds_a_comment_by_its_words_and_cites_its_work_item(embedded_graph):
     # "Rounding is off by a cent for annual plans."
     hits = tools.semantic_search(embedded_graph, text="rounding off by a cent on annual plans")
     assert hits[0].uid == "synthetic:pr:3"  # cited by its PR, not by the chunk
-    assert hits[0].chunk_uid in {"chunk:synthetic:comment:3", "chunk:synthetic:pr:3:body"}
+    # PR 3 has a body and two comment chunks; the best one is the comment that shares the words.
+    assert hits[0].chunk_uid == "chunk:synthetic:comment:3"
     assert hits[0].label == "WorkItem" and hits[0].kind == "pull_request" and hits[0].number == 3
     assert hits == sorted(hits, key=lambda h: -h.similarity) and 0 <= hits[-1].similarity <= 1
 

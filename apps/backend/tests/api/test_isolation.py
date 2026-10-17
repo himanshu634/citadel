@@ -6,11 +6,12 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import pytest
 from backend import registry
 from backend.api import create_app
 from backend.api.companies import status_of
 from backend.testing import second_company
-from brain import tools
+from brain import embeddings, tools
 from brain.testing import FakeEmbedder, needs_graph, synthetic_company
 from fastapi.testclient import TestClient
 
@@ -82,8 +83,16 @@ def responses(client: TestClient, slug: str, args: dict[str, str]) -> dict[str, 
     return out
 
 
+@pytest.fixture
+def fake_embedder():
+    """A FakeEmbedder for this test only, so semantic_search embeds questions like the chunks."""
+    embeddings.set_embedder(FakeEmbedder())
+    yield
+    embeddings.set_embedder(None)
+
+
 def test_every_company_route_answers_only_for_its_company(
-    api_root, runner, gate, monkeypatch, synthetic_graph, second_graph
+    api_root, runner, gate, monkeypatch, synthetic_graph, second_graph, fake_embedder
 ):
     monkeypatch.setattr("backend.api.companies.status_of", status_of)  # the real graph status
     registry.write_new(synthetic_company(synthetic_graph))
@@ -94,9 +103,10 @@ def test_every_company_route_answers_only_for_its_company(
     for slug in slugs.values():
         client.post(f"/api/companies/{slug}/builds", json={})
         wait_done(runner, slug)
-    # After the builds, so nothing is embedded: semantic_search embeds its question and finds
-    # no vectors, which is still a 200 answer for this company only.
-    monkeypatch.setattr("brain.embeddings._override", FakeEmbedder())
+        # The test runner's build steps are fakes, so embed here: semantic_search must return
+        # rows, or a leak of the other company's chunks could not show.
+        report = embeddings.embed_pending(slug)
+        assert report.skipped_reason is None, report
 
     seen: dict[str, set[str]] = {}
     for key, slug in slugs.items():
@@ -105,6 +115,8 @@ def test_every_company_route_answers_only_for_its_company(
             assert r.status_code == 200, (slug, route, r.text)
             body = r.json()
             assert body["slug"] == slug, (slug, route)
+            if route == "tools/semantic_search":
+                assert body["rows"], slug
             seen[key] |= uids(body)
         assert seen[key], slug
 
