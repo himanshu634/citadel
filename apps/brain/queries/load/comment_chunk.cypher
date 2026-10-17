@@ -1,5 +1,5 @@
 // purpose: Store comment text as a Chunk FROM its work item, so the "why" behind a PR lives in
-//          the graph (embedding is filled later). The schema has no Comment node by design.
+//          the graph (the embed stage fills the vector). The schema has no Comment node by design.
 // params:  $company, $rows: [{uid, work_item_uid, author_uid, text, text_hash, created_at, ts,
 //          source, url}]
 // returns: n (chunks written; rows whose work item is missing are dropped)

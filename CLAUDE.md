@@ -26,8 +26,9 @@ Everything goes through the Makefile (`make help`). Company-scoped targets take 
 make setup                     # uv sync + create .env from .env.example
 make up / make down            # FalkorDB in Docker; ports/password from .env (:6379, Browser UI :3000)
 make schema SLUG=synthetic     # create indexes on brain_synthetic (idempotent)
-make synthetic                 # regenerate synthetic JSONL, schema + full ingest into brain_synthetic
-make fetch | ingest | sync     # SOURCE=<type> limits to one source; FULL=1 ignores sync cursors
+make synthetic                 # regenerate synthetic JSONL, schema + full ingest (+ embed) into brain_synthetic
+make fetch | ingest | sync     # SOURCE=<type> limits to one source; FULL=1 ignores sync cursors; ingest also embeds
+make embed SLUG=x              # embed new or changed chunk text (ALL=1: every chunk again)
 make stats                     # node/relationship counts
 make tools                     # list the named query tools and their params
 make query TOOL=impact_of P="system=CI"   # run one (SLUG=..., JSON=1 for raw rows)
@@ -55,8 +56,9 @@ make fe-install | fe-dev | fe-check | fe-test | fe-build   # frontend: pnpm inst
 
 Configuration comes from `.env` (see `.env.example`): FalkorDB host/port/credentials and
 `FALKORDB_TLS` (the same code runs against local Docker or FalkorDB Cloud), `GITHUB_TOKEN`
-(falls back to `gh auth token`). `EMBEDDING_DIM` sets the vector index size and must match
-whichever embedding model is used later. `ANTHROPIC_API_KEY`,
+(falls back to `gh auth token`). `EMBEDDING_PROVIDER` (`fastembed` | `none`), `EMBEDDING_MODEL`
+(default `BAAI/bge-base-en-v1.5`, cached in `data/models/`) and `EMBEDDING_DIM` (768; the vector
+index size, must equal the model's output size) drive the embed stage. `ANTHROPIC_API_KEY`,
 `ANTHROPIC_MODEL` (default `claude-haiku-5-5`) and `ANTHROPIC_EFFORT` (default `medium`) drive
 `agents ask`. Settings live in `brain/config.py` (also `REPO_ROOT`).
 
@@ -69,6 +71,7 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
                          adapter.records ─► CanonicalRecord          (pure transform, no network)
                          normalize       ─► company rules applied    (pure)
                          loader          ─► MERGE into brain_<slug>  (only writer to FalkorDB)
+                         embed           ─► Chunk.embedding          (after all sources; local model)
 ```
 
 - **`canonical.py`** is the contract between adapters and the loader (Person, Team, System,
@@ -101,6 +104,16 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
 - **`loader.py`** batches rows (`UNWIND $rows`, 500 per query) into `queries/load/*.cypher`. All
   writes are `MERGE` on uid then `SET`, so loads are idempotent. Nodes are written before
   relationships; relationship queries `MATCH` both ends, so dangling links are dropped and counted.
+- **Chunks** (`chunking.py`, loader): `Chunk -[:FROM]-> WorkItem|Document`, kinds `comment`
+  (uid `chunk:<comment uid>`), `work_item` (`chunk:<uid>:body`, title + body) and `document`
+  (`chunk:<uid>:<idx>`, cut by `split_text` at 1200 chars; a shorter document loses its extra
+  chunks). Each carries `text_hash`.
+- **`embeddings.py`**: `Embedder` protocol (`passages` / `query`), fastembed provider
+  (`BAAI/bge-base-en-v1.5`, 768 dims, ONNX on CPU, no key), `get_embedder()` (None when
+  `EMBEDDING_PROVIDER=none`) / `set_embedder()`. `embed_pending` is incremental: it embeds chunks
+  whose `text_hash` differs from `embedded_hash` or whose `embed_model` differs (`--all` clears
+  `embedded_hash` first). A model that cannot load or run makes the stage `skipped` with the
+  reason, never a failed build; progress events go out at most once a second.
 - **`pipeline.py`** is the source-agnostic glue the CLI calls. Ingest is incremental: each source
   has a `SyncState` node holding a cursor; records older than it are skipped, records without a
   timestamp (people, teams, ownership, links) are always loaded. `--full` ignores the cursor.
@@ -109,13 +122,20 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   citations). `call(slug, name, **params)` is the one entry point; typed wrappers sit on top.
   `prepare` only converts params (days → epoch, text → RediSearch OR query, login → uid). No
   LLM-generated Cypher anywhere. `path_between` uses `algo.SPpaths` (FalkorDB's `shortestPath`
-  rejects undirected traversals).
+  rejects undirected traversals). `semantic_search` sits beside the full-text tools
+  (`related_*`): it embeds the question (`prepare`), queries the `Chunk` vector index, keeps the
+  best chunk per source and returns the source WorkItem/Document uid to cite; similarity is
+  1 - cosine distance, `kinds` filters chunk kinds. With embeddings off it raises
+  `EmbeddingUnavailable` (the backend answers 503 with the reason).
 - **`graph_view.py`** builds the Graph page's view: every drawable node and link, and the
   territory (home system) of each node; the rules are in its module doc. Pure apart from `load`.
 - **`db.py`** is the only place that opens a connection and selects the graph (`brain_<slug>`);
   all queries go through `db.run()` so nothing can hit the wrong company's graph.
 - **`cli_util.py`** holds the CLI helpers shared by the three CLIs. **`testing.py`** holds the
-  shared pytest graph fixtures (loaded with `-p brain.testing`).
+  shared pytest graph fixtures (loaded with `-p brain.testing`). It sets `EMBEDDING_PROVIDER=none`
+  for the whole session (no test loads the model); `FakeEmbedder` + `set_embedder` give a test
+  vectors, and the fixtures `embeddings_off` and `embedded_graph` (synthetic, every chunk embedded)
+  cover the two cases.
 
 ## Named Cypher queries
 
@@ -123,9 +143,11 @@ Python never holds Cypher strings. Every query lives in `apps/brain/queries/<fol
 with a leading `//` header (purpose / params / returns) and is fetched by name via
 `queries.get("load/person")`. A file may hold several statements separated by `;` (FalkorDB runs one
 statement per `GRAPH.QUERY`), which the schema files use. Folders: `schema/` (range, full-text,
-vector indexes, applied in order by `schema.py`, "already indexed" errors are skipped), `load/`
-(loader writes), `tools/` (agent-facing read queries), `graph/` (the Graph page's whole-graph read,
-used by `brain/graph_view.py`), `chat/` (the agents' chat history in agent_<slug>, run by
+vector indexes, applied in order by `schema.py`, "already indexed" errors are skipped; the vector
+index on `Chunk.embedding` is queried by `tools/semantic_search`), `load/` (loader writes,
+including the embed stage's `chunks_to_embed`, `chunk_embedding`, `clear_embedded`), `tools/`
+(agent-facing read queries), `graph/` (the Graph page's whole-graph read, used by
+`brain/graph_view.py`), `chat/` (the agents' chat history in agent_<slug>, run by
 `agents.checkpoint.run`).
 
 The synthetic company (`apps/brain/examples/synthetic_company`, source type `canonical_jsonl`)
@@ -158,6 +180,9 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
   timed and recorded in the append-only `trace` channel with the subgraph it touched
   (`agents/walk.py` turns any tool's rows into nodes + relationships; links the rows only imply
   are `inferred`). A stop is honoured only between saved steps, so the thread stays valid.
+- `semantic_search` is for why/how questions, or once when `related_*` found nothing
+  (`system_prompt.md`): its hits are candidates, cited only if the snippet answers, and an
+  entity `list_systems` / `person_profile` shows is absent is not searched for.
 - Tests use a scripted fake client (`apps/agents/tests/test_agent.py`); nothing in `make test` calls the API.
   `agents/offline.py` is the same idea for `agents chat --offline`.
 - Online traces (`agents/traces.py`): every turn asked from the CLI (`_run_ask`, real Claude only)
@@ -190,7 +215,8 @@ tools that ran, answer text (substrings or a regex) and a step budget. Expected 
 or gold refs (`{tool, params, field, top}`) read from the graph when the run starts, so cases
 follow the data. Each case runs `REPEAT` times and reports a pass rate; turns of one case share a
 thread. Results: `data/evals/<slug>/<time>-<model>-<effort>.jsonl`; `BASELINE=` diffs pass rates
-against an earlier file. It calls the API, so it is not part of `make test`;
+against an earlier file. The `[semantic]` cases ask in words with no full-text overlap (the
+graph must be embedded). It calls the API, so it is not part of `make test`;
 `apps/agents/tests/test_evals.py` checks the case files and the harness with the scripted client.
 `evals/drafts.py` (`make eval-drafts`) turns thumbs-down traces into cases `fb-<trace id>`: the
 earlier turns of the thread, then the bad one expecting only an answer, with the bad answer in
@@ -232,7 +258,9 @@ HTTP for the frontend, `backend.api:app` (FastAPI, `make api`): its only way in.
   round-trip so hand-written comments survive; writes are atomic.
 - `config_diff.py` says if a saved change needs a graph rebuild or a new download.
 - `jobs.py`: one build per company, at most two at once, progress as SSE events, last build kept
-  in `data/jobs/<slug>.json`; a build cut off by a restart is marked `stopped`.
+  in `data/jobs/<slug>.json`; a build cut off by a restart is marked `stopped`. A build ends
+  with one `embed` stage for the company (after every source's ingest; the UI's "Embed text"
+  row); a stop at its last event is ignored, the work being complete.
 - `/api/onboard/github` adds a company from one public GitHub repo (the rail's + dialog):
   `onboard.py` derives name, slug and window; the create re-checks visibility (private repos are
   refused) and writes and starts under the start lock.

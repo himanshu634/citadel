@@ -1,5 +1,5 @@
 // purpose: Open one node found through another tool: its main fields plus its direct neighbours
-//          in both directions (who wrote it, what it touches, closes, mentions, comment chunks),
+//          in both directions (who wrote it, what it touches, closes, mentions, its text chunks),
 //          so an agent can read a PR, issue, document, person or system and follow links.
 // params:  $uid, $limit (int, max neighbours)
 // returns: uid, label, title, kind, state, url, date, body (first 2000 chars),

@@ -24,6 +24,7 @@ graph LR
   Document -- MENTIONS --> WorkItem
   Document -- MENTIONS --> System
   Chunk -- FROM --> WorkItem
+  Chunk -- FROM --> Document
   Decision -. "MADE_IN (later)" .-> WorkItem
   Decision -. "AFFECTS (later)" .-> System
   Decision -. "SUPERSEDES / CONTRADICTS (later)" .-> Decision
@@ -46,10 +47,26 @@ accessor.
 | `Change` | `sha`, `date`, `ts`, `kind` (feat/fix/perf/ci/build/docs/refactor/other), `subject` | commits |
 | `WorkItem` | `kind` (pull_request/issue/ticket/thread), `number`, `title`, `body`, `state`, `created_at`, `closed_at`, `merged_at`, `labels`, `container`; tickets also `key`, `status_category` (backlog/todo/in_progress/done/canceled), `priority` (urgent/high/medium/low), `priority_rank` (1-4, 5 = none; null for PRs and issues), `due_date`, `due_ts` | PRs, issues, tickets, chat threads |
 | `Document` | `path`, `title`, `body`, `updated_at` | repo markdown, published docs folders |
-| `Chunk` | `kind`, `text`, `author_uid`, `ts`, `embedding` (vector, filled later) | comment text today; document/PR chunks for semantic search later |
+| `Chunk` | `kind` (`comment` / `work_item` / `document`), `text`, `text_hash`, `ts`, `embedding` (vector), `embedded_hash`, `embed_model`; comments also `author_uid`, `created_at`; work-item chunks `created_at`; document chunks `idx` | text for semantic search, one `FROM` its source; see below |
 | `Decision` | `summary`, `rationale`, `valid_from`, `valid_to` | defined now, written later by the Builder agent |
 | `Episode` | `agent`, `run_at`, `input`, `summary` | agent memory, written later |
 | `SyncState` | `adapter`, `key`, `cursor`, `window_since`, `last_run`, `records` | ingestion bookkeeping, one per configured source |
+
+A `Chunk` is a piece of text with a vector. Three kinds, each `FROM` its source:
+
+| `kind` | uid | Text |
+|---|---|---|
+| `comment` | `chunk:<comment uid>` | one comment |
+| `work_item` | `chunk:<work item uid>:body` | the title, then the body, of a PR, issue, ticket or thread |
+| `document` | `chunk:<document uid>:<idx>` | the title, then the body, cut at blank lines into pieces of up to 1200 characters; `idx` is the piece's position. A document that shrinks loses its extra chunks |
+
+`text_hash` fingerprints `text`. The embed stage runs after the sources are loaded and writes
+`embedding`, `embedded_hash` (the `text_hash` it embedded) and `embed_model`. A chunk is embedded
+again only when `text_hash` differs from `embedded_hash` or the model changed, so a re-ingest
+costs nothing for unchanged text. `brain embed --all` clears `embedded_hash` to embed every chunk
+once more. With `EMBEDDING_PROVIDER=none`, or a model that cannot load, chunks not yet embedded stay without a
+vector and semantic search is unavailable. A vector never leaves the graph: no tool row, `get_entity` result
+or Graph page node carries one.
 
 People and systems get source-free uids, so the same login seen in GitHub and in a Slack export
 is one node. No email addresses are stored anywhere: people are identified by login, and
@@ -70,7 +87,7 @@ normalize scrubs addresses out of every text field.
 | `(Change)-[:PART_OF]->(WorkItem)` | commit belongs to a PR (PR commit list, merge commit, or `(#123)` in the subject) |
 | `(WorkItem)-[:CLOSES]->(WorkItem)` | PR closes issue |
 | `(WorkItem \| Document)-[:MENTIONS]->(WorkItem \| System)` | `#123` / PR URLs, and repo paths such as `src/index/`. A ticket can name a work item by its `url` (for example a GitHub PR): the loader matches it to the work item with that `url` |
-| `(Chunk)-[:FROM]->(WorkItem)` | where a piece of text came from |
+| `(Chunk)-[:FROM]->(WorkItem \| Document)` | where a piece of text came from |
 | `(Decision)-[:MADE_IN \| AFFECTS \| SUPERSEDES \| CONTRADICTS]` | later (Builder / Critic agents) |
 
 ## Expertise is derived, not stored
@@ -85,9 +102,11 @@ PRs) is always one hop away for citation.
 
 - Range indexes on every label's `uid`, plus `Person.login`, `WorkItem.number`, `WorkItem.key`, `WorkItem.url`, `System.name`.
 - Full-text (RediSearch) on `WorkItem(title, body)` and `Document(title, body)`.
-- Vector (HNSW, cosine) on `Chunk.embedding`, dimension `EMBEDDING_DIM`.
+- Vector (HNSW, cosine) on `Chunk.embedding`, dimension `EMBEDDING_DIM`. The `semantic_search`
+  tool queries it: nearest chunks to the embedded question, then the work item or document each
+  comes from (best chunk per source); similarity is 1 - cosine distance.
 
-`make schema SLUG=<slug>` applies them; re-running is safe.
+`make schema SLUG=<slug>` applies them; re-running is safe. The vector dimension must equal the embedding model's output size.
 
 ## Ingest window
 
