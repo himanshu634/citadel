@@ -1,9 +1,9 @@
-# Company Brain
+# Citadel: Company Brain
 
 **A living memory of how your company builds software, one that agents can query and that
 repairs itself.**
 
-Entry for *Graph Hacks: Context for AI Agents* (FalkorDB × WeMakeDevs, Oct 15–18 2026).
+Citadel is our entry for *Graph Hacks: Context for AI Agents* (FalkorDB × WeMakeDevs, Oct 15–18 2026).
 Tracks: **Company Brain** and **Agent Memory & Coordination**.
 
 ## The problem
