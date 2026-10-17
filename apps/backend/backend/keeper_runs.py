@@ -26,8 +26,10 @@ on "Review now" (`keeper_budget`) and after an approval (budget 0, so pm's follo
 - `subscribe` replays the events of the company's latest run in this process, then follows it
   live, then ends; so a page that opens the stream after a quick run still sees all of it.
 - `recover` (at startup) marks a review a previous server process left `running` as stopped
-  (`ledger/review_stop_running`). It only reads a company whose ledger has no running review,
-  so it never creates keeper_<slug>.
+  (`ledger/review_stop_running`), only once its heartbeat is `REVIEW_STALE_SECONDS` old: a
+  review another process runs (`agents keeper review`) keeps beating, so neither a (re)start
+  nor a new start (`ledger/review_start` stops only a stale one) overlaps it. It only writes
+  for a company whose latest review is running, so it never creates keeper_<slug>.
 
 Every seam (`store_for`, `client_for`, `has_key`, `brain`, `graph_run`) defaults to a module
 function, taken when the KeeperRuns is made (not at call time, as `api.ask.Asker` does): a run
@@ -303,8 +305,9 @@ class KeeperRuns:
         return Subscription(self, sub)
 
     def recover(self) -> None:
-        """On startup: a review still `running` in a company's ledger belonged to a process that
-        is gone. Best effort per company; a company with no ledger is skipped."""
+        """On startup: a review still `running` in a company's ledger whose heartbeat is stale
+        belonged to a process that is gone (a fresh one is another process's live review).
+        Best effort per company; a company with no ledger is skipped."""
         for company in registry.list_companies():
             slug = company.slug
             if self.running(slug):

@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass, field
 
 import pytest
+from agents.keeper.gaps import utc_now
 from agents.keeper.model import gap_uid
 from agents.policies import offline_client
 from agents.testing import FakeBrainFacts, fake_brain
@@ -182,12 +183,24 @@ def test_events_without_any_review_is_404(kclient, company):
 
 
 def test_startup_stops_a_review_cut_off_by_a_restart(runner, keeper, ledger, company):
-    old = {"uid": "review:old", "trigger": "build", "budget": 3, "now": "2026-10-17T08:00:00Z"}
+    old = {"uid": "review:old", "trigger": "build", "budget": 3, "now": "2020-01-01T08:00:00Z"}
     ledger.write("ledger/review_start", KEEPER, old)
     with TestClient(create_app(runner, keeper=keeper)):
         pass
     [r] = ledger.reviews
     assert (r.state, r.stop) == ("stopped", "restart")
+
+
+def test_startup_leaves_a_review_another_process_runs(runner, keeper, ledger, company):
+    """A review the CLI runs keeps beating: a server (re)start does not stop it, and a start
+    returns it instead of overlapping it."""
+    live = {"uid": "review:cli", "trigger": "manual", "budget": 3, "now": utc_now()}
+    ledger.write("ledger/review_start", KEEPER, live)
+    with TestClient(create_app(runner, keeper=keeper)) as c:
+        r = c.post(f"{BASE}/review")
+        assert r.json()["uid"] == "review:cli", r.text
+    [r] = ledger.reviews
+    assert (r.uid, r.state) == ("review:cli", "running")
 
 
 def test_build_done_starts_a_review(client, company, ledger, runner, gate):
