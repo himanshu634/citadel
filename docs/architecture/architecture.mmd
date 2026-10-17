@@ -23,7 +23,7 @@ graph TB
   subgraph AGENTS["apps/agents — first user"]
     direction TB
     LOOP["Claude agent loop<br/>router · Ask<br/>submit_answer with cited uids"]
-    ROLES["agent roles<br/>work layer · sim"]
+    ROLES["agent roles<br/>pm · qa · keeper"]
     EVAL["evals & traces"]
     CK[("agent_slug<br/>checkpoints")]
     LOOP --- ROLES

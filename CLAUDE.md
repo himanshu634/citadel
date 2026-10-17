@@ -12,7 +12,7 @@ Python packages and a pnpm SvelteKit app (`apps/frontend`):
 | Folder | Package · CLI | Holds |
 |---|---|---|
 | `apps/brain` | `brain` · `brain` | the engine: adapters, pipeline, loader, schema, queries, named tools, `db.py`, `graph_view.py` |
-| `apps/agents` | `agents` · `agents` | Claude agents, roles, work store, sim, evals, traces; reach the graph only through named tools |
+| `apps/agents` | `agents` · `agents` | Claude agents, roles, the Keeper, evals, traces; reach the graph only through named tools |
 | `apps/backend` | `backend` · `backend` | FastAPI app (`backend.api:app`), jobs, registry, onboard, config diff |
 
 Dependency rule: backend → agents → brain, never the reverse. Diagram: `docs/architecture/`.
@@ -39,7 +39,6 @@ make traces SLUG=x DAYS=7      # live Ask traffic: no-answer/step-limit/nudge/..
 make eval-drafts SLUG=x        # thumbs-down answers as draft eval cases (WRITE=1 appends to evals/cases/x.yaml)
 make chats-backfill SLUG=x     # chat history for threads asked before it existed (checkpoints + traces; ALL=1 adds untraced)
 make agents                    # list the agent roles, their jobs and read tools
-make sim SLUG=synthetic SCENARIO=sprint OFFLINE=1   # run the simulation (sprint, race, regression); not the product story
 make reset SLUG=x CONFIRM=1    # delete brain_x, agent_x, keeper_x, its build history and Ask traces (frees the slug)
 make linear-seed SLUG=synthetic_linear CONFIRM=1   # copy the synthetic tickets into a real Linear workspace
 make brain ARGS="..."          # any `brain` CLI command
@@ -318,33 +317,26 @@ demo's agents are `brain`, `keeper`, `pm` and `qa`. Pieces:
   run starts, steps or ends. Words for reasons, log actions, errors in `src/lib/keeper.ts`; Ask
   marks a cited `Claim` source "Keeper" (`WalkAnswer`).
 
-### Agent roles (`agents/roles`, `agents/work`, `agents/sim`)
+### Agent roles (`agents/roles`, `agents/work`, `agents/policies`)
 
-The simulated company in [docs/agents.md](docs/agents.md) (the original spec, no longer the
-product story; its "Implementation status" says what is built). Agents never message each
-other: each reads its queue, makes one decision and writes it; the next agent finds it through
-its own queue. Pieces:
-- `agents/work/`: the records (`model.py`), every legal task move in one table (`moves.py`: the
-  guards `MemoryStore` enforces today and phase 2's write queries must match; no
-  `queries/work/` exists yet), one pydantic model per `submit_*` tool
-  (`submits.py`: the write query's params), work-layer read tools (`tools.py`) and the
-  `WorkStore` protocol (`store.py`: `read`/`write` by query name, like `db.run`).
-  `memory_store.py` is the offline/test double that enforces the same guards; the FalkorDB store
-  is phase 2.
-- `agents/acl.py`: which database user may read/write which graph (`brain_`, `sim_`, `mem_<slug>_<role>`,
-  `agent_`, `keeper_`), and which role each writer user acts as. The store refuses what it does not allow.
+The roles the Keeper's review runs (`pm`, `qa`, `keeper`) plus `brain` (Ask). Agents never
+message each other: each reads its queue on the Keeper's ledger, makes one decision and writes
+it; the next agent finds it through its own queue. Pieces:
+- `agents/work/`: the `WorkStore` protocol (`store.py`: `read`/`write` by query name, like
+  `db.run`; implemented by the Keeper's ledger stores) and one pydantic model per `submit_*`
+  tool (`submits.py`: the write query's params).
+- `agents/acl.py`: which database user may read/write which graph (`brain_`, `agent_`,
+  `keeper_`). The stores refuse what it does not allow.
 - `agents/roles/`: one `ROLE` per module (user, sorted read tools, jobs; prompt in
-  `agents/prompts/<role>.md` after `_shared.md`). A job = queue read + optional atomic claim +
-  one submit tool + `apply` (named writes).
+  `agents/prompts/<role>.md` after `_shared.md`). A job = queue read + one submit tool + `apply`
+  (named writes).
 - `agents/runner.py`: runs a job through the brain loop (`loop.py`, parameterised by prompt,
-  submit tool and grounding check), then writes and logs one Episode. Read-only roles log to
-  their own memory graph.
+  submit tool and grounding check), then writes and logs one Episode (`ledger/write_episode`).
 - `agents/policies/`: a deterministic policy per job; `ScriptedClient` plays it through the real
-  loop, so offline runs hit the same checks as Claude. Tests: `apps/agents/tests/test_work_store.py`,
-  `test_agent_roles.py` (fake brain in `agents/testing.py`).
-- `agents/sim/`: the orchestrator's tick loop (`STEPS` order) and the scenarios.
+  loop, so offline runs hit the same checks as Claude. Tests: `test_agent_roles.py`,
+  `test_keeper_jobs.py` (fake brain in `agents/testing.py`).
 Rules: roles cite only uids from this run's tool results; a write that matches nothing changed
-nothing; role read tools not yet backed by a query are pinned in `test_tools_still_missing_are_pinned`.
+nothing; every role read tool is a `brain.tools` tool (`test_every_read_tool_is_a_graph_tool`).
 
 ## Backend (`apps/backend/backend`)
 

@@ -1,8 +1,7 @@
-"""Run one agent job on one subject: claim, think (brain loop), write, log the Episode.
+"""Run one agent job on one subject: think (brain loop), write, log the Episode.
 
-    claim (atomic write) -> brain loop: role prompt + role read tools + the job's submit tool
-                         -> grounding check -> job.apply (named writes) -> job.after
-                         -> Episode (always, once claimed)
+    brain loop: role prompt + role read tools + the job's submit tool
+             -> grounding check -> job.apply (named writes) -> Episode (always)
 
 Why: every role decides the same way, so this is the one place that does it. The loop is
 `agents/loop.py` (the same one `agents ask` uses), so a role's run follows the same rules:
@@ -18,18 +17,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import anthropic
-from brain.config import graph_name
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import START, StateGraph
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
-from agents import acl
 from agents.loop import AgentState, Check, add_brain_loop
 from agents.roles.base import Ctx, Job, Role, Subject, write
 from agents.toolset import Runner, Toolset
 from agents.work.store import Row, WorkStore
 from agents.work.submits import Submit
-from agents.work.tools import WORK_TOOLS
 
 RECURSION_LIMIT = 30  # graph steps per run (each tool round trip is two)
 
@@ -42,7 +38,7 @@ class RunResult:
     subject: str
     rows: list[Row] = field(default_factory=list)  # what the job wrote ([] = nothing)
     submit: dict[str, Any] | None = None  # the accepted submit input
-    stop: str | None = None  # why nothing was written: claim_lost, write_refused, no_answer, ...
+    stop: str | None = None  # why nothing was written: write_refused, no_answer, ...
     tools_called: list[str] = field(default_factory=list)
     episode: str | None = None
     model: str | None = None
@@ -51,39 +47,19 @@ class RunResult:
 # --- tools --------------------------------------------------------------------------------------
 
 
-def available_tools() -> set[str]:
-    from brain import tools as graph_tools
-
-    return {*graph_tools.TOOLS, *WORK_TOOLS}
-
-
 def missing_tools(role: Role) -> list[str]:
-    """Read tools the role declares that no store or graph query provides yet (phase 2)."""
-    return [t for t in role.read_tools if t not in available_tools()]
-
-
-def role_toolset(
-    role: Role, store: WorkStore, db_user: str, graph_run: Runner | None = None
-) -> Toolset:
-    """The role's read tools: brain graph tools (`brain.tools`, read-only on brain_<slug>) and
-    work-layer tools (run by the store, as the role's own database user)."""
+    """Read tools the role declares that `brain.tools` does not provide."""
     from brain import tools as graph_tools
 
-    run_graph = graph_run or graph_tools.call
-    mapping: dict[str, Any] = {}
-    for name in role.read_tools:
-        tool = WORK_TOOLS.get(name) or graph_tools.TOOLS.get(name)
-        if tool is not None:
-            mapping[name] = tool
+    return [t for t in role.read_tools if t not in graph_tools.TOOLS]
 
-    def run(slug: str, name: str, **params: Any) -> list[BaseModel]:
-        work = WORK_TOOLS.get(name)
-        if work is None:
-            return run_graph(slug, name, **params)
-        rows = store.read(work.query, params, db_user=db_user)
-        return [work.row.model_validate(r) for r in rows]
 
-    return Toolset(tools=mapping, run=run)
+def role_toolset(role: Role, graph_run: Runner | None = None) -> Toolset:
+    """The role's read tools: brain graph tools (`brain.tools`, read-only on brain_<slug>)."""
+    from brain import tools as graph_tools
+
+    mapping = {n: graph_tools.TOOLS[n] for n in role.read_tools if n in graph_tools.TOOLS}
+    return Toolset(tools=mapping, run=graph_run or graph_tools.call)
 
 
 # --- grounding ----------------------------------------------------------------------------------
@@ -135,17 +111,12 @@ def run_job(
     graph_run: Runner | None = None,
 ) -> RunResult:
     result = RunResult(ctx.agent, role.name, job.name, subject.uid)
-    if subject.claim and not write(
-        store, ctx, subject.claim, task=subject.uid, summary=f"{ctx.agent} took {subject.uid}"
-    ):
-        result.stop = "claim_lost"  # someone else got there first: not a run
-        return result
 
     g = StateGraph(AgentState)
     entry = add_brain_loop(
         g,
         client,
-        role_toolset(role, store, ctx.db_user, graph_run),
+        role_toolset(role, graph_run),
         system_prompt=role.prompt,
         submit_tool=job.submit.tool(),
         check=grounding(job.submit, subject),
@@ -162,26 +133,15 @@ def run_job(
     }
     try:
         _think_and_write(g, inputs, store, job, subject, ctx, result)
-    except Exception as e:  # an API or store failure: give the work back, log it, carry on
+    except Exception as e:  # an API or store failure: log it, carry on
         result.stop = f"error: {type(e).__name__}: {e}"[:300]
-    if not result.rows and subject.unclaim:  # give the work back for someone else
-        write(
-            store,
-            ctx,
-            subject.unclaim,
-            task=subject.uid,
-            summary=f"{ctx.agent} gave {subject.uid} back ({result.stop})",
-        )
 
     actions = [r["action"] for r in result.rows if "action" in r]
-    # A read-only role (Risk) cannot write the brain; it logs its runs in its own memory graph.
-    own = acl.can(ctx.db_user, store.slug, graph_name(store.slug), "W")
     episode = write(
         store,
         ctx,
-        "work/write_episode" if own else "memory/write_episode",
+        "ledger/write_episode",
         run_at=ctx.now,
-        tick=ctx.tick,
         input=f"{role.name}.{job.name} {subject.uid}",
         summary=_summary(result.submit, result.stop),
         tools_called=result.tools_called,
@@ -220,8 +180,6 @@ def _think_and_write(
         result.submit = answer
         sub = job.submit.model_validate(answer)
         result.rows = job.apply(store, ctx, subject, sub)
-        if result.rows and job.after:
-            job.after(store, ctx, subject, sub, result.rows)
         result.stop = None if result.rows else "write_refused"
     else:
         result.stop = state.get("stop") or "no_answer"
@@ -230,8 +188,8 @@ def _think_and_write(
 def _summary(answer: dict[str, Any] | None, stop: str | None) -> str:
     if not answer:
         return f"No decision ({stop})."
-    for key in ("reason", "plan", "report", "notes"):
-        if isinstance(answer.get(key), str) and answer[key].strip():
-            return answer[key].strip().splitlines()[0][:300]
+    reason = answer.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        return reason.strip().splitlines()[0][:300]
     lists = {k: len(v) for k, v in answer.items() if isinstance(v, list) and k != "cites"}
     return ", ".join(f"{n} {k}" for k, n in lists.items()) or "Done."

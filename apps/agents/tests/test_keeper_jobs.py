@@ -89,8 +89,8 @@ def test_roles_listed():
     )
     assert missing_tools(keeper) == []
     assert [j.name for j in keeper.jobs] == ["decide"]
-    assert [j.name for j in ROLES["pm"].jobs] == ["triage", "accept", "consult", "follow_up"]
-    assert [j.name for j in ROLES["qa"].jobs] == ["test", "consult"]
+    assert [j.name for j in ROLES["pm"].jobs] == ["consult", "follow_up"]
+    assert [j.name for j in ROLES["qa"].jobs] == ["consult"]
     for role in ("pm", "qa"):
         assert "keeper_notes" in ROLES[role].read_tools
     for key in (("pm", "consult"), ("qa", "consult"), ("keeper", "decide"), ("pm", "follow_up")):

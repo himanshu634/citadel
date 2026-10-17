@@ -20,7 +20,7 @@ thread reads (and deletes) in a few indexed queries. Times are epoch ms.
 `Recorder` turns one run's events (`agents.ask.run_events`) into writes: `start` opens a turn,
 `llm` adds a response and its calls, `step_done` stores a call's result, and the answer (or the
 error) closes the turn. Writes are best effort, like traces: a failed write is logged and never
-stops the answer. Only the Ask API and the CLI record; `ask`, evals and the sim never do.
+stops the answer. Only the Ask API and the CLI record; `ask` and evals never do.
 Queries live in queries/chat/; `MemoryChatStore` is the test double with the same behaviour.
 """
 
