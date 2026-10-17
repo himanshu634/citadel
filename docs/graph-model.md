@@ -68,7 +68,9 @@ sync cursor skips); its `text_hash` is filled when it is embedded.
 `embedding`, `embedded_hash` (the `text_hash` it embedded) and `embed_model`. A chunk is embedded
 again only when `text_hash` differs from `embedded_hash` or the model changed, so a re-ingest
 costs nothing for unchanged text. `brain embed --all` clears `embedded_hash` to embed every chunk
-once more. With `EMBEDDING_PROVIDER=none`, or a model that cannot load, chunks not yet embedded stay without a
+once more. Bot text (a comment by, or the body of a work item authored by, a Person with
+`is_bot`) is never embedded, and `semantic_search` never returns it. `get_entity` lists comment
+chunks as neighbours but not work-item or document chunks (their text is the node's `body`). With `EMBEDDING_PROVIDER=none`, or a model that cannot load, chunks not yet embedded stay without a
 vector and semantic search is unavailable. A vector never leaves the graph: no tool row, `get_entity` result
 or Graph page node carries one.
 

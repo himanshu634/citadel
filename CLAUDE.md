@@ -114,8 +114,10 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   (`BAAI/bge-base-en-v1.5`, 768 dims, ONNX on CPU, no key), `get_embedder()` (None when
   `EMBEDDING_PROVIDER=none`) / `set_embedder()`. `embed_pending` is incremental: it embeds chunks
   whose `text_hash` differs from `embedded_hash` or whose `embed_model` differs (`--all` clears
-  `embedded_hash` first). A model that cannot load or run makes the stage `skipped` with the
-  reason, never a failed build; progress events go out at most once a second.
+  `embedded_hash` first). Bot text (comments by, and bodies of work items authored by, an
+  `is_bot` Person) is never embedded, and `semantic_search` filters it out too. A model that
+  cannot load or run makes the stage `skipped` with the reason, never a failed build; its first
+  event says the model is loading; progress events go out at most once a second.
 - **`pipeline.py`** is the source-agnostic glue the CLI calls. Ingest is incremental: each source
   has a `SyncState` node holding a cursor; records older than it are skipped, records without a
   timestamp (people, teams, ownership, links) are always loaded. `--full` ignores the cursor.
