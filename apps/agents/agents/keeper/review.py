@@ -397,10 +397,14 @@ class _Run:
             except Exception as e:
                 self.finish(n, "failed", error=f"{type(e).__name__}: {e}"[:300])
                 raise
-            data = [r.model_dump(mode="json", by_alias=True) if hasattr(r, "model_dump") else r
-                    for r in rows]  # fmt: skip
-            nodes, _ = subgraph(name, params, data)
-            touched = list(dict.fromkeys(nd["uid"] for nd in nodes if nd.get("uid")))
+            try:  # drawing the step must never change what the job sees
+                data = [r.model_dump(mode="json", by_alias=True) if hasattr(r, "model_dump")
+                        else r for r in rows]  # fmt: skip
+                nodes, _ = subgraph(name, params, data)
+                touched = list(dict.fromkeys(nd["uid"] for nd in nodes if nd.get("uid")))
+            except Exception:
+                _log.warning("could not draw step %s of %s", n, self.uid, exc_info=True)
+                touched = []
             self.finish(n, "done", count=len(rows), touched=touched)
             return rows
 

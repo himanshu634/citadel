@@ -27,7 +27,6 @@ from backend.keeper_runs import KeeperRuns
 router = APIRouter(prefix="/companies/{slug}", tags=["activity"])
 Slug = Annotated[str, Depends(company_slug)]
 AskerDep = Annotated[Asker, Depends(get_asker)]
-REVIEW_OVERREAD = 3  # reviews read per run shown, for the skipped ones left out
 
 
 @router.get("/activity")
@@ -60,14 +59,13 @@ def _ask_runs(asker: Asker, slug: str, limit: int) -> list[ActivityRun]:
 
 
 def _review_runs(keeper: KeeperRuns, slug: str, limit: int) -> list[ActivityRun]:
-    """The latest `limit` Keeper reviews. A skipped one with no steps is left out, so a few more
-    are read (reviews without an API key are all skipped)."""
+    """The latest `limit` Keeper reviews that are not skipped, and their steps: two reads,
+    whatever the limit (the page polls every 1.5 s while a run is going)."""
     store = keeper.store_for(slug)
-    read = {"limit": limit * REVIEW_OVERREAD}
-    reviews = [Review(**r) for r in store.read("ledger/recent_reviews", read)]
-    steps = {
-        r.uid: [ReviewStep(**s) for s in store.read("ledger/review_steps", {"review": r.uid})]
-        for r in reviews
-    }
-    runs = runs_from_reviews(reviews, steps, live=lambda uid: keeper.is_running(slug, uid))
-    return runs[:limit]
+    reviews = [Review(**r) for r in store.read("ledger/recent_reviews", {"limit": limit})]
+    steps: dict[str, list[ReviewStep]] = {r.uid: [] for r in reviews}
+    if reviews:
+        for row in store.read("ledger/review_steps", {"reviews": list(steps)}):
+            step = ReviewStep(**row)
+            steps[step.review].append(step)
+    return runs_from_reviews(reviews, steps, live=lambda uid: keeper.is_running(slug, uid))

@@ -97,7 +97,7 @@ def test_review_end_to_end_offline():
 
 
 def steps_of(store, review_uid: str) -> list[dict]:
-    return store.read("ledger/review_steps", {"review": review_uid})
+    return store.read("ledger/review_steps", {"reviews": [review_uid]})
 
 
 def test_each_graph_tool_call_and_submit_is_a_step():
@@ -159,6 +159,49 @@ def test_a_job_that_wrote_nothing_is_a_failed_submit_step():
     submits = [s for s in steps_of(store, r.uid) if s["kind"] == "submit"]
     assert [(s["actor"], s["status"]) for s in submits] == [("pm", "failed"), ("qa", "failed")]
     assert all(s["error"].startswith("error: AttributeError") for s in submits)
+
+
+class StepsRefused(MemoryKeeperStore):
+    """A ledger whose step writes fail: the trail is best effort."""
+
+    def write(self, name, db_user, params):
+        if name in ("ledger/write_step", "ledger/finish_step"):
+            raise ResponseError("step write refused")
+        return super().write(name, db_user, params)
+
+
+def outcome(store) -> tuple:
+    claims = sorted((c.kind, c.status, tuple(c.evidence)) for c in store.claims.values())
+    return claims, [(e.actor, e.action) for e in store.log]
+
+
+def test_failing_step_writes_change_nothing_else():
+    results = []
+    for store in (MemoryKeeperStore(SLUG), StepsRefused(SLUG)):
+        seed_gap(store, GROUNDED)
+        r, _ = run_review(store, FakeBrainFacts())
+        results.append((r.state, outcome(store)))
+    assert results[0][0] == results[1][0] == "done"
+    assert results[0][1] == results[1][1] and results[0][1][0]  # same claims and log
+    assert steps_of(store, store.reviews[-1].uid) == []
+
+
+def test_a_trail_failure_after_the_tool_still_returns_its_rows(monkeypatch):
+    """Drawing the step (dump, subgraph, finish) must never change what the job sees."""
+    plain = MemoryKeeperStore(SLUG)
+    seed_gap(plain, GROUNDED)
+    run_review(plain, FakeBrainFacts())
+
+    def broken(*a, **kw):
+        raise ValueError("cannot draw this")
+
+    monkeypatch.setattr("agents.keeper.review.subgraph", broken)
+    store = MemoryKeeperStore(SLUG)
+    seed_gap(store, GROUNDED)
+    r, _ = run_review(store, FakeBrainFacts())
+    assert r.state == "done" and outcome(store) == outcome(plain)
+    graph = [s for s in steps_of(store, r.uid) if s["kind"] == "graph"]
+    assert graph and all(s["status"] == "done" and s["touched"] == [] for s in graph)
 
 
 def test_a_review_given_its_uid_uses_it():

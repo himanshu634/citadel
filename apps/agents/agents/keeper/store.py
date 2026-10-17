@@ -168,8 +168,12 @@ def _validate(name: str, p: dict[str, Any]) -> None:
     key = _STATUS_KEY.get(name, "to")
     if name in _STATUS and p.get(key) not in _STATUS[name]:
         raise ValueError(f"{name}: unknown status {p.get(key)!r}")
-    if name == "ledger/write_step" and not isinstance(p["input"], str):
-        p["input"] = json.dumps(p["input"], default=str, ensure_ascii=False)
+    if name == "ledger/write_step":
+        given = p["input"]
+        step_input = json.loads(given) if isinstance(given, str) else given  # bad JSON: ValueError
+        if not isinstance(step_input, dict):
+            raise ValueError(f"{name}: input must be a JSON object, not {given!r}"[:200])
+        p["input"] = json.dumps(step_input, default=str, ensure_ascii=False)
     if name == "ledger/open_gap":
         trace = p.get("trace_id")
         Gap(
@@ -453,7 +457,8 @@ class MemoryKeeperStore(_LedgerStore):
         return out
 
     def _r_recent_reviews(self, p: Mapping[str, Any]) -> list[Row]:
-        return [r.model_dump() for r in reversed(self.reviews)][: p["limit"]]
+        shown = [r for r in reversed(self.reviews) if r.state != "skipped"]
+        return [r.model_dump() for r in shown[: p["limit"]]]
 
     def _w_review_picked(self, p: Mapping[str, Any]) -> list[Row]:
         for r in self.reviews:
@@ -485,8 +490,9 @@ class MemoryKeeperStore(_LedgerStore):
         return [{"review": s["review"], "n": s["n"], "status": s["status"]}]
 
     def _r_review_steps(self, p: Mapping[str, Any]) -> list[Row]:
-        rows = sorted((s for (r, _), s in self.steps.items() if r == p["review"]),
-                      key=lambda s: s["n"])  # fmt: skip
+        wanted = set(p["reviews"])
+        rows = sorted((s for (r, _), s in self.steps.items() if r in wanted),
+                      key=lambda s: (s["review"], s["n"]))  # fmt: skip
         return [ReviewStep(**s).model_dump() for s in rows]
 
     # --- consults -----------------------------------------------------------------------------

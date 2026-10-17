@@ -154,8 +154,8 @@ def test_a_running_review_keeps_the_page_watching(company, runner, keeper, ledge
 
 def test_skipped_reviews_do_not_crowd_out_older_ones(company, runner, keeper, ledger):
     seed_review(ledger, "review:real", "2020-01-01T00:00:00Z", steps=[("qa", "work_history")])
-    for i in range(3):
-        seed_review(ledger, f"review:skip{i}", f"2020-01-0{i + 2}T00:00:00Z", state="skipped")
+    for i in range(10):
+        seed_review(ledger, f"review:skip{i}", f"2020-01-{i + 2:02d}T00:00:00Z", state="skipped")
     client = both_client(runner, keeper, FakeClient())
     got = client.get(f"/api/companies/{company}/activity", params={"limit": 2}).json()
     assert [r["id"] for r in got["runs"]] == ["keeper:review:real"]

@@ -185,7 +185,7 @@ def test_review_steps_round_trip(store):
     step = {"review": rid, "n": 1, "actor": "pm", "tool": "work_history",
             "input": '{"system": "Auth", "limit": 10}', "at": T1}  # fmt: skip
     assert store.write("ledger/write_step", KEEPER, step) == [{"review": rid, "n": 1}]
-    [running] = store.read("ledger/review_steps", {"review": rid})
+    [running] = store.read("ledger/review_steps", {"reviews": [rid]})
     assert running == {
         "review": rid, "n": 1, "actor": "pm", "tool": "work_history", "kind": "graph",
         "input": {"system": "Auth", "limit": 10}, "status": "running", "count": None,
@@ -200,7 +200,7 @@ def test_review_steps_round_trip(store):
               "input": {"can_ground": True}, "status": "failed", "error": "write_refused",
               "at": T3}  # fmt: skip
     store.write("ledger/write_step", KEEPER, submit)  # a dict input is stored as JSON text
-    first, second = store.read("ledger/review_steps", {"review": rid})
+    first, second = store.read("ledger/review_steps", {"reviews": [rid]})
     assert (first["status"], first["count"], first["touched"], first["ended_at"]) == (
         "done", 2, ["system:Auth", "pr:1"], T2)  # fmt: skip
     assert (second["kind"], second["input"], second["status"], second["error"]) == (
@@ -209,11 +209,25 @@ def test_review_steps_round_trip(store):
 
     store.write("ledger/review_finish", KEEPER, {"uid": rid, "state": "done", "now": T3})
     other = start_review(store)
-    assert store.read("ledger/review_steps", {"review": other}) == []
+    assert store.read("ledger/review_steps", {"reviews": [other]}) == []
+    store.write("ledger/write_step", KEEPER, {**step, "review": other, "tool": "impact_of"})
+    both = store.read("ledger/review_steps", {"reviews": [other, rid]})  # one read, many reviews
+    assert sorted((s["review"], s["n"], s["tool"]) for s in both) == sorted([
+        (rid, 1, "work_history"), (rid, 2, "submit_consult"), (other, 1, "impact_of")])  # fmt: skip
+    assert [s["n"] for s in both if s["review"] == rid] == [1, 2]  # in order within a review
     no_review = {**step, "review": "review:nope"}
     assert store.write("ledger/write_step", KEEPER, no_review) == []  # only on a known review
     with pytest.raises(ValueError):
         store.write("ledger/write_step", KEEPER, {**step, "n": 3, "status": "lost"})
+
+
+@pytest.mark.parametrize("bad", ["not json", "[1, 2]", '"text"', 5])
+def test_a_step_input_must_be_a_json_object(store, bad):
+    rid = start_review(store)
+    step = {"review": rid, "n": 1, "actor": "pm", "tool": "work_history", "input": bad, "at": T1}
+    with pytest.raises(ValueError):
+        store.write("ledger/write_step", KEEPER, step)
+    assert store.read("ledger/review_steps", {"reviews": [rid]}) == []
 
 
 def test_recent_reviews_newest_first_and_picked_gaps(store):
@@ -227,6 +241,11 @@ def test_recent_reviews_newest_first_and_picked_gaps(store):
     assert (rows[0]["gaps"], rows[0]["gap_text"]) == (["gap:a", "gap:b"], "Who owns Auth?")
     assert (rows[1]["gaps"], rows[1]["gap_text"], rows[1]["state"]) == ([], None, "done")
     assert [r["uid"] for r in store.read("ledger/recent_reviews", {"limit": 1})] == [second]
+    store.write("ledger/review_finish", KEEPER, {"uid": second, "state": "skipped", "now": T2})
+    skipped = start_review(store)
+    store.write("ledger/review_finish", KEEPER, {"uid": skipped, "state": "skipped", "now": T2})
+    third = start_review(store)  # running
+    assert [r["uid"] for r in store.read("ledger/recent_reviews", {"limit": 5})] == [third, first]
 
 
 def test_log_and_read_log(store):
