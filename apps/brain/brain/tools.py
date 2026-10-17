@@ -654,7 +654,8 @@ TOOLS: dict[str, Tool] = {
         Tool(
             "collaborators",
             "Who works most closely together: pairs of people ranked by PRs one reviewed of "
-            "the other's, with example PRs. Give a login for that person's closest "
+            "the other's, with example PRs, and the issues both commented on "
+            "(shared_threads, not ranked). Give a login for that person's closest "
             "collaborators.",
             CollaboratorsParams,
             Collaborators,
