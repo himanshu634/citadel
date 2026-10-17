@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from brain import db, loader, tools
-from brain.canonical import Document, WorkItem
+from brain.canonical import Document, Link, WorkItem
 from brain.embeddings import embed_pending
 from brain.testing import FakeEmbedder, load_company, needs_graph, synthetic_company
 from redis.exceptions import ResponseError
@@ -180,11 +180,21 @@ def test_a_broken_read_on_an_existing_graph_still_raises(synthetic_graph, monkey
 
 
 def test_bodies_and_documents_become_chunks(synthetic_graph):
+    chunks = "MATCH (c:Chunk)-[:FROM]->({uid: $uid}) RETURN c.uid ORDER BY c.uid"
+
+    def chunks_of(uid: str) -> list[str]:
+        return [r[0] for r in db.run_text(synthetic_graph, chunks, {"uid": uid}).result_set]
+
+    issue_chunks = ["chunk:synthetic:comment:7", "chunk:synthetic:issue:14:body"]
+    assert chunks_of("synthetic:issue:14") == issue_chunks
+    doc_uid = "synthetic:doc:docs/billing-runbook.md"
+    assert chunks_of(doc_uid) == [f"chunk:{doc_uid}:0"]
+    # get_entity lists comment chunks, not the body and document chunks (their text is `body`)
     issue = tools.get_entity(synthetic_graph, uid="synthetic:issue:14")
-    chunks = [n for n in issue.neighbours if n.label == "Chunk" and n.rel == "FROM"]
-    assert {n.uid for n in chunks} == {"chunk:synthetic:issue:14:body", "chunk:synthetic:comment:7"}
-    doc = tools.get_entity(synthetic_graph, uid="synthetic:doc:docs/billing-runbook.md")
-    assert any(n.uid == "chunk:synthetic:doc:docs/billing-runbook.md:0" for n in doc.neighbours)
+    listed = [n.uid for n in issue.neighbours if n.label == "Chunk"]
+    assert listed == ["chunk:synthetic:comment:7"]
+    doc = tools.get_entity(synthetic_graph, uid=doc_uid)
+    assert not any(n.label == "Chunk" for n in doc.neighbours)
     node_rows = db.run(
         synthetic_graph, "graph/nodes", {"labels": ["WorkItem", "Document"]}, read_only=True
     )
@@ -275,5 +285,23 @@ def test_a_backfilled_body_chunk_is_not_embedded_again_by_a_later_load():
         assert db.run_text(slug, hashed).result_set[0][0] == 3  # filled when embedded
         loader.load(slug, backfill_items())
         assert embed_pending(slug, FakeEmbedder()).embedded == 0
+    finally:
+        db.delete_graph(slug)
+
+
+def test_a_long_document_still_shows_its_links():
+    """Document chunks would sort first (FROM before MENTIONS) and fill a small limit."""
+    slug = "test_entity_doc"
+    db.delete_graph(slug)
+    try:
+        body = "\n\n".join(f"para{i} " * 200 for i in range(3))  # several chunks at 1200 chars
+        doc = Document(uid="t:doc:a.md", source="t", path="a.md", title="A", body=body)
+        pr = backfill_items()[0]
+        link = Link(rel="MENTIONS", from_uid=doc.uid, from_label="Document", to_uid=pr.uid,
+                    to_label="WorkItem", source="t")  # fmt: skip
+        loader.load(slug, [doc, pr, link])
+        entity = tools.get_entity(slug, uid=doc.uid, limit=1)
+        assert [(n.rel, n.uid) for n in entity.neighbours] == [("MENTIONS", pr.uid)]
+        assert entity.neighbour_count == 1  # counts what it lists
     finally:
         db.delete_graph(slug)
