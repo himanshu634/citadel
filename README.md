@@ -38,14 +38,8 @@ wrong answer. The Keeper is the agent that stops this. It watches every question
   log: who, what, why, and who approved it.
 
 In the app, the Systems page shows each Keeper review step by step on the agent trail, with
-**Review now**, the claims waiting for a lead, and the log in its rail. Try it without an API key:
-
-```bash
-make synthetic                                  # the offline demo company
-make keeper-review SLUG=synthetic OFFLINE=1     # one review with scripted agents
-make keeper-gaps SLUG=synthetic                 # what it found
-make keeper-log SLUG=synthetic                  # what it did, and why
-```
+**Review now**, the claims waiting for a lead, and the log in its rail. A review also runs offline
+with scripted agents, so the demo company needs no API key.
 
 How a gap becomes a claim: [The self-healing loop](#the-self-healing-loop).
 
@@ -133,22 +127,11 @@ The diagrams are Excalidraw scenes: open the `.excalidraw` files in
 to edit them, then export SVG over the old one. The `.mmd` files are the Mermaid sources the
 scenes were first generated from.
 
-## Quick start
+## Running it
 
-Full setup, prerequisites and troubleshooting: **[DEVELOPMENT.md](DEVELOPMENT.md)**.
-
-```bash
-make setup        # uv sync + .env from .env.example
-make up           # FalkorDB on :6379, Browser UI on http://localhost:3000
-make synthetic    # offline demo company, no tokens needed
-make query SLUG=synthetic TOOL=owners_vs_experts
-make dev          # API on :8000 + app on http://localhost:5173
-```
-
-With a GitHub token, `make sync` builds `brain_falkordb` from the FalkorDB repo itself. With
-`ANTHROPIC_API_KEY` set, `make ask SLUG=synthetic Q="who knows Auth?"` gets an answer from Claude.
-`make keeper-review SLUG=synthetic OFFLINE=1` runs one Keeper review with scripted agents, no key
-needed.
+Setup, prerequisites, every command and troubleshooting: **[DEVELOPMENT.md](DEVELOPMENT.md)**.
+An offline synthetic company runs with no tokens. A GitHub token builds a brain from a public repo,
+and an Anthropic API key turns on Ask and the Keeper's review jobs.
 
 ## The graph
 
@@ -188,7 +171,7 @@ purpose, parameters, returns, example.
 | `tools/people_activity.cypher` | People with how many PRs they authored and reviewed, bots excluded (dashboard overview) |
 | `tools/graph_stats.cypher` | Node and relationship counts per type |
 
-### Schema (`make schema`)
+### Schema
 
 | File | Purpose |
 |---|---|
@@ -197,7 +180,7 @@ purpose, parameters, returns, example.
 | `schema/vector_index.cypher` | HNSW cosine vector index on `Chunk.embedding` (dimension from `EMBEDDING_DIM`) |
 | `schema/list_indexes.cypher` | List indexes; used to warn when the vector dimension does not match |
 
-### Load (write side: `make ingest`)
+### Load (write side, run by ingest)
 
 | File | Purpose |
 |---|---|
@@ -258,7 +241,7 @@ apps/brain/       Python 3.12 (uv): the engine. CLI: brain
                     testing (pytest graph fixtures)
   queries/          schema/, load/, tools/, graph/, chat/, keeper/, ledger/  (every Cypher query)
   examples/         synthetic_company/ (offline demo data + generator)
-  tests/            pytest; graph tests use a real FalkorDB (make up) and throwaway graphs
+  tests/            pytest; graph tests use a real FalkorDB and throwaway graphs
 apps/agents/      Python: agents that use the brain through named tools. CLI: agents
   agents/           loop, graph, ask, toolset, traces, keeper/ (gaps, noticing, review, rules,
                     ledger store), roles/, policies/, prompts/, work/, sim/, acl, llm,
@@ -274,7 +257,7 @@ data/             gitignored: raw API caches, build history, traces
 ```
 
 Dependencies run one way: backend, then agents, then brain (checked by
-`apps/brain/tests/test_package_boundaries.py`). `make test` runs the suites of all three packages.
+`apps/brain/tests/test_package_boundaries.py`).
 
 ## AI usage
 
