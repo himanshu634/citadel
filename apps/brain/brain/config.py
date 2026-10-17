@@ -67,10 +67,10 @@ class Settings(BaseSettings):
     anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     anthropic_max_tokens: int = 64000
 
-    # The Keeper's limits (budget per run, budget during a build, cap on notices).
-    keeper_budget: int = 5
-    keeper_build_budget: int = 3
-    keeper_notice_cap: int = 10
+    # The Keeper's limits. A budget is the number of gaps one review run decides.
+    keeper_budget: int = 5  # on-demand review (Review now, `agents keeper review`)
+    keeper_build_budget: int = 3  # the review the app starts after a build
+    keeper_notice_cap: int = 10  # max new gaps per noticing run
 
     @field_validator(
         "falkordb_username",
