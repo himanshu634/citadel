@@ -296,6 +296,15 @@
 	let srcInvalid = $state<SourceConfig>({ type: 'github', repo: 'platform', include: ['commits'] });
 	let srcDocs = $state<SourceConfig>({ type: 'local_docs', path: 'data/inbox/acme_labs/docs' });
 	let srcJsonl = $state<SourceConfig>({ type: 'canonical_jsonl', path: '' });
+	let srcLinear = $state<SourceConfig>({ type: 'linear', workspace: 'synthetic-co', teams: ['IDN', 'PAY'] });
+	let srcLinearEmpty = $state<SourceConfig>({ type: 'linear', workspace: '', teams: [] });
+	let srcLinearBad = $state<SourceConfig>({ type: 'linear', workspace: 'Synthetic Co', teams: ['IDN', 'PAY-1', '9OPS'] });
+	const linearBadErrors = [
+		{ loc: ['sources', 10, 'workspace'], msg: "String should match pattern '^[a-z0-9-]+$'" },
+		{ loc: ['sources', 10, 'teams', 1], msg: "String should match pattern '^[A-Z][A-Z0-9]{0,6}$'" },
+		{ loc: ['sources', 10, 'teams', 2], msg: "String should match pattern '^[A-Z][A-Z0-9]{0,6}$'" }
+	];
+	let srcLinearPublic = $state<SourceConfig>({ type: 'linear', workspace: 'acme', teams: [] });
 	const previewYaml = [
 		'slug: acme_labs',
 		'name: Acme Labs',
@@ -682,7 +691,8 @@
 			One card per source in the add-company form. GitHub: the repository, what to read, and what
 			GitHub said about it (found, rate limited), a note when no token exists, and an error when
 			GitHub cannot find the repository or when it is private while the data permission is not Own. Folder sources take one
-			path.
+			path. Linear: the workspace and its team keys; an error banner while the data permission is
+			Public, and the API's pattern errors as sentences under their field.
 		</p>
 		<div class="sources">
 			<SourceCard bind:source={srcFound} index={0} dataPermission="public" errors={[]} onremove={noop} checks={checksFound} />
@@ -707,6 +717,10 @@
 				onremove={noop}
 				checks={checksFound}
 			/>
+			<SourceCard bind:source={srcLinear} index={8} dataPermission="synthetic" errors={[]} onremove={noop} checks={checksFound} />
+			<SourceCard bind:source={srcLinearEmpty} index={9} dataPermission="own" errors={[{ loc: ['sources', 9, 'workspace'], msg: "String should match pattern '^[a-z0-9-]+$'" }]} onremove={noop} checks={checksFound} />
+			<SourceCard bind:source={srcLinearBad} index={10} dataPermission="own" errors={linearBadErrors} onremove={noop} checks={checksFound} />
+			<SourceCard bind:source={srcLinearPublic} index={11} dataPermission="public" errors={[]} onremove={noop} checks={checksFound} />
 		</div>
 	</Card>
 
@@ -721,6 +735,10 @@
 			<figure>
 				<CompanyForm bind:draft={formNew} section="company" errors={[]} />
 				<figcaption>Company step, empty</figcaption>
+			</figure>
+			<figure>
+				<CompanyForm bind:draft={formNew} section="sources" errors={[]} />
+				<figcaption>Sources step, Public data: Linear is off, with the reason</figcaption>
 			</figure>
 			<figure>
 				<CompanyForm bind:draft={formErrors} section="company" errors={formErrorList} />
