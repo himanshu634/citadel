@@ -199,6 +199,10 @@ export interface GithubTokenCheck {
 	token: 'env' | 'gh' | null;
 }
 
+export interface LinearKeyCheck {
+	key: boolean;
+}
+
 export interface GithubRepoCheck {
 	exists: boolean;
 	/** null when the repo does not exist. */

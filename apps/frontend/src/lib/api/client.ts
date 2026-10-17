@@ -14,6 +14,7 @@ import type {
 	Feedback,
 	GithubRepoCheck,
 	GithubTokenCheck,
+	LinearKeyCheck,
 	Entity,
 	GraphView,
 	ModelsOut,
@@ -128,6 +129,8 @@ export const api = {
 			'GET',
 			`/checks/github/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
 		),
+	/** Whether LINEAR_API_KEY is set; read once per API process, so a new key needs a restart. */
+	linearKey: () => request<LinearKeyCheck>('GET', '/checks/linear'),
 	/** The add-a-company dialog's lookup. 424 without a token, 429 rate limited, 502 GitHub failed. */
 	lookupRepo: (owner: string, name: string) =>
 		request<RepoLookup>(

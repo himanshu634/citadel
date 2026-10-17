@@ -1,11 +1,12 @@
 /**
- * What GitHub says about the repositories typed into source cards, and whether a token exists.
+ * What GitHub says about the repositories typed into source cards, whether a GitHub token exists,
+ * and whether a Linear API key is set.
  *
  * Why: a card learns early that a repository is private (the fetch would refuse it unless the
  * data is the company's own) or that no token is configured. The wizard also needs the answers to
  * decide whether Continue is open, so they live here, keyed by `owner/name`, and not in a card.
- * Only a private repository without `own` blocks (see `repoErrors`): not found, a missing token,
- * a rate limit or a GitHub outage are notes the card shows, and must not stop anyone from adding
+ * Only a private repository without `own` blocks (see `repoErrors`): not found, a missing token or
+ * Linear key, a rate limit or a GitHub outage are notes the card shows, and must not stop anyone from adding
  * a company. A check that has no answer yet counts as pending (`pending`), so Continue waits.
  */
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
@@ -31,6 +32,8 @@ function failure(error: unknown): RepoResult {
 export class RepoChecks {
 	/** Where a token comes from; null when there is none; undefined until known (or API down). */
 	token = $state<'env' | 'gh' | null | undefined>(undefined);
+	/** Whether LINEAR_API_KEY is set; undefined until known (or API down). */
+	linearKey = $state<boolean | undefined>(undefined);
 	results = new SvelteMap<string, RepoResult>();
 	checking = new SvelteSet<string>();
 
@@ -41,6 +44,14 @@ export class RepoChecks {
 			this.token = (await api.githubToken()).token;
 		} catch {
 			this.token = undefined;
+		}
+	}
+
+	async checkLinearKey(): Promise<void> {
+		try {
+			this.linearKey = (await api.linearKey()).key;
+		} catch {
+			this.linearKey = undefined;
 		}
 	}
 
