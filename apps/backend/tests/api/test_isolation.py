@@ -11,8 +11,8 @@ from backend import registry
 from backend.api import create_app
 from backend.api.companies import status_of
 from backend.testing import second_company
-from brain import embeddings, tools
-from brain.testing import FakeEmbedder, needs_graph, synthetic_company
+from brain import db, embeddings, tools
+from brain.testing import FakeEmbedder, load_company, needs_graph, synthetic_company
 from fastapi.testclient import TestClient
 
 pytestmark = needs_graph
@@ -91,15 +91,29 @@ def fake_embedder():
     embeddings.set_embedder(None)
 
 
+@pytest.fixture
+def own_graphs():
+    """Both companies in graphs of this test's own, deleted afterwards. The test embeds them:
+    the session graphs (synthetic_graph, second_graph) must stay unembedded for later tests."""
+    slugs = {"synthetic": "test_iso_synthetic", "second": "test_iso_second"}
+    for slug in slugs.values():
+        db.delete_graph(slug)
+    load_company(synthetic_company(slugs["synthetic"]))
+    load_company(second_company(slugs["second"]))
+    yield slugs
+    for slug in slugs.values():
+        db.delete_graph(slug)
+
+
 def test_every_company_route_answers_only_for_its_company(
-    api_root, runner, gate, monkeypatch, synthetic_graph, second_graph, fake_embedder
+    api_root, runner, gate, monkeypatch, own_graphs, fake_embedder
 ):
     monkeypatch.setattr("backend.api.companies.status_of", status_of)  # the real graph status
-    registry.write_new(synthetic_company(synthetic_graph))
-    registry.write_new(second_company(second_graph))
+    registry.write_new(synthetic_company(own_graphs["synthetic"]))
+    registry.write_new(second_company(own_graphs["second"]))
     client = TestClient(create_app(runner))
     gate.set()
-    slugs = {"synthetic": synthetic_graph, "second": second_graph}
+    slugs = own_graphs
     for slug in slugs.values():
         client.post(f"/api/companies/{slug}/builds", json={})
         wait_done(runner, slug)
