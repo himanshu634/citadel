@@ -107,7 +107,9 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
 - **Chunks** (`chunking.py`, loader): `Chunk -[:FROM]-> WorkItem|Document`, kinds `comment`
   (uid `chunk:<comment uid>`), `work_item` (`chunk:<uid>:body`, title + body) and `document`
   (`chunk:<uid>:<idx>`, cut by `split_text` at 1200 chars; a shorter document loses its extra
-  chunks). Each carries `text_hash`.
+  chunks). Each carries `text_hash`. Before the embed stage, `pipeline.ingest` runs
+  `loader.backfill_body_chunks` (`load/backfill_body_chunks`): a work item with no body chunk
+  (an upgraded graph; the cursor skips old items) gets one, with the same text a load writes.
 - **`embeddings.py`**: `Embedder` protocol (`passages` / `query`), fastembed provider
   (`BAAI/bge-base-en-v1.5`, 768 dims, ONNX on CPU, no key), `get_embedder()` (None when
   `EMBEDDING_PROVIDER=none`) / `set_embedder()`. `embed_pending` is incremental: it embeds chunks

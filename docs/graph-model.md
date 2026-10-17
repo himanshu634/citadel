@@ -60,6 +60,10 @@ A `Chunk` is a piece of text with a vector. Three kinds, each `FROM` its source:
 | `work_item` | `chunk:<work item uid>:body` | the title, then the body, of a PR, issue, ticket or thread |
 | `document` | `chunk:<document uid>:<idx>` | the title, then the body, cut at blank lines into pieces of up to 1200 characters; `idx` is the piece's position. A document that shrinks loses its extra chunks |
 
+Before the embed stage, every ingest backfills a `work_item` chunk for any WorkItem that has
+none (`load/backfill_body_chunks`: graphs built before body chunks existed, whose old items the
+sync cursor skips); its `text_hash` is filled when it is embedded.
+
 `text_hash` fingerprints `text`. The embed stage runs after the sources are loaded and writes
 `embedding`, `embedded_hash` (the `text_hash` it embedded) and `embed_model`. A chunk is embedded
 again only when `text_hash` differs from `embedded_hash` or the model changed, so a re-ingest

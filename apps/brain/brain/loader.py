@@ -375,6 +375,13 @@ def _load_body_chunks(
     _run(slug, "load/prune_document_chunks", prune_rows, rep)
 
 
+def backfill_body_chunks(slug: str) -> int:
+    """Write the body chunk of every work item that has none (a graph built before work items
+    had them; an incremental ingest skips the old items). Returns the chunks written."""
+    result = db.run(slug, "load/backfill_body_chunks", {"company": slug})
+    return result[0]["n"] if result else 0
+
+
 def _load_ownership(slug: str, owns: list[Ownership], rep: LoadReport) -> None:
     """One OWNS edge per (owner, system); several patterns for the same pair are joined."""
     patterns: dict[tuple[str, str, str], list[str]] = defaultdict(list)

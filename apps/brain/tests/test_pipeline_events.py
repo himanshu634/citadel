@@ -190,3 +190,15 @@ def test_cli_path_unchanged():
     assert inspect.signature(pipeline.ingest).parameters["on_event"].default is None
     assert inspect.signature(pipeline.fetch).parameters["on_event"].default is None
     assert inspect.signature(schema.apply_schema).parameters["on_event"].default is None
+
+
+@needs_graph
+def test_an_incremental_ingest_backfills_missing_body_chunks(events_company, embeddings_off):
+    """A graph built before work items had body chunks: the cursor skips the old items, so only
+    the backfill can give them one."""
+    pipeline.ingest(events_company, full=True)
+    count = "MATCH (c:Chunk {kind: 'work_item'}) RETURN count(c)"
+    assert db.run_text(events_company, count).result_set[0][0] == 15
+    db.run_text(events_company, "MATCH (c:Chunk {kind: 'work_item'}) DETACH DELETE c")
+    pipeline.ingest(events_company)
+    assert db.run_text(events_company, count).result_set[0][0] == 15

@@ -10,8 +10,10 @@ are always loaded, which is cheap and keeps edges complete.
 `full=True` ignores the cursor, and so does a changed `window.since` (widening the window must
 pull in records older than the cursor).
 
-After the sources, the embed stage gives new or changed Chunk text its vectors (see
-`embeddings.embed_pending`); without a usable model it is skipped, never failed.
+After the sources, every work item still without a body chunk gets one (graphs built before
+work items had them; the cursor skips old items), then the embed stage gives new or changed
+Chunk text its vectors (see `embeddings.embed_pending`); without a usable model it is skipped,
+never failed.
 """
 
 from __future__ import annotations
@@ -154,5 +156,6 @@ def ingest(
         latest = next_cursor(records, cursor, datetime.now(UTC))
         loader.set_sync_state(slug, adapter.name, key, latest, window_since, result.loaded)
         emit(BuildEvent(slug, "load", "done", key, count=sum(loaded.written.values())))
+    loader.backfill_body_chunks(slug)  # graphs built before work items had body chunks
     report.embed = embeddings.embed_pending(slug, on_event=emit)
     return report

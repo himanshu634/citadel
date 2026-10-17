@@ -10,8 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 from brain import db, loader, tools
-from brain.canonical import Document
-from brain.testing import load_company, needs_graph, synthetic_company
+from brain.canonical import Document, WorkItem
+from brain.embeddings import embed_pending
+from brain.testing import FakeEmbedder, load_company, needs_graph, synthetic_company
 from redis.exceptions import ResponseError
 
 pytestmark = needs_graph
@@ -217,5 +218,62 @@ def test_shrunk_document_leaves_no_stale_chunks():
         loader.load(slug, [doc("one short paragraph")])
         rows = db.run_text(slug, chunks)
         assert [r[0] for r in rows.result_set] == ["chunk:t:doc:a.md:0"]
+    finally:
+        db.delete_graph(slug)
+
+
+BODY_CHUNKS = (
+    "MATCH (c:Chunk {kind: 'work_item'})-[:FROM]->(w:WorkItem) "
+    "RETURN c.uid, c.text, c.company, c.created_at, c.ts, c.source, c.url, w.uid ORDER BY c.uid"
+)
+
+
+def backfill_items() -> list[WorkItem]:
+    """A body, a body of only line breaks (it reads as no body), and no body at all."""
+
+    def item(n: int, title: str, body: str) -> WorkItem:
+        return WorkItem(
+            uid=f"t:pr:{n}", source="t", url=f"https://example.com/pull/{n}", kind="pull_request",
+            number=n, title=title, body=body, state="open", created_at=f"2026-09-0{n}T12:00:00Z",
+        )  # fmt: skip
+
+    return [
+        item(1, "Retry failed charges", "Adds an idempotency key.\n\nSee #4."),
+        item(2, "Bump lockfile", "\r\n"),
+        item(3, "Rename the queue", ""),
+    ]
+
+
+def test_backfill_writes_missing_body_chunks_as_a_load_would():
+    """An upgraded graph has work items but no body chunks, and an incremental ingest skips the
+    old items; the backfill must write exactly what a load writes, then nothing."""
+    slug = "test_body_backfill"
+    db.delete_graph(slug)
+    try:
+        loader.load(slug, backfill_items())
+        loaded = db.run_text(slug, BODY_CHUNKS).result_set
+        assert len(loaded) == 3
+        db.run_text(slug, "MATCH (c:Chunk {kind: 'work_item'}) DETACH DELETE c")
+        assert loader.backfill_body_chunks(slug) == 3
+        assert db.run_text(slug, BODY_CHUNKS).result_set == loaded
+        assert loader.backfill_body_chunks(slug) == 0
+    finally:
+        db.delete_graph(slug)
+
+
+def test_a_backfilled_body_chunk_is_not_embedded_again_by_a_later_load():
+    """The backfill cannot hash in Cypher; the embed stage fills the hash from the text, and a
+    later load of the same item writes the same text, so nothing is pending."""
+    slug = "test_backfill_embed"
+    db.delete_graph(slug)
+    try:
+        loader.load(slug, backfill_items())
+        db.run_text(slug, "MATCH (c:Chunk {kind: 'work_item'}) DETACH DELETE c")
+        loader.backfill_body_chunks(slug)
+        assert embed_pending(slug, FakeEmbedder()).embedded == 3
+        hashed = "MATCH (c:Chunk) RETURN count(c.text_hash)"
+        assert db.run_text(slug, hashed).result_set[0][0] == 3  # filled when embedded
+        loader.load(slug, backfill_items())
+        assert embed_pending(slug, FakeEmbedder()).embedded == 0
     finally:
         db.delete_graph(slug)
