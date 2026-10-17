@@ -137,7 +137,7 @@ class _BuildingAware:
 @dataclass(eq=False)
 class _Run:
     slug: str
-    uid: str = field(default_factory=review_uid)  # the review it runs (unless one was running)
+    uid: str = field(default_factory=review_uid)  # the review it runs
     stop: threading.Event = field(default_factory=threading.Event)
     rebuilt: threading.Event = field(default_factory=threading.Event)  # never cleared
     started: threading.Event = field(default_factory=threading.Event)  # first event, or the end
@@ -196,14 +196,14 @@ class KeeperRuns:
     def start(self, slug: str, trigger: Trigger, budget: int) -> Review:
         """The slug's running review, else a new one (see the module doc), once the ledger has
         recorded it. Raises BrainBuilding while the slug builds, and ReviewNotStarted when,
-        after `start_wait` seconds, the run has not ended and the ledger's latest review is not
-        a running one (an older review is never returned as the new one)."""
+        after `start_wait` seconds, the ledger's latest review is not this run's (an older
+        review is never returned as the new one). A quick run may already have ended."""
         run = self._launch(slug, trigger, budget)
         run.started.wait(self.start_wait)
         if run.ended and run.result is not None:
             return run.result  # as it ended
         current = self.current(slug)
-        if current is None or not (run.ended or current.state == "running"):
+        if current is None or current.uid != run.uid:
             raise ReviewNotStarted(f"The review of {slug} did not start in time.")
         return current
 
