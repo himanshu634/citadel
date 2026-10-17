@@ -169,9 +169,10 @@ did, and no case was changed to pass. 17 failed runs (Haiku 6, Sonnet 11), by ca
   ranked row. Telling the agent in `agents/system_prompt.md` to cite the rows a ranking names, not
   only its subject, is the likely fix. It is not made here, so the baseline measures the shipped
   prompt.
-- **Too many steps** (2 runs, Haiku): `semantic-own-database` (6 tool calls, limit 5) and
-  `semantic-container-privileges` (9, limit 6) tried several full-text wordings before
-  `semantic_search`. Both answers were right.
+- **Too many steps** (2 runs, Haiku), both with right answers: `semantic-container-privileges`
+  ran `related_work_items` three times in other wordings before `semantic_search` (9 tool calls,
+  limit 6); `semantic-own-database` found the answer with `semantic_search` on its third call,
+  then looked up three entities with `get_entity` (6 calls, limit 5).
 - **Skipped semantic search** (1 run, Haiku): `semantic-overcharge` answered from full-text hits
   alone; the case expects `semantic_search`, because the question shares no words with the issue.
 - **No answer** (1 run, Haiku): in `no-real-names` #2 Haiku called `submit_answer` with markers
