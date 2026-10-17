@@ -143,6 +143,23 @@ ledger, which survives a rebuild of the brain).
 | **Concurrency** | Every status move is guarded in its Cypher (`WHERE c.status IN $from`), so of two racing approvals, or an approve and a reject, one wins and the other changes nothing (HTTP 409). One review per company at a time; nothing reviews or decides while the company rebuilds | `queries/ledger/set_claim_status.cypher`, `agents/keeper/decide.py` (`ClaimNotPending`), `backend/keeper_runs.py` | `test_claim_status_guard` (memory store and real FalkorDB), `test_approve_twice` |
 | **Isolation** | One graph per company; `brain/db.py` is the only place that opens a connection and picks the graph, and the API resolves the slug in one place. A permission table says which database user (`citadel_brain`, `citadel_keeper`, `citadel_pm`, `citadel_qa`, ...) may read or write which graph; the ledger store checks it on every read and write. The same table renders `ACL SETUSER` lines for FalkorDB, not yet applied: today all users share one connection | `brain/db.py`, `backend/api/deps.py`, `agents/acl.py` | `apps/backend/tests/api/test_isolation.py`, `test_acl_refused`, `test_keeper_acl.py` |
 
+## Evals
+
+`make eval` asks Claude fixed questions against a loaded brain and grades each answer with
+deterministic checks: the uids it cites, the graph tools it ran, its text and its step count.
+Expected uids on the live repo are read from the graph when the run starts, so cases follow the
+data. Each case ran 3 times (2026-10-17, same graphs and agent code for every run):
+
+| Company | Cases | Haiku 5.5 (baseline, the default) | Sonnet 5.5 |
+|---|---:|---:|---:|
+| synthetic (offline demo) | 17 | 48/51 runs (94%) | 45/51 (88%) |
+| falkordb (FalkorDB/FalkorDB repo) | 23 | 66/69 runs (96%) | 64/69 (93%) |
+
+No run errored. Every one of Sonnet's failed runs named the right answer but cited a coarser node
+than the case asks for. Tables by tag and case, the known misses, the method and how to rerun:
+**[docs/evals.md](docs/evals.md)** (generated from the result files in
+[docs/evals/](docs/evals/)).
+
 ## Running it
 
 Setup, prerequisites, every command and troubleshooting: **[DEVELOPMENT.md](DEVELOPMENT.md)**.

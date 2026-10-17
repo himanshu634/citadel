@@ -255,7 +255,8 @@ follow the data. Each case runs `REPEAT` times and reports a pass rate; turns of
 thread. Case files: `synthetic.yaml` (the offline company, fixed answers) and `falkordb.yaml` (the
 live FalkorDB repo: rankings only as gold refs, literals only for merged PR/issue pairs and bot
 uids, several questions taken from real Ask traces). Results: `data/evals/<slug>/<time>-<model>-<effort>.jsonl`; `BASELINE=` diffs pass rates
-against an earlier file. The `[semantic]` cases ask in words with no full-text overlap (the
+against an earlier file; `make eval-report FILES=...` (`evals/report.py`) turns result files into the
+Markdown tables of docs/evals.md (published runs: `docs/evals/<slug>/`). The `[semantic]` cases ask in words with no full-text overlap (the
 graph must be embedded). It calls the API, so it is not part of `make test`;
 `apps/agents/tests/test_evals.py` checks the case files and the harness with the scripted client.
 `evals/drafts.py` (`make eval-drafts`) turns thumbs-down traces into cases `fb-<trace id>`: the
