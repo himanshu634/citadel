@@ -209,6 +209,7 @@
         max_steps: 5
     - question: Give me their names instead of GitHub ids.
       expect:
+        text_none: [avi avni, dvir dukhan, guy korland]  # names read off the logins or known from elsewhere
         text_re: "(no|not|n't|without) (\\w+ )?(a |any )?(real |display |full )?names?|names? (is|are|field is) (empty|missing|not (recorded|stored|available|in))|only (\\w+ )?(their )?(github )?(logins|ids|usernames|handles)"
         max_steps: 6
 

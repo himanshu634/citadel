@@ -129,6 +129,21 @@ def test_each_check_fails_on_its_own():
     ]  # fmt: skip
 
 
+def test_a_tool_that_failed_did_not_run():
+    """tools_any/all count only calls that returned rows; tools_none and max_steps count every
+    call (an attempt is still the wrong move, and still a step)."""
+    e = Expect(tools_any=["semantic_search"], tools_none=["record_testimony"], max_steps=2)
+    checks = grade(
+        e,
+        _gold(),
+        text="ok",
+        cited=[],
+        tools=["semantic_search", "record_testimony"],
+        failed=["semantic_search", "record_testimony"],
+    )
+    assert _failed(checks) == ["tools_any", "tools_none"]
+
+
 def test_no_answer_fails_once_and_stops_grading():
     checks = grade(Expect(text_all=["x"]), _gold(), text=None, cited=[], tools=[])
     assert [(c.name, c.ok) for c in checks] == [("answered", False)]
