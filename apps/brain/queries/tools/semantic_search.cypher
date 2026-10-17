@@ -16,12 +16,19 @@
 //          the many comment chunks could crowd out every document. The best chunk is picked
 //          by reduce (lowest score, then lowest uid), not by collect order, which is not
 //          guaranteed; ties between sources fall back to uid too. The author is min(login), so
-//          a source with two AUTHORED edges is still one row. Never returns a vector.
+//          a source with two AUTHORED edges is still one row. Bot text (a comment by, or the
+//          body of a work item authored by, a Person with is_bot = true) is never returned, as
+//          chunks_to_embed never embeds it; this also hides vectors written before that rule.
+//          Like $kinds it filters after the nearest-neighbour step. Never returns a vector.
 // example: make query TOOL=semantic_search P="text='why do invoices get charged twice'"
 CALL db.idx.vector.queryNodes('Chunk', 'embedding', $k, vecf32($vector)) YIELD node, score
 WITH node AS c, score
 WHERE $kinds IS NULL OR c.kind IN $kinds
+OPTIONAL MATCH (commenter:Person {uid: c.author_uid})
+WITH c, score, commenter
+WHERE coalesce(commenter.is_bot, false) = false
 MATCH (c)-[:FROM]->(src)
+WHERE NOT (c.kind = 'work_item' AND (src)<-[:AUTHORED]-(:Person {is_bot: true}))
 WITH src, collect({chunk: c, uid: c.uid, score: score}) AS hits
 WITH src, reduce(best = null, h IN hits |
        CASE WHEN best IS NULL OR h.score < best.score

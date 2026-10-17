@@ -29,8 +29,14 @@ def fresh_synthetic():
 
 
 def count_chunks(slug: str) -> int:
-    """Chunks with text: the ones the embed stage must embed."""
-    rows = db.run_text(slug, "MATCH (c:Chunk) WHERE trim(c.text) <> '' RETURN count(c)")
+    """Chunks with text and not by a bot: the ones the embed stage must embed (the synthetic
+    company has one bot comment, ci-bot's coverage report)."""
+    rows = db.run_text(
+        slug,
+        "MATCH (c:Chunk) WHERE trim(c.text) <> '' "
+        "OPTIONAL MATCH (p:Person {uid: c.author_uid}) "
+        "WITH c, p WHERE coalesce(p.is_bot, false) = false RETURN count(c)",
+    )
     return rows.result_set[0][0]
 
 
