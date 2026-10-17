@@ -321,6 +321,12 @@ describe('stepSentence', () => {
 		expect(stepSentence(paths, true)).toBe('Found how alice and carol connect');
 	});
 
+	test('semantic_search reads as a search by meaning', () => {
+		const step = { tool: 'semantic_search', input: { text: 'why charges double' } };
+		expect(stepSentence(step)).toBe('Searching by meaning for "why charges double"');
+		expect(stepSentence(step, true)).toBe('Searched by meaning for "why charges double"');
+	});
+
 	test('a tool it does not know is named as it is', () => {
 		expect(stepSentence({ tool: 'mystery', input: {} })).toBe('Running mystery');
 		expect(stepSentence({ tool: 'mystery', input: {} }, true)).toBe('Ran mystery');
@@ -418,6 +424,15 @@ describe('ledgerItems', () => {
 	test('different tools are not folded together', () => {
 		const items = ledgerItems([history(1, 'Auth'), call(2, 'experts_for_system', { system: 'Auth' }), history(3, 'Billing')], true);
 		expect(items.map((i) => i.steps.map((s) => s.n))).toEqual([[1], [2], [3]]);
+	});
+
+	test('repeated searches by meaning fold into one row with each text', () => {
+		const items = ledgerItems(
+			[call(1, 'semantic_search', { text: 'retries' }), call(2, 'semantic_search', { text: 'double charge' })],
+			true
+		);
+		expect(items).toHaveLength(1);
+		expect(items[0].sentence).toBe('Searched by meaning 2 times: "retries", "double charge"');
 	});
 
 	test('a tool with no repeat wording says how many more there were', () => {

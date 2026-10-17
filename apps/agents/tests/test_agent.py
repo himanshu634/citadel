@@ -83,6 +83,13 @@ def test_request_shape_uses_settings_and_a_stable_prefix():
     assert req["messages"][0]["content"][0]["text"].startswith("Company: Synthetic Co (synthetic)")
 
 
+def test_prompt_says_how_to_use_a_semantic_search_hit():
+    """A hit is cited by its source uid; its chunk_uid opens the whole passage. No dates: the
+    prompt must stay a cacheable constant."""
+    bullet = next(b for b in loop.SYSTEM_PROMPT.split("\n- ") if "`semantic_search` once" in b)
+    assert "`uid`" in bullet and "`chunk_uid`" in bullet and "`get_entity`" in bullet
+
+
 def test_citing_an_unseen_uid_is_rejected_then_corrected():
     client = FakeClient(
         reply(tool_use("t1", "related_work_items", {"text": "jwt"})),

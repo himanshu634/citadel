@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     linear_api_key: str | None = None
 
     embedding_dim: int = 768
+    # fastembed runs a model on this machine; gemini sends chunk text and questions to Google's
+    # Gemini API (billed to GEMINI_API_KEY's project); none turns semantic search off.
+    embedding_provider: Literal["fastembed", "gemini", "none"] = "fastembed"
+    embedding_model: str | None = None  # None: the provider's default (embeddings.DEFAULT_MODEL)
+    gemini_api_key: str | None = None
 
     # Claude answers questions over the graph (the agents package). pydantic-settings reads .env
     # but does not export it, so agents/llm.py passes the key on; unset lets the SDK use its own
@@ -73,6 +78,8 @@ class Settings(BaseSettings):
         "github_token",
         "linear_api_key",
         "anthropic_api_key",
+        "embedding_model",
+        "gemini_api_key",
         mode="before",
     )
     @classmethod

@@ -57,20 +57,24 @@ STEP_EVENTS = {
         ("load", "running", SRC),
         ("load", "done", SRC),
     ],
+    # once for the whole company, after every source's ingest: start, one batch, done
+    "embed": [("embed", "running", None), ("embed", "running", None), ("embed", "done", None)],
 }
 
 
 class FakeSteps:
     """Records calls and emits the real pipeline's events, per source in `sources` (default one,
     SRC). Fetch covers the sources in its `keys` (all for None), like pipeline.fetch; a source
-    in `skip_records` stops at a skipped records stage, like an unavailable source. `gate` (when
-    given) blocks `prepare` after `gate_at` of its events until the test sets it. `fail_on` makes
-    that step raise after `fail_after` of its events (default: before its last one)."""
+    in `skip_records` stops at a skipped records stage, like an unavailable source; ingest ends
+    with the company's embed stage. `gate` (when given) blocks the `gate_in` step (default
+    prepare) after `gate_at` of its events until the test sets it. `fail_on` makes that step
+    raise after `fail_after` of its events (default: before its last one)."""
 
     def __init__(
         self,
         gate: threading.Event | None = None,
         gate_at: int = 1,
+        gate_in: str = "prepare",
         fail_on: str | None = None,
         fail_after: int | None = None,
         sources: list[str] | None = None,
@@ -78,6 +82,7 @@ class FakeSteps:
     ):
         self.gate = gate
         self.gate_at = gate_at
+        self.gate_in = gate_in
         self.fail_on = fail_on
         self.fail_after = fail_after
         self.source_keys = sources if sources is not None else [SRC]
@@ -102,7 +107,7 @@ class FakeSteps:
                 events += [("records", "running", key), ("records", "skipped", key)]
             else:
                 events += [(stage, status, key) for stage, status, _ in STEP_EVENTS["ingest"]]
-        return events
+        return events + STEP_EVENTS["embed"]
 
     def _step(self, name, slug, on_event, keys=None):
         events = self._events(name, keys)
@@ -110,10 +115,10 @@ class FakeSteps:
         for i, (stage, status, source) in enumerate(events):
             if name == self.fail_on and i == fail_at:
                 raise RuntimeError("boom")
-            if name == "prepare" and self.gate is not None and i == self.gate_at:
+            if name == self.gate_in and self.gate is not None and i == self.gate_at:
                 assert self.gate.wait(5), "test never opened the gate"
             on_event(BuildEvent(slug, stage, status, source))
-        if name == "prepare" and self.gate is not None and self.gate_at == len(events):
+        if name == self.gate_in and self.gate is not None and self.gate_at == len(events):
             assert self.gate.wait(5), "test never opened the gate"
 
     def sources(self, slug, keys):

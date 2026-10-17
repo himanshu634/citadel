@@ -10,7 +10,8 @@ with uids, and urls where the node has one, so every answer can cite its sources
     experts_for_system("falkordb", system="CI")              # same, typed signature
 
 `prepare` turns friendly parameters into query parameters (days -> epoch seconds, plain text ->
-a RediSearch query, login -> person uid). It never builds Cypher.
+a RediSearch query or, for semantic search, the question's embedding, login -> person uid). It
+never builds Cypher.
 """
 
 from __future__ import annotations
@@ -19,12 +20,13 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from brain import db
 from brain.canonical import person_uid
+from brain.embeddings import EmbeddingUnavailable, get_embedder
 
 DAY = 86_400
 
@@ -199,6 +201,30 @@ class RelatedDocument(_Model):
     mentions: list[ItemRef]
 
 
+class SemanticParams(_Model):
+    text: str = Field(description="The question in plain words, e.g. 'why do invoices fail'.")
+    limit: int = Field(8, ge=1, le=30)
+    kinds: list[Literal["comment", "work_item", "document"]] | None = Field(
+        None, description="Only search these chunk kinds (default: all)."
+    )
+
+
+class SemanticHit(_Model):
+    uid: str  # the WorkItem or Document the best chunk comes from: cite this, not the chunk
+    label: str
+    kind: str  # the WorkItem's kind (pull_request / issue / ticket / thread) or 'document'
+    number: int | None
+    title: str
+    state: str | None
+    url: str | None
+    chunk_uid: str
+    chunk_kind: str
+    snippet: str
+    similarity: float  # 0..1, higher is closer
+    author: str | None
+    systems: list[str]
+
+
 class PersonParams(_Model):
     login: str = Field(description="Login / handle, e.g. 'erin' (case-insensitive).")
     limit: int = Field(5, ge=1, le=50, description="Max entries per list.")
@@ -365,6 +391,47 @@ def _text(p: dict[str, Any]) -> dict[str, Any]:
     return {"query": query, "words": query.split("|") if query else [], "limit": p["limit"]}
 
 
+SEMANTIC_OFF = (
+    "Semantic search is off: set EMBEDDING_PROVIDER=fastembed (or gemini) and run make embed."
+)
+SEMANTIC_MAX_K = 200
+
+
+def _semantic(p: dict[str, Any]) -> dict[str, Any]:
+    """Embed the question. Blank text gives no vector (and no search) without touching the model.
+    The kinds filter runs after the nearest-neighbour step, so with kinds set the query fetches
+    the most chunks it may, or comments could crowd out every document. No kinds (or an empty
+    list) means every kind."""
+    kinds = p["kinds"] or None
+    k = SEMANTIC_MAX_K if kinds else min(p["limit"] * 4, SEMANTIC_MAX_K)
+    out = {"vector": None, "k": k, "limit": p["limit"], "kinds": kinds}
+    if not p["text"].strip():
+        return out
+    embedder = get_embedder()
+    if embedder is None:
+        raise EmbeddingUnavailable(SEMANTIC_OFF)
+    return {**out, "vector": embedder.query(p["text"]), "model": embedder.model}
+
+
+def _no_semantic_hits(slug: str, model: str) -> None:
+    """A semantic search found nothing: raise when that is because the graph has no vectors
+    from `model` (none at all, or another model's), so the agent hears why instead of reading
+    "nothing matched". Returns when vectors from `model` are there (the filters left nothing)."""
+    models = {r["model"]: r["n"] for r in db.run(slug, "load/embedded_models", read_only=True)}
+    if model in models:
+        return
+    if not models:
+        raise EmbeddingUnavailable(
+            f"Nothing in this company's graph is embedded yet, so semantic search finds nothing. "
+            f"Run make embed SLUG={slug}."
+        )
+    others = ", ".join(str(m) for m in models)
+    raise EmbeddingUnavailable(
+        f"This company's text was embedded with {others}, not {model}, so semantic search "
+        f"cannot compare it with the question. Run make embed SLUG={slug} to embed it again."
+    )
+
+
 def _person(p: dict[str, Any]) -> dict[str, Any]:
     return {"person_uid": person_uid(p["login"]), "limit": p["limit"]}
 
@@ -436,6 +503,15 @@ TOOLS: dict[str, Tool] = {
             _text,
         ),
         Tool(
+            "semantic_search",
+            "Work items and documents whose text means the same as the question, even in other "
+            "words (semantic search). Use for why/how questions; use related_work_items for "
+            "exact names, numbers and keys.",
+            SemanticParams,
+            SemanticHit,
+            _semantic,
+        ),
+        Tool(
             "person_profile",
             "One person's teams, systems, recent PRs, reviews and declared ownership.",
             PersonParams,
@@ -502,7 +578,11 @@ def call(slug: str, name: str, **params: Any) -> list[_Model]:
     query_params = tool.prepare(tool.params.model_validate(params).model_dump())
     if query_params.get("query") == "":  # full-text search with no usable words
         return []
+    if "vector" in query_params and query_params["vector"] is None:  # semantic, blank question
+        return []
     rows = db.run(slug, tool.query, query_params, read_only=True)
+    if not rows and "vector" in query_params:
+        _no_semantic_hits(slug, query_params["model"])
     return [tool.row.model_validate(_plain(r)) for r in rows]
 
 
@@ -546,6 +626,12 @@ def related_work_items(slug: str, text: str, limit: int = 10) -> list[RelatedWor
 
 def related_documents(slug: str, text: str, limit: int = 5) -> list[RelatedDocument]:
     return call(slug, "related_documents", text=text, limit=limit)
+
+
+def semantic_search(
+    slug: str, text: str, limit: int = 8, kinds: list[str] | None = None
+) -> list[SemanticHit]:
+    return call(slug, "semantic_search", text=text, limit=limit, kinds=kinds)
 
 
 def person_profile(slug: str, login: str) -> PersonProfile | None:

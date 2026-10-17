@@ -1161,6 +1161,10 @@
 			<BuildProgress snapshot={builds.skippedSource} />
 			<h3 class="sub">Rebuild</h3>
 			<BuildProgress snapshot={builds.rebuild} />
+			<h3 class="sub">Loading the model, embedding text, and embeddings off</h3>
+			<BuildProgress snapshot={builds.embedLoading} />
+			<BuildProgress snapshot={builds.embedding} />
+			<BuildProgress snapshot={builds.embedSkipped} />
 			<h3 class="sub">Done</h3>
 			<BuildProgress snapshot={builds.done}>
 				{#snippet actions()}

@@ -19,6 +19,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from .conftest import write
 
 TERMINAL = {"done", "failed", "stopped"}
+BUILD_STAGES = ["prepare", "fetch", "records", "normalize", "load", "embed"]
 
 
 @pytest.fixture
@@ -101,8 +102,8 @@ def test_status_shows_building(client, company):
     assert listed["status"] == "building"
     assert listed["build"]["state"] == "running" and listed["build"]["stage"] == "prepare"
     assert listed["build"]["kind"] == "build"
-    assert listed["build"]["stages"] == ["prepare", "fetch", "records", "normalize", "load"]
-    assert (listed["build"]["step"], listed["build"]["steps"]) == (1, 5)
+    assert listed["build"]["stages"] == BUILD_STAGES
+    assert (listed["build"]["step"], listed["build"]["steps"]) == (1, 6)
 
 
 def test_failed_build_shows_failed_with_the_error(api_root, company, tmp_path):
@@ -189,7 +190,7 @@ async def test_events_stream_sends_build_events_until_done(company, runner, gate
     assert len(sent) == len(set(sent))  # nothing sent twice
     assert sent[-1][:2] == ("done", "done")
     steps = [json.loads(m["data"])["step"] for m in rest]  # each live event carries its step
-    assert steps == sorted(steps) and steps[-1] == snap["steps"] == 5
+    assert steps == sorted(steps) and steps[-1] == snap["steps"] == 6
     assert not runner._subscribers
 
 
@@ -249,7 +250,7 @@ async def test_status_message_is_the_company_as_the_list_shows_it(client, compan
     assert out[-1] == listed  # CompanyOut: the same fields and values as GET /api/companies
     assert "config" not in out[-1] and out[-1]["name"] == "Acme Labs"
     assert out[0]["build"]["kind"] == "build"
-    assert out[0]["build"]["stages"] == ["prepare", "fetch", "records", "normalize", "load"]
+    assert out[0]["build"]["stages"] == BUILD_STAGES
 
 
 @pytest.mark.anyio

@@ -497,6 +497,8 @@ COMMENTS = [
     (5, "carol", "2026-05-12", "Looks good; identity should still review login-adjacent bits."),
     (8, "alice", "2026-07-09", "Make sure the auth service connection pool is resized."),
     (14, "bob", "2026-09-11", "Probably the batch retry from #4; needs an idempotency key."),
+    # bot noise: boilerplate that the embed stage and semantic search leave out
+    (5, "ci-bot", "2026-05-12", "Codecov report: patch coverage 91.2%, project coverage +0.4%."),
 ]
 
 DOCUMENTS = [

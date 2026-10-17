@@ -71,7 +71,7 @@ def runner_recording(tmp_path):
 
 @pytest.fixture
 def runner_failing(tmp_path):
-    return JobRunner(steps=FakeSteps(fail_on="ingest"), jobs_dir=tmp_path)
+    return JobRunner(steps=FakeSteps(fail_on="ingest", fail_after=4), jobs_dir=tmp_path)  # load
 
 
 @pytest.fixture
@@ -193,6 +193,68 @@ def test_stop_after_a_finished_stage_lands_on_the_next(tmp_path, gate):
     assert r.steps.calls == ["prepare"]
 
 
+def wait_last(r: JobRunner, slug: str, pair: tuple) -> None:
+    """Wait until the slug's latest event is `pair` (stage, status, source)."""
+    deadline = time.monotonic() + 5
+    while not r.current(slug).events or pairs(r.current(slug), 1) != [pair]:
+        assert time.monotonic() < deadline, r.current(slug)
+        time.sleep(0.01)
+
+
+def test_stop_after_the_last_sources_load_lands_on_embed(tmp_path, gate):
+    # the gate holds ingest before its `load done` (event 4 of one source)
+    r = JobRunner(steps=FakeSteps(gate=gate, gate_in="ingest", gate_at=4), jobs_dir=tmp_path)
+    r.start("a")
+    wait_last(r, "a", ("load", "running", SRC))
+    r.stop("a")
+    gate.set()
+    snap = wait_done(r, "a")
+    assert snap.state == "stopped"
+    assert pairs(snap, 2) == [("load", "done", SRC), ("embed", "stopped", None)]
+
+
+def test_stop_after_an_earlier_sources_load_lands_on_the_next_source(tmp_path, gate):
+    steps = FakeSteps(gate=gate, gate_in="ingest", gate_at=4, sources=[A, B])  # A's load done
+    r = JobRunner(steps=steps, jobs_dir=tmp_path)
+    r.start("a")
+    wait_last(r, "a", ("load", "running", A))
+    r.stop("a")
+    gate.set()
+    snap = wait_done(r, "a")
+    assert pairs(snap, 2) == [("load", "done", A), ("records", "stopped", None)]
+
+
+def test_stop_during_embed_stops_on_embed(tmp_path, gate):
+    # the gate holds ingest after embed started, before its next progress event
+    r = JobRunner(steps=FakeSteps(gate=gate, gate_in="ingest", gate_at=6), jobs_dir=tmp_path)
+    r.start("a")
+    wait_last(r, "a", ("embed", "running", None))
+    r.stop("a")
+    gate.set()
+    snap = wait_done(r, "a")
+    assert snap.state == "stopped"
+    assert pairs(snap, 2) == [("embed", "running", None), ("embed", "stopped", None)]
+    assert snap.step == snap.steps  # embed is the last step
+    assert not any(e.stage == "embed" and e.status == "done" for e in snap.events)
+
+
+def test_stop_on_the_last_embed_event_finishes_the_build(tmp_path, gate):
+    # the gate holds ingest before `embed done`, its last event (8 events for one source)
+    r = JobRunner(steps=FakeSteps(gate=gate, gate_in="ingest", gate_at=7), jobs_dir=tmp_path)
+    r.start("a")
+    deadline = time.monotonic() + 5
+    while sum(e.stage == "embed" for e in r.current("a").events) < 2:  # start and one batch
+        assert time.monotonic() < deadline, r.current("a")
+        time.sleep(0.01)
+    assert r.stop("a") is True
+    gate.set()
+    snap = wait_done(r, "a")
+    # the work was complete: done with its totals, not stopped on a stage that reported done
+    assert snap.state == "done"
+    assert pairs(snap, 2) == [("embed", "done", None), ("done", "done", None)]
+    assert snap.events[-1].totals == {"written": {"load/person": 3}, "dropped": {}}
+
+
 def test_stop_queued_job_never_runs(runner, gate):
     runner.start("a")
     runner.start("b")
@@ -306,7 +368,14 @@ def test_summary(runner, gate):
         time.sleep(0.01)
     s = runner.summary("a")
     assert (s.state, s.stage) == ("running", "prepare") and s.started_at
-    assert s.kind == "build" and s.stages == ["prepare", "fetch", "records", "normalize", "load"]
+    assert s.kind == "build" and s.stages == [
+        "prepare",
+        "fetch",
+        "records",
+        "normalize",
+        "load",
+        "embed",
+    ]
 
 
 A, B = "github:acme/a", "github:acme/b"
@@ -321,8 +390,8 @@ def test_two_source_build_counts_steps_per_source(tmp_path):
     r = JobRunner(steps=FakeSteps(sources=[A, B]), jobs_dir=tmp_path)
     r.start("a")
     snap = wait_done(r, "a")
-    # prepare, fetch a, fetch b, then records/normalize/load for a, then for b
-    assert snap.steps == 9 and snap.step == 9
+    # prepare, fetch a, fetch b, then records/normalize/load for a, then for b, then embed
+    assert snap.steps == 10 and snap.step == 10
     stamped = steps_of(snap)
     assert stamped == sorted(stamped)  # never goes backwards
     reached = {(e.stage, e.source): e.step for e in snap.events if e.status != "waiting"}
@@ -330,9 +399,10 @@ def test_two_source_build_counts_steps_per_source(tmp_path):
     assert (reached[("fetch", A)], reached[("fetch", B)]) == (2, 3)
     assert reached[("records", A)] == 4 and reached[("load", A)] == 6
     assert reached[("records", B)] == 7 and reached[("load", B)] == 9
-    assert reached[("done", None)] == 9  # the closing done keeps the last step
+    assert reached[("embed", None)] == 10  # once for the company, after every source
+    assert reached[("done", None)] == 10  # the closing done keeps the last step
     summary = r.summary("a")
-    assert (summary.step, summary.steps) == (9, 9)
+    assert (summary.step, summary.steps) == (10, 10)
 
 
 def test_skipped_records_jump_over_that_sources_ingest_steps(tmp_path):
@@ -341,14 +411,14 @@ def test_skipped_records_jump_over_that_sources_ingest_steps(tmp_path):
     snap = wait_done(r, "a")
     reached = {(e.stage, e.source): e.step for e in snap.events if e.status != "waiting"}
     assert reached[("records", A)] == 4 and reached[("records", B)] == 7
-    assert snap.step == snap.steps == 9
+    assert snap.step == snap.steps == 10
 
 
 def test_rebuild_without_fetch_counts_reset_and_no_fetch(tmp_path):
     r = JobRunner(steps=FakeSteps(sources=[A, B]), jobs_dir=tmp_path)
     r.start("a", kind="rebuild", refetch=set())
     snap = wait_done(r, "a")
-    assert snap.steps == 2 + 6  # reset, prepare, then 3 ingest stages per source
+    assert snap.steps == 2 + 6 + 1  # reset, prepare, 3 ingest stages per source, embed
     assert snap.step == snap.steps
     assert [e.step for e in snap.events if e.stage == "reset"][-1] == 1
 
@@ -357,7 +427,7 @@ def test_partial_refetch_counts_only_the_fetched_sources(tmp_path):
     r = JobRunner(steps=FakeSteps(sources=[A, B]), jobs_dir=tmp_path)
     r.start("a", refetch={B})
     snap = wait_done(r, "a")
-    assert snap.steps == 1 + 1 + 6
+    assert snap.steps == 1 + 1 + 6 + 1
     assert [e.step for e in snap.events if e.stage == "fetch"] == [2, 2]
     assert snap.step == snap.steps
 
@@ -366,12 +436,12 @@ def test_queued_build_has_no_step_yet(runner, gate):
     runner.start("a")
     runner.start("b")
     queued = runner.start("c")
-    assert queued.state == "queued" and queued.step is None and queued.steps == 5
+    assert queued.state == "queued" and queued.step is None and queued.steps == 6
     assert runner.summary("c").step is None
     running = runner.summary("a")
     assert running.state == "running" and running.step == 1
     gate.set()
-    assert wait_done(runner, "c").step == 5
+    assert wait_done(runner, "c").step == 6
 
 
 def test_stopped_build_keeps_its_step(tmp_path, gate):
@@ -407,7 +477,7 @@ def test_old_snapshot_file_has_no_step(tmp_path):
 
 def test_snapshot_carries_its_planned_stages(runner_recording, tmp_path):
     snap = runner_recording.start("a", "rebuild", refetch=set())  # nothing to fetch
-    assert snap.stages == ["reset", "prepare", "records", "normalize", "load"]
+    assert snap.stages == ["reset", "prepare", "records", "normalize", "load", "embed"]
     wait_done(runner_recording, "a")
     fresh = JobRunner(steps=FakeSteps(), jobs_dir=tmp_path)
     assert fresh.summary("a").stages == snap.stages  # survives a restart
@@ -416,6 +486,7 @@ def test_snapshot_carries_its_planned_stages(runner_recording, tmp_path):
 def test_snapshot_file_without_stages_gets_the_full_plan(tmp_path):
     (tmp_path / "a.json").write_text(json.dumps(RUNNING_SNAPSHOT))
     snap = JobRunner(jobs_dir=tmp_path, steps=FakeSteps()).current("a")
+    # such files predate the embed stage, so their plan has none (no Embed row waiting forever)
     assert snap.stages == ["prepare", "fetch", "records", "normalize", "load"]
 
 
@@ -615,7 +686,8 @@ def test_real_pipeline_reaches_the_planned_step_count(two_source_company, tmp_pa
     r.start(two_source_company)
     snap = wait_done(r, two_source_company, 60)
     assert snap.state == "done", snap.error
-    assert snap.steps == 1 + 3 + 3 * 3  # prepare, a fetch and three ingest stages per source
+    # prepare, a fetch and three ingest stages per source, then embed (skipped: embeddings off)
+    assert snap.steps == 1 + 3 + 3 * 3 + 1
     stamped = steps_of(snap)
     assert stamped == sorted(stamped)
     assert snap.events[-2].step == snap.steps == snap.step  # the last stage before `done`

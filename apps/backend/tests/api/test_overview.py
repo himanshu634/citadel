@@ -119,6 +119,16 @@ def test_overview_and_tools_are_503_when_the_graph_is_down(api_client_with, monk
         assert r.status_code == 503 and r.json() == {"detail": "FalkorDB is not reachable"}
 
 
+def test_semantic_search_with_embeddings_off_is_503_with_the_sentence(
+    api_client_with, monkeypatch, embeddings_off
+):
+    client = api_client_with("acme")
+    monkeypatch.setattr(db, "graph_exists", lambda slug: True)
+    r = client.post("/api/companies/acme/tools/semantic_search", json={"text": "invoice"})
+    assert r.status_code == 503
+    assert r.json() == {"detail": tools.SEMANTIC_OFF}
+
+
 @pytest.fixture
 def graph_deleted_after_the_check(monkeypatch):
     """graph_exists says yes once (the route's check), then the truth: a rebuild deleted it."""

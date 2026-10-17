@@ -3,7 +3,8 @@
 Why: agents and the UI read the graph only through the named tools, so these routes are thin
 wrappers over `brain.tools.TOOLS` and `tools.call`. The slug picks the graph; the body is the
 tool's params and is validated by the tool's own model (bad values -> 422; unknown keys are
-dropped). Both responses carry the slug they were built for.
+dropped). A tool that needs embeddings it cannot use (off, nothing embedded yet, or embedded
+with another model) is a 503 with the reason. Both responses carry the slug they were built for.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from brain import db, tools
+from brain.embeddings import EmbeddingUnavailable
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import ValidationError
 
@@ -48,7 +50,10 @@ def call_tool(
         detail = exc.errors(include_url=False, include_context=False, include_input=False)
         raise HTTPException(status_code=422, detail=detail) from exc
     # Only the model's fields go on: other body keys (e.g. "slug") are dropped, not passed along.
-    rows = tools.call(slug, name, **validated.model_dump()) if db.graph_exists(slug) else []
+    try:
+        rows = tools.call(slug, name, **validated.model_dump()) if db.graph_exists(slug) else []
+    except EmbeddingUnavailable as exc:  # semantic search without usable vectors: say why
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return ToolResult(
         slug=slug, tool=name, rows=[r.model_dump(mode="json", by_alias=True) for r in rows]
     )

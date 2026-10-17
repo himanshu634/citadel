@@ -351,6 +351,7 @@ const SAID: Record<string, (p: Record<string, unknown>) => Said> = {
 	impact_of: (p) => [`Checking what changes together with ${str(p.system)}`, `Checked what changes together with ${str(p.system)}`],
 	related_work_items: (p) => [`Searching PRs and issues for "${str(p.text)}"`, `Searched PRs and issues for "${str(p.text)}"`],
 	related_documents: (p) => [`Searching docs for "${str(p.text)}"`, `Searched docs for "${str(p.text)}"`],
+	semantic_search: (p) => [`Searching by meaning for "${str(p.text)}"`, `Searched by meaning for "${str(p.text)}"`],
 	get_entity: (p) => [`Opening ${shortUid(str(p.uid))}`, `Opened ${shortUid(str(p.uid))}`],
 	list_systems: () => ['Listing the systems', 'Listed the systems'],
 	owners_vs_experts: () => ['Comparing declared owners with who does the work', 'Compared declared owners with who does the work'],
@@ -387,7 +388,8 @@ const REPEATS: Record<string, { key: string; many: string; verb: string }> = {
 	person_profile: { key: 'login', many: 'people', verb: 'Looked up the profiles of' },
 	get_entity: { key: 'uid', many: 'nodes', verb: 'Opened' },
 	related_work_items: { key: 'text', many: 'searches', verb: 'Searched PRs and issues' },
-	related_documents: { key: 'text', many: 'searches', verb: 'Searched docs' }
+	related_documents: { key: 'text', many: 'searches', verb: 'Searched docs' },
+	semantic_search: { key: 'text', many: 'searches', verb: 'Searched by meaning' }
 };
 
 export interface LedgerItem {

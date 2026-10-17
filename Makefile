@@ -13,7 +13,7 @@ AGENTS := uv run agents
 BACKEND := uv run backend
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs ps browser init schema fetch ingest sync stats query tools ask chat eval eval-drafts traces reset linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
+.PHONY: help setup up down logs ps browser init schema fetch ingest embed sync stats query tools ask chat eval eval-drafts traces reset linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
@@ -53,8 +53,11 @@ schema: ## Create indexes on graph brain_$(SLUG) (safe to re-run)
 fetch: ## Pull raw data for $(SLUG) into data/raw/ (SOURCE=github to limit)
 	$(BRAIN) fetch $(SLUG) $(if $(SOURCE),--source $(SOURCE))
 
-ingest: ## Load cached data into brain_$(SLUG) (FULL=1 ignores sync cursors)
+ingest: ## Load cached data into brain_$(SLUG), then embed (FULL=1 ignores sync cursors)
 	$(BRAIN) ingest $(SLUG) $(if $(filter 1 yes,$(FULL)),--full) $(if $(SOURCE),--source $(SOURCE))
+
+embed: ## Embed new or changed chunk text in brain_$(SLUG) (ALL=1 re-embeds every chunk)
+	$(BRAIN) embed $(SLUG) $(if $(filter 1 yes,$(ALL)),--all)
 
 sync: ## fetch + ingest for $(SLUG)
 	$(BRAIN) sync $(SLUG) $(if $(filter 1 yes,$(FULL)),--full) $(if $(SOURCE),--source $(SOURCE))
@@ -68,7 +71,7 @@ ask: ## Ask brain_$(SLUG) a question: make ask SLUG=synthetic Q="who knows Auth?
 chat: ## Chat with brain_$(SLUG) (OFFLINE=1: one scripted turn, no API key; THREAD=id resumes)
 	$(AGENTS) chat $(SLUG) $(if $(filter 1 yes,$(OFFLINE)),--offline) $(if $(THREAD),--thread $(THREAD))
 
-synthetic: ## Regenerate the synthetic company JSONL and load it into brain_synthetic
+synthetic: ## Regenerate the synthetic company JSONL, load and embed it into brain_synthetic
 	uv run python apps/brain/examples/synthetic_company/generate.py
 	$(BRAIN) schema synthetic
 	$(BRAIN) ingest synthetic --full
