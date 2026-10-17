@@ -123,6 +123,10 @@ describe('decisionError', () => {
 			gone: true
 		});
 	});
+	it("keeps the server's sentence on a 409 while the brain is being rebuilt, and keeps the claim", () => {
+		const said = 'The brain is being rebuilt; try again when the build finishes.';
+		expect(decisionError(new ApiError(409, said))).toEqual({ message: said });
+	});
 	it('says the claim is gone on a 404', () => {
 		expect(decisionError(new ApiError(404, 'No claim claim:1'))).toEqual({ message: 'This claim is gone. The list now shows the ones still waiting.', gone: true });
 	});
@@ -202,10 +206,22 @@ describe('railLog', () => {
 });
 
 describe('decidedLine', () => {
-	const claim = { statement: 'bob decides the refund rules in Billing.', kind: 'expert' as const };
-	it('says what the decision did, and the follow-up only for kinds pm follows up', () => {
+	const claim = { statement: 'bob decides the refund rules in Billing.', kind: 'expert' as const, status: 'accepted' as const };
+	it('says what an accepted approval did, and the follow-up only for kinds pm follows up', () => {
 		expect(decidedLine('approve', 'Dana', claim)).toBe('Dana approved: bob decides the refund rules in Billing. pm opens its follow-up next.');
 		expect(decidedLine('approve', 'Dana', { ...claim, kind: 'fact' })).toBe('Dana approved: bob decides the refund rules in Billing.');
-		expect(decidedLine('reject', 'Dana', claim)).toBe('Dana rejected: bob decides the refund rules in Billing. Its gap is open again.');
+	});
+	it('says the sources won when the approval found they now say otherwise', () => {
+		expect(decidedLine('approve', 'Dana', { ...claim, kind: 'fact', status: 'conflicts_with_source' })).toBe(
+			'Dana approved, but the sources now say otherwise, so the brain keeps what they say: bob decides the refund rules in Billing. pm opens a follow-up to fix the source.'
+		);
+	});
+	it("says the gap is open again when the brain didn't have the claim's subject or evidence", () => {
+		expect(decidedLine('approve', 'Dana', { ...claim, status: 'stale' })).toBe(
+			"Dana approved, but the brain no longer has this claim's subject or evidence, so it was not added: bob decides the refund rules in Billing. Its gap is open again."
+		);
+	});
+	it('says a rejection reopens the gap', () => {
+		expect(decidedLine('reject', 'Dana', { ...claim, status: 'rejected' })).toBe('Dana rejected: bob decides the refund rules in Billing. Its gap is open again.');
 	});
 });

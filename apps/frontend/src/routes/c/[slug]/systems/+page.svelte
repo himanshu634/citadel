@@ -213,8 +213,9 @@ read again when a Keeper run starts or ends, after Review now and after each dec
 	}
 	async function decide(claim: Claim, decision: 'approve' | 'reject', by: string, why: string): Promise<DecisionError | null> {
 		const slug = data.slug;
+		let result: Claim;
 		try {
-			await api.keeper[decision](slug, claim.uid, { by, why });
+			result = await api.keeper[decision](slug, claim.uid, { by, why });
 		} catch (e) {
 			const err = decisionError(e);
 			if (err.gone) {
@@ -228,7 +229,7 @@ read again when a Keeper run starts or ends, after Review now and after each dec
 		} catch {
 			// Private window or blocked storage: the name is typed again next time.
 		}
-		decided = { slug, text: decidedLine(decision, by, claim) };
+		decided = { slug, text: decidedLine(decision, by, result) };
 		readLedgerNow++;
 		readRunsNow++;
 		return null;

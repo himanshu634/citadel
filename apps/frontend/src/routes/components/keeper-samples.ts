@@ -25,7 +25,8 @@ export const pendingClaim: Claim = {
 	why: null,
 	gap: 'gap:refunds',
 	created_at: at(8),
-	updated_at: at(8)
+	updated_at: at(8),
+	follow_up_tries: 0
 };
 
 export const pendingEvidence: EvidenceRef[] = [

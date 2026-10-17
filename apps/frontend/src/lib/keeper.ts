@@ -7,7 +7,7 @@
  */
 import { ApiError, describeError } from './api/client';
 import { shortUid } from './walk';
-import type { ActivityRun, ClaimKind, FieldError, LogEntry, Review } from './types';
+import type { ActivityRun, ClaimKind, ClaimStatus, FieldError, LogEntry, Review } from './types';
 
 const REASONS: Record<string, string> = {
 	replaces_claim: 'it replaces an earlier Keeper update',
@@ -73,6 +73,7 @@ const ACTIONS: Record<string, string> = {
 	needs_person: 'said a gap needs a person',
 	gap_released: 'put a gap back',
 	follow_up_opened: 'opened a follow-up',
+	follow_up_skipped: 'opened no follow-up for a claim',
 	episode: 'finished a job',
 	review_start: 'started a review',
 	review_done: 'finished a review',
@@ -149,6 +150,8 @@ export interface DecisionError {
  */
 export function decisionError(e: unknown): DecisionError {
 	if (e instanceof ApiError) {
+		// The company is building (`BUILDING` in agents/keeper/decide.py): nobody decided it.
+		if (e.status === 409 && typeof e.detail === 'string' && /being rebuilt/.test(e.detail)) return { message: e.detail };
 		if (e.status === 409)
 			return { message: 'Someone already decided this claim. The list now shows where it stands.', gone: true };
 		if (e.status === 404)
@@ -172,13 +175,20 @@ export function decisionError(e: unknown): DecisionError {
 /** The kinds of accepted claim pm opens a follow-up for (`agents/roles/pm.py`). */
 const FOLLOWED_UP: ClaimKind[] = ['owner', 'expert', 'decision'];
 
-/** What a lead's decision did, said once it went through. */
+/**
+ * What a lead's decision did, said once it went through, from the claim the server returned: an
+ * approval re-checks the sources and projects the claim, so it can end other than accepted.
+ */
 export function decidedLine(
 	decision: 'approve' | 'reject',
 	by: string,
-	claim: { statement: string; kind: ClaimKind }
+	claim: { statement: string; kind: ClaimKind; status: ClaimStatus }
 ): string {
 	if (decision === 'reject') return `${by} rejected: ${claim.statement} Its gap is open again.`;
+	if (claim.status === 'conflicts_with_source')
+		return `${by} approved, but the sources now say otherwise, so the brain keeps what they say: ${claim.statement} pm opens a follow-up to fix the source.`;
+	if (claim.status === 'stale')
+		return `${by} approved, but the brain no longer has this claim's subject or evidence, so it was not added: ${claim.statement} Its gap is open again.`;
 	const next = FOLLOWED_UP.includes(claim.kind) ? ' pm opens its follow-up next.' : '';
 	return `${by} approved: ${claim.statement}${next}`;
 }

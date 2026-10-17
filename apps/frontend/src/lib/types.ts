@@ -666,6 +666,8 @@ export interface Claim {
 	gap: string | null;
 	created_at: string;
 	updated_at: string;
+	/** pm follow-up jobs that opened no task: after one, the claim is not tried again. */
+	follow_up_tries: number;
 }
 
 /** One line of the Keeper's append-only log. */
