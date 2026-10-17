@@ -270,7 +270,8 @@ def test_markdown_report_compares_two_files_per_company(tmp_path):
         check = {"name": "cite_any", "ok": passed, "detail": "none of ['person:alice']"}
         usage = {"input_tokens": 100, "output_tokens": 10, "cache_read_input_tokens": 0}
         turn = {"tools": ["x", "y"], "rejected": [], "tool_errors": [], "ms": 2000,
-                "usage": usage, "checks": [check], "passed": passed}  # fmt: skip
+                "usage": usage, "checks": [check], "passed": passed,
+                "sources": ["system:Auth"]}  # fmt: skip
         return {"kind": "run", "case": case, "tags": tags, "repeat": rep, "passed": passed,
                 "error": error, "turns": [] if error else [turn]}  # fmt: skip
 
@@ -302,5 +303,8 @@ def test_markdown_report_compares_two_files_per_company(tmp_path):
     assert "| cases passed every run | 1/2 | 1/2 |" in text
     assert "| graph tool calls | 2.0 | 1.5 |" in text  # an errored run made no calls
     assert "| `why` | history | 2/2 | 1/2 (1 err) | -50 pt |" in text
-    assert "- `who` #1 (haiku-5-5 medium): turn 1 cite_any: none of ['person:alice']" in text
+    assert (
+        "- `who` #1 (haiku-5-5 medium): turn 1 cite_any: none of ['person:alice'] "
+        "(cited system:Auth)"
+    ) in text
     assert "- `why` #1 (sonnet-5-5 medium): error: APIStatusError: overloaded" in text

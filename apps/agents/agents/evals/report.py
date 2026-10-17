@@ -186,7 +186,10 @@ def _why(run: dict[str, Any]) -> str:
     for i, t in enumerate(run["turns"], 1):
         for c in t["checks"]:
             if not c["ok"]:
-                reasons.append(f"turn {i} {c['name']}: {_short(c['detail'])}")
+                reason = f"turn {i} {c['name']}: {_short(c['detail'])}"
+                if c["name"].startswith("cite_"):
+                    reason += f" (cited {', '.join(t.get('sources', [])) or 'nothing'})"
+                reasons.append(reason)
     return "; ".join(reasons) or "failed"
 
 
