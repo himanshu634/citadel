@@ -75,6 +75,8 @@ def test_profile_entity_and_systems(synthetic_graph):
     erin = tools.person_profile(synthetic_graph, login="Erin")  # case-insensitive
     assert erin.teams == ["payments"] and erin.prs_authored == 3
     assert erin.systems[0].system == "Web app"
+    bot = tools.person_profile(synthetic_graph, login="ci-bot")  # no PRs, no reviews
+    assert bot.prs_authored == 0 and bot.recent_prs == [] and bot.recent_reviews == []
 
     issue = tools.get_entity(synthetic_graph, uid="synthetic:issue:14")
     assert issue.title == "Invoice emails sometimes sent twice"
