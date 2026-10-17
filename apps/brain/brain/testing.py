@@ -165,7 +165,8 @@ def embedded_graph():
     db.delete_graph(slug)
     load_company(synthetic_company(slug))
     embeddings.set_embedder(FakeEmbedder())
-    embeddings.embed_pending(slug)
+    report = embeddings.embed_pending(slug)
+    assert report.skipped_reason is None and report.embedded > 0, report
     yield slug
     embeddings.set_embedder(None)
     db.delete_graph(slug)

@@ -108,6 +108,23 @@ def test_ingest_without_embeddings_ends_with_a_skipped_embed(events_company, emb
 
 
 @needs_graph
+def test_ingest_completes_when_the_model_raises(events_company):
+    class Broken(FakeEmbedder):
+        def passages(self, texts):
+            raise RuntimeError("segfault in the runtime")
+
+    set_embedder(Broken())
+    try:
+        seen: list[BuildEvent] = []
+        report = pipeline.ingest(events_company, full=True, on_event=seen.append)
+    finally:
+        set_embedder(None)
+    assert (seen[-1].stage, seen[-1].status) == ("embed", "skipped")
+    assert "segfault in the runtime" in seen[-1].message == report.embed.skipped_reason
+    assert sum(report.load.written.values()) > 0  # the sources were still loaded
+
+
+@needs_graph
 def test_missing_folder_is_skipped(events_company_missing_folder):
     seen: list[BuildEvent] = []
     pipeline.ingest(events_company_missing_folder, on_event=seen.append)

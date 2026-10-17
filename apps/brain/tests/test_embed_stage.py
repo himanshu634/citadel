@@ -173,3 +173,27 @@ def test_a_chunk_without_a_text_hash_is_embedded_once(fresh_synthetic):
     first = embed_pending(fresh_synthetic, FakeEmbedder())
     assert first.embedded == count_chunks(fresh_synthetic)
     assert embed_pending(fresh_synthetic, FakeEmbedder()).embedded == 0
+
+
+def test_a_wrong_number_of_vectors_skips_and_keeps_what_was_written(fresh_synthetic):
+    class Short(FakeEmbedder):
+        calls = 0
+
+        def passages(self, texts):
+            self.calls += 1
+            vectors = super().passages(texts)
+            return vectors if self.calls == 1 else vectors[:-1]  # drops one from batch 2
+
+    events = []
+    report = embed_pending(fresh_synthetic, Short(), batch=4, on_event=events.append)
+    assert report.embedded == 4 and "returned 3 vectors for 4 chunks" in report.skipped_reason
+    assert (events[-1].stage, events[-1].status, events[-1].count) == ("embed", "skipped", 4)
+
+
+def test_a_chunk_still_pending_after_its_write_stops_with_a_reason(fresh_synthetic, monkeypatch):
+    # a write that reports success but changes nothing: the same batch comes back
+    monkeypatch.setattr(loader, "set_embeddings", lambda slug, rows, model: len(rows))
+    events = []
+    report = embed_pending(fresh_synthetic, FakeEmbedder(), batch=4, on_event=events.append)
+    assert report.embedded == 4 and "still pending" in report.skipped_reason
+    assert (events[-1].stage, events[-1].status) == ("embed", "skipped")

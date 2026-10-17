@@ -151,14 +151,21 @@ def embed_pending(
     done: set[str] = set()
     while rows := loader.chunks_to_embed(slug, e.model, batch):
         uids = [r["uid"] for r in rows]
-        if done.intersection(uids):
-            break  # a chunk came back after its write: stop rather than loop
+        if again := sorted(done.intersection(uids)):
+            # stop rather than loop: the write did not make the chunk current
+            reason = f"Chunk {again[0]} was still pending after its vector was written."
+            return _skip(slug, report, reason, emit)
         try:
-            vectors = e.passages([r["text"] for r in rows])
+            vectors = list(e.passages([r["text"] for r in rows]))
         except EmbeddingUnavailable as exc:
             return _skip(slug, report, str(exc), emit)
         except Exception as exc:
             return _skip(slug, report, f"Embedding model {e.model} failed: {exc}", emit)
+        if len(vectors) != len(rows):
+            reason = (
+                f"Embedding model {e.model} returned {len(vectors)} vectors for {len(rows)} chunks."
+            )
+            return _skip(slug, report, reason, emit)
         written = loader.set_embeddings(
             slug,
             [
