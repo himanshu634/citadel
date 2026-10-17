@@ -461,6 +461,25 @@ export interface AskAnswer {
 	model: string | null;
 }
 
+/** A Claude model a question may run on (GET /api/models, backend `ModelOut`). */
+export interface ModelInfo {
+	id: string;
+	name: string;
+	/** One line on what it is good for. */
+	blurb: string;
+	/** Price per token as a multiple of the cheapest model's: 1, 20, 40, 100. */
+	cost: number;
+	/** An answer can take minutes. */
+	slow: boolean;
+}
+
+export interface ModelsOut {
+	/** Cheapest first. */
+	models: ModelInfo[];
+	/** The id a question runs on when it names none. */
+	default: string;
+}
+
 /** One tool call as the page shows it: asked for (running), then done. */
 export interface WalkStep extends AskStepEvent {
 	status: 'running' | 'done';
@@ -544,4 +563,45 @@ export interface Feedback {
 	trace_id: string;
 	rating: Rating | null;
 	note: string | null;
+}
+
+// --- Agent activity (GET /api/companies/{slug}/activity; agents/activity.py) -----------------
+
+/** One tool call of a run, with the company-graph nodes it touched. */
+export interface ActivityStep {
+	/** 1-based, in the order the agent ran them. */
+	n: number;
+	/** `brain` for Ask; `keeper`, `pm`, `qa` once Keeper reviews are listed. */
+	actor: string;
+	tool: string;
+	kind: CallKind;
+	input: Record<string, unknown>;
+	status: 'running' | 'done' | 'failed';
+	count: number | null;
+	error: string | null;
+	/** brain_<slug> uids, in the order the step returned them. */
+	touched: string[];
+}
+
+/** One run of one agent: today an Ask turn. Times are ISO strings. */
+export interface ActivityRun {
+	/** `ask:<thread id>:<turn n>`. */
+	id: string;
+	source: 'ask';
+	actor: string;
+	/** What the run was for: the question. */
+	title: string;
+	status: ChatStatus;
+	started_at: string;
+	ended_at: string | null;
+	/** An Ask run reopens in its chat. */
+	thread_id: string | null;
+	steps: ActivityStep[];
+}
+
+export interface Activity {
+	/** Newest first. */
+	runs: ActivityRun[];
+	/** Some run is still going, so the page keeps watching. */
+	running: boolean;
 }

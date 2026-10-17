@@ -1,5 +1,5 @@
 // Example chats for the gallery: the chat list's states and one answer's timeline, with an MCP call.
-import type { AskLlmEvent, ThreadSummary } from '$lib/types';
+import type { AskLlmEvent, ModelInfo, ThreadSummary } from '$lib/types';
 import { done } from './walk-samples';
 
 export const NOW = Date.parse('2026-10-16T12:00:00Z');
@@ -65,3 +65,11 @@ export const timeline: AskLlmEvent[] = [
 ];
 
 export const timelineSteps = done;
+
+/** GET /api/models as the backend serves it (agents/llm.py MODELS). */
+export const models: ModelInfo[] = [
+	{ id: 'claude-haiku-5-5', name: 'Haiku 5.5', blurb: 'Fastest. Lookups and short walks.', cost: 1, slow: false },
+	{ id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', blurb: 'Balanced. Longer walks across teams.', cost: 20, slow: false },
+	{ id: 'claude-opus-5-5', name: 'Opus 5.5', blurb: 'Most careful over many hops.', cost: 40, slow: false },
+	{ id: 'claude-fable-5-1', name: 'Fable 5.1', blurb: 'Most capable. Can take minutes.', cost: 100, slow: true }
+];

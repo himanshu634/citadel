@@ -168,6 +168,32 @@ def test_thread_follow_up_appends_to_the_same_conversation():
     assert history[-1]["content"][0]["text"].endswith("Sure?")
 
 
+def test_each_turn_of_a_thread_can_pick_its_model():
+    saver = InMemorySaver()
+    client = FakeClient(
+        reply(submit("t1", "No sources.", [])),
+        reply(submit("t2", "Still none.", [])),
+        reply(submit("t3", "None again.", [])),
+    )
+    first = ask(client, checkpointer=saver, model="claude-opus-5-5")
+    agent.ask("synthetic", "Sure?", first.thread_id, client=client, toolset=TOOLSET,
+              checkpointer=saver)  # fmt: skip
+    agent.ask("synthetic", "Haiku?", first.thread_id, client=client, toolset=TOOLSET,
+              checkpointer=saver, model="claude-haiku-5-5")  # fmt: skip
+    opus, default, haiku = client.requests
+    assert opus["model"] == "claude-opus-5-5" and opus["fallbacks"] == "default"
+    assert default["model"] == get_settings().anthropic_model  # no model: back to the default
+    assert haiku["model"] == "claude-haiku-5-5" and "fallbacks" not in haiku
+    assert len(haiku["messages"]) == 7  # the Opus turns are kept as they were (append-only)
+
+
+def test_an_unknown_model_is_refused_before_any_call():
+    client = FakeClient()
+    with pytest.raises(ValueError, match="unknown model"):
+        ask(client, model="claude-opus-4-1")
+    assert client.requests == []
+
+
 @pytest.mark.parametrize(
     ("types", "kept"),
     [

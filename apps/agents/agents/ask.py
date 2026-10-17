@@ -66,10 +66,11 @@ def ask(
     client: anthropic.Anthropic | None = None,
     toolset: Toolset | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
+    model: str | None = None,
 ) -> Answer:
     """Answer one question about brain_<slug>. Pass the same thread_id (with a checkpointer)
     to ask a follow-up in the same conversation."""
-    for event in _run(slug, question, thread_id, client, toolset, checkpointer, None):
+    for event in _run(slug, question, thread_id, client, toolset, checkpointer, None, model):
         if isinstance(event, Answer):
             return event
     raise AssertionError("the run ended without an answer")  # _run always ends with one
@@ -83,11 +84,12 @@ def ask_traced(
     client: anthropic.Anthropic | None = None,
     toolset: Toolset | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
+    model: str | None = None,
 ) -> tuple[Answer, list[dict[str, Any]]]:
     """`ask`, plus the run's `step_done` events (see `ask_events`), so evals can grade which
     tools ran and how often an answer was rejected, with the token counts `ask_events` drops."""
     steps: list[dict[str, Any]] = []
-    for event in _run(slug, question, thread_id, client, toolset, checkpointer, None):
+    for event in _run(slug, question, thread_id, client, toolset, checkpointer, None, model):
         if isinstance(event, Answer):
             return event, steps
         if event.get("kind") == "step_done":
@@ -103,6 +105,7 @@ def ask_events(
     client: anthropic.Anthropic | None = None,
     toolset: Toolset | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
+    model: str | None = None,
     stop: threading.Event | None = None,
 ) -> Iterator[dict[str, Any]]:
     """The same run as `ask`, as events for the Ask page, in order:
@@ -113,7 +116,7 @@ def ask_events(
     ms, usage, calls} (`loop.llm_event`); steps carry `call`, the seq of the response that
     asked for them.
     Setting `stop` ends the run at the next step, leaving the thread valid for a follow-up."""
-    for event in _run(slug, question, thread_id, client, toolset, checkpointer, stop):
+    for event in _run(slug, question, thread_id, client, toolset, checkpointer, stop, model):
         yield answer_out(event) if isinstance(event, Answer) else event
 
 
@@ -125,12 +128,13 @@ def run_events(
     client: anthropic.Anthropic | None = None,
     toolset: Toolset | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
+    model: str | None = None,
     stop: threading.Event | None = None,
 ) -> Iterator[dict[str, Any] | Answer]:
     """`ask_events` with the Answer itself as the last item instead of its `answer` event, for
     a caller that needs what the event leaves out (tokens, nudges): the Ask API, which records
     a trace (`traces.py`) before it sends the answer."""
-    yield from _run(slug, question, thread_id, client, toolset, checkpointer, stop)
+    yield from _run(slug, question, thread_id, client, toolset, checkpointer, stop, model)
 
 
 def answer_out(answer: Answer, trace_id: str | None = None) -> dict[str, Any]:
@@ -148,8 +152,11 @@ def answer_out(answer: Answer, trace_id: str | None = None) -> dict[str, Any]:
     }
 
 
-def _run(slug, question, thread_id, client, toolset, checkpointer, stop) -> Iterator[Any]:
-    """Yield the run's step events, then its Answer."""
+def _run(slug, question, thread_id, client, toolset, checkpointer, stop, model) -> Iterator[Any]:
+    """Yield the run's step events, then its Answer. `model` (one of `llm.MODEL_IDS`) answers
+    this turn; None means ANTHROPIC_MODEL. Each turn of a thread may use a different one."""
+    if model is not None and model not in llm.MODEL_IDS:
+        raise ValueError(f"unknown model {model!r}; pick one of {sorted(llm.MODEL_IDS)}")
     thread_id = thread_id or uuid.uuid4().hex[:12]
     cfg = load_company(slug)
     mcp = Connector.from_config(cfg.mcp_servers)  # the company's MCP servers, if any
@@ -175,6 +182,7 @@ def _run(slug, question, thread_id, client, toolset, checkpointer, stop) -> Iter
         "stop_details": None,
         "nudges": 0,
         "route": None,
+        "ask_model": model,
     }
     yield {"kind": "start", "thread_id": thread_id}
     numbers: dict[str, int] = {}  # tool_use id -> step number in this answer

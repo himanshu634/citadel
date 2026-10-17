@@ -56,6 +56,17 @@ describe('AskThread', () => {
 		expect(t.selected).toBe(1);
 	});
 
+	test('a picked model goes with that question only, and the turn keeps it', async () => {
+		const fetchMock = serve(run(), run());
+		const t = new AskThread('acme');
+		await t.ask('First?', 'claude-opus-5-5');
+		await t.ask('And then?');
+		const bodies = fetchMock.mock.calls.map((c) => JSON.parse((c as unknown as [string, RequestInit])[1].body as string));
+		expect(bodies[0]).toEqual({ question: 'First?', model: 'claude-opus-5-5' });
+		expect(bodies[1]).toEqual({ question: 'And then?', thread_id: 't1' });
+		expect(t.turns.map((x) => x.model)).toEqual(['claude-opus-5-5', null]);
+	});
+
 	test('an error event and a cut stream both end the turn as failed, with a sentence', async () => {
 		serve(sse([['start', { thread_id: 'x' }], ['error', { detail: 'No Anthropic credentials.' }]]), sse([['start', { thread_id: 'x' }]]));
 		const t = new AskThread('acme');
@@ -110,12 +121,25 @@ describe('AskThread', () => {
 		const t = new AskThread('acme');
 		await t.ask('Who is Alice?');
 		vi.useFakeTimers();
-		t.replay();
+		t.replay(0);
 		expect(t.revealed).toBe(0);
 		vi.advanceTimersByTime(800);
 		expect(t.revealed).toBeNull(); // one graph step: done after the first tick
-		t.replay(true);
+		t.replay(0, true);
 		expect(t.revealed).toBeNull();
+	});
+
+	test('replaying an earlier turn makes it the selected one', async () => {
+		serve(run(), run());
+		const t = new AskThread('acme');
+		await t.ask('First?');
+		await t.ask('And then?');
+		expect(t.selected).toBe(1);
+		vi.useFakeTimers();
+		t.replay(0);
+		expect([t.selected, t.revealed]).toEqual([0, 0]);
+		t.select(1);
+		expect([t.selected, t.revealed]).toEqual([1, null]); // selecting another stops the replay
 	});
 
 	test('reset starts a new conversation', async () => {

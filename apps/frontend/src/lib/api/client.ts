@@ -6,6 +6,7 @@
  * streams (SSE) are separate and not here.
  */
 import type {
+	Activity,
 	BuildSnapshot,
 	Company,
 	CompanyConfig,
@@ -16,6 +17,7 @@ import type {
 	GithubTokenCheck,
 	Entity,
 	GraphView,
+	ModelsOut,
 	OnboardRequest,
 	OnboardResult,
 	Overview,
@@ -66,6 +68,8 @@ const company = (slug: string) => `/companies/${encodeURIComponent(slug)}`;
 
 export const api = {
 	companies: () => request<Company[]>('GET', '/companies'),
+	/** The Claude models an Ask question may run on, and the default. */
+	models: () => request<ModelsOut>('GET', '/models'),
 	/** A thumbs on one Ask answer (its `trace_id`); `rating` null takes it back. 404: no such answer. */
 	feedback: (slug: string, traceId: string, rating: Rating | null, note?: string) =>
 		request<Feedback>('POST', `${company(slug)}/traces/${encodeURIComponent(traceId)}/feedback`, {
@@ -80,6 +84,8 @@ export const api = {
 	/** Delete a chat and its checkpoints. 409 while it is answering. */
 	deleteThread: (slug: string, id: string) =>
 		request<void>('DELETE', `${company(slug)}/threads/${encodeURIComponent(id)}`),
+	/** The agents' latest runs with their steps on the graph, newest first (the Systems page). */
+	activity: (slug: string, limit = 6) => request<Activity>('GET', `${company(slug)}/activity?limit=${limit}`),
 	/** The chats that touched or cited one node of the company graph. */
 	refThreads: (slug: string, uid: string) =>
 		request<ThreadSummary[]>('GET', `${company(slug)}/refs/${encodeURIComponent(uid)}/threads`),

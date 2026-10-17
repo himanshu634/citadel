@@ -65,6 +65,7 @@ Rules:
   `--color-text-muted`; ready and empty = no badge. The icon repeats what the accessible name says in
   words ("building", "last build failed", "config invalid", "graph unreachable").
 - `-soft` tints are for selected rows and citation chips, with text in the matching strong colour.
+  `--color-accent-soft` is also the fill of the user's question bubble on the Ask page, with ink text.
 - Node colours are for marks (dots, bars, avatar initials), never for body text or buttons.
 - Work item state maps to badges as: open = success, merged = accent, closed = neutral.
 
@@ -151,6 +152,76 @@ Rules:
 - No motion: the layout is worked out before the map is shown (in a worker), and panning to a
   selection jumps.
 
+### The Systems page and the agent trail (design direction A)
+
+- The Systems page is the Graph page's map with an agent's run drawn over it. It answers "where is
+  an agent working, and what has it done on the graph" (canvas: Systems · Agent at work).
+- **The agent is ink, never accent or status.** Each step sits on the node it was about (the system
+  it read, the node it opened), else on the first drawn node it returned when all it returned
+  sits in one territory. A step spread over several (listing the systems) gets no point: its nodes
+  are lit and the rail says "across the graph". Its number is an ink
+  disc (`--color-text` with `--color-surface` text). One ink line joins the steps in order.
+  Steps in a row on one node share a disc ("1, 2").
+- While the run is going, the agent's node has an ink ring, its territory an ink outline, and an
+  ink label says who and what ("Ask agent · Reading recent work on Auth"). Nothing moves on its
+  own: the trail grows as steps land, and the map is not laid out again.
+- The nodes a run touched stay bright and the rest dim, as a selection does. A selection still
+  wins over the trail.
+- The rail lists every step, numbered as on the map. A ring is the step running now. A dash marks
+  a step with nothing on the map (the answer check, an MCP call), and it says "not on the map".
+- The page opens on a running run, else the newest. A run that starts takes the map back from a
+  run picked in "Other runs". Runs are read every 1.5 s while one is going, every 6 s otherwise,
+  every 20 s in a hidden tab.
+
+### The Ask page (design direction J + L)
+
+- **One lane per question** (`AskLane`). A strip across the top (`Q1`, the question, how it went),
+  the conversation on the left (the question as a bubble, the ledger, the answer, Copy answer, the
+  thumbs and Replay walk) and that question's own walk on the right. Lanes stack in one scroller;
+  nothing is replaced when a follow-up arrives.
+- **The walk is sticky per lane.** It stays in view while its lane scrolls by and leaves with it.
+  A follow-up's walk starts from what the earlier questions found: those nodes are dashed and faint
+  until a step reaches them.
+- **Walks draw first near the screen, then stay drawn.** A lane draws its walk the first time it
+  comes within 200px of the scroller's view (IntersectionObserver); until then a box of the same
+  size (canvas and caption line) keeps its place. A drawn walk is never drawn again from scratch:
+  scrolling back or unfolding shows it as it was, with no new layout or animation.
+- **One splitter for every lane** (`Splitter`), between the conversation and the walk column. Width
+  is a share of the page: 38% by default, 320px to 65% when dragged, and the chat column keeps at
+  least 420px (on a narrow page the widest share drops, but never below 320px). The width is kept
+  in this browser (`citadel-ask-walk`). A double-click puts it back to 38%. Keys: arrows move it
+  by a step, Shift by a bigger step, Home and End go to the narrowest and the widest, Enter folds
+  and unfolds. Dragging more than 80px past the narrowest width folds the column.
+- **Folded, the column is a strip** (`--walk-strip`, 48px) with a marker per lane: a status dot and
+  the node count. Folding keeps the width: unfolding (by key, button or drag) brings back the
+  width from before. The splitter stays, so one drag opens it again.
+- **"Hide the walks" / "Show the walks"**: an icon button at the top of the walk column (in the
+  page head, wide screens only) folds and opens the column too, and saves the choice like the
+  splitter does.
+- **Progress for screen readers.** While a lane's answer runs, a hidden polite live region says
+  the step under way (the ledger's sentence, "Reading recent work on Auth"), or "Writing the
+  answer" while only the answer check runs.
+- **A new question scrolls its lane to the top** (pin-to-top), and the newest lane is at least as
+  tall as the scroller so there is room to do it. Further than 80px from the end, a "Jump to latest"
+  pill shows, left-aligned with the chat column.
+- **Below 1100px** the page is one column: the walk goes under the conversation, not sticky, and
+  there is no splitter.
+- **The sidebar folds** to its icons (`--sidebar-folded`, 56px) from the top bar's fold button or
+  the `[` key, and the choice is kept (`citadel-sidebar`). Folded items are named by tooltips and
+  for screen readers. The fold animates: the sidebar column's width eases over `--duration-base`,
+  the labels fade out at once (`--duration-fast`) and fade back in once there is room, folded
+  headings turn into the hairlines between groups, and the fold button's chevron turns over. Open
+  and folded are one markup, so no icon or row moves. A page load never animates: a kept fold is
+  drawn folded. Below 900px the drawer is never folded; it slides in and out with a fading scrim.
+  The Ask page, like the Graph page,
+  fills the height under the top bar (a bleed page).
+- **Past chats** (`ChatList`) are a column left of the lanes, with New chat at its top; below
+  1400px they sit above the lanes as a short scrolling strip. "Hide past chats" folds the column
+  (kept in `citadel-ask-history`); folded, "Show past chats" and New chat move into the page head.
+  `?thread=<id>` opens a saved chat and scrolls its last lane to the top.
+- **How it answered** (`TurnTimeline`) sits folded under each lane's answer: the ledger already
+  shows the work while it happens, so the timeline never opens by itself here.
+
 ## 7. Components
 
 Import from `$lib` (`import { Button, Card } from '$lib'`). Interactive primitives with focus
@@ -178,12 +249,17 @@ not add another component library.
 | `Stat`       | A count with its label, inside a `<dl>`. For summaries, not decoration.                        |
 | `EmptyState` | Says what will appear and how to get it, with one action.                                      |
 | `CitedAnswer`, `GraphPath` | The answer pattern from section 1. Citation chips link to the numbered source.   |
-| `GraphWalk`  | The agent's walk for one answer (Ask page, direction D). Nodes are pills with their type dot; the start node is ink at the centre. Links are `--graph-edge` hairlines labelled `step · RELATIONSHIP` in mono; a link the rows only imply is dashed (the legend says so). The newest step of a running answer is accent (ring on its nodes, accent links); a lit citation is accent and everything else drops to 25% (links 20%). Above 12 nodes, only the start, cited, lit and newest nodes keep their names; the rest are dots that name themselves on hover or focus. Earlier nodes drift at most 36 stage units when a step lands. Rules in `src/lib/walk.ts`. |
+| `GraphWalk`  | The agent's walk for one answer (Ask page, direction D). Nodes are pills with their type dot; the start node is ink at the centre. Links are `--graph-edge` hairlines labelled `step · RELATIONSHIP` in mono; a link the rows only imply is dashed (the legend says so). The newest step of a running answer is accent (ring on its nodes, accent links); a lit citation is accent and everything else drops to 25% (links 20%). Above 12 nodes of its own, only the start, cited, lit and newest nodes keep their names; the rest are dots that name themselves on hover or focus. Carried nodes never crowd the walk: they keep their names only while the whole walk, carried nodes included, has 12 nodes or fewer. Earlier nodes drift at most 36 stage units when a step lands, and glide there with their links (`--duration-slow`); new links draw on from their ends. `carried` is context from earlier questions: its nodes and links are dashed and faint until a step touches them. Rules in `src/lib/walk.ts`. |
 | `WalkSteps`  | The tool calls behind an answer: number circle (success tint; accent while running; danger with an alert icon when failed), the call in mono, rows and ms. One step opens to show its rows (paths as chains); rows a citation used carry its chip. The last row is the answer check, and a rejected check stays visible with the reason. |
+| `WalkLedger` | The brain's work for one answer, one row per graph step in plain words ("Read recent work on Auth"). Each row has a mark for how it ended (done, running, found nothing, failed, not run), its rows and its time. Once the answer is in, repeated calls of one tool fold into one row; a call that found nothing or failed keeps its own row and says so under it. An open row shows its call and rows (`StepRows`). Hovering or focusing a row lights what its steps added to the walk; leaving the list, or the answer landing, clears it. The last row is the newest answer check ("Checked: every citation came from a step above"); a rejected check says why, and a pass after send-backs says how many ("Checked after 1 send-back: …"). There is no Checked, Assumed or Not in the brain footer. |
+| `StepRows`   | The rows one step returned: paths as chains of nodes and relationships, other rows on one line. Rows a citation used carry its number; the active citation tints its rows. Says so when the step found nothing. |
+| `Splitter`   | The line between two panes that resizes the one after it (rules in section 6, The Ask page). A hairline at rest; on hover, focus or drag it thickens to accent and shows a grip. A `separator` with `aria-valuenow`, so it is keyboard and screen reader usable. The parent places it full height and keeps `size` and `folded`; a fold by drag keeps the size from before the drag. |
+| `AskLane`    | One question and everything it led to (section 6, The Ask page): strip, conversation with its ledger and answer, and its own walk. The page owns the columns (`walkWidth`), the splitter and the scrolling. Hovering a citation or a ledger row lights what backs it in the walk; a citation wins. The walk is drawn once and kept (folding only hides it). |
 | `WalkAnswer` | The answer on the Ask page: limited Markdown rendered as text, citation chips that are buttons (hover or focus lights the path, click pins it), sources that say which step found them. No answer says why (refused, stopped, step limit). |
 | `AnswerRating` | A thumbs up and down under an Ask answer, saved on its trace. Ghost icon buttons with `aria-pressed`; pressed is a filled ink icon on the sunken fill plus a line of words ("Marked right"), never accent (the citations own it). Pressing again takes it back. A thumbs down offers an optional note, which becomes the `why` of a draft eval case. Saving and a failed save are said in words; a failed save keeps the earlier thumbs. Hidden when the answer has no trace or was stopped. |
+| `ModelPicker` | The Claude model for the next Ask question (direction P): a small outlined chip under the question field, left of Ask, with a chip icon and the model's name. It opens upward to the list: each model with a check when picked (the picked row also has the accent-soft fill), its name in the label width, a "Default" tag on the server's default and a warning-tinted "Slow" tag on a model that can take minutes, one muted line on what it is good for, and its price per token next to the cheapest in mono (x1, x20, x40, x100). The pick is per question and kept in the browser. While an answer runs the chip is dashed, muted and shows a padlock, and its name says why. Each answer then says "Answered by" with the model in a mono stamp; a follow-up on another model says it switched. |
 | `ChatList` | The Ask page's past chats, newest first, in a column left of the thread (above it below 1400px). Each row is a link: the first question on one line, then "n questions · 5 min ago". The open chat has the surface fill and a hairline; a chat still answering shows a spinner and "answering", a failed one says "failed" in danger text, a stopped one says "stopped". Delete is a ghost icon shown on hover or focus (always on touch) and asks once inline (Delete / Keep). Shared per company: there are no users. |
-| `TurnTimeline` | How one answer came about, under its question: one summary line ("How it answered · 3 responses · 5 tool calls · 17,340 tokens") on the sunken fill that folds open (open while the answer runs). Inside, each Claude response is a hairline-ruled block: model, ms and stop reason in meta, its reasoning folded, its text, then every tool call as a row: status icon (success, danger, spinner), a badge for where it ran (Graph tool, Answer check, Server tool neutral; MCP with the server name in accent), the call in mono and its rows count or status. MCP and server calls fold open to their result. |
+| `TurnTimeline` | How one answer came about (on the Ask page, folded under the lane's answer): one summary line ("How it answered · 3 responses · 5 tool calls · 17,340 tokens") on the sunken fill that folds open (its `running` prop opens it while an answer runs; the Ask page leaves it folded). Inside, each Claude response is a hairline-ruled block: model, ms and stop reason in meta, its reasoning folded, its text, then every tool call as a row: status icon (success, danger, spinner), a badge for where it ran (Graph tool, Answer check, Server tool neutral; MCP with the server name in accent), the call in mono and its rows count or status. MCP and server calls fold open to their result. |
 | `EntityRow`, `WorkItemRow`, `ActivityBars` | List and comparison patterns for people, teams, systems and work items. |
 | `CompanyForm` | The fields of a company file for one wizard step or all three (Settings). Edits the draft; the page validates and hands back `errors`, which show under the field their `loc` names. Errors no field shows are listed at the foot of the step, so nothing blocks without a reason. Rules in `src/lib/onboarding.ts`. |
 | `SourceCard` | One source of a company. GitHub: repository, what to read, token note with "Check again", GitHub's answer; an error only when the repository is private while the data is not `own`. Not found, rate limits and outages are warnings with "Check again", never blockers; Continue waits while a check is unanswered. |
@@ -191,9 +267,10 @@ not add another component library.
 | `BuildProgress` | One build: "Step n of N" from the plan, an ink progress meter (the one accent block of the view is the primary button), a table with a cell per source and stage, and the plain log. Each cell is icon plus word plus count or message; a skipped source is one merged cell saying why. Rules live in `src/lib/buildProgress.ts`. |
 | `AddCompanyDialog` | Add a company from one public GitHub repository: one field (a link or `owner/name`), then what Citadel will make (company, graph, window). Private repos are refused in the field's error; no token, GitHub down and a company that already reads the repo or its owner are banners with their one action. "Advanced setup" opens the step-by-step form at `/new`. Rules in `src/lib/addCompany.svelte.ts`. |
 | `CompanyRail` | One tile per company brain; one click switches company and keeps the section you are on. Monogram 15px at width 118; ink for the current tile (section 3). Tooltip shows the name and `brain_<slug>` in mono. The + opens `AddCompanyDialog`. |
-| `TerritoryMap` | The whole company graph as territories (section 6, The graph map). Canvas plus an HTML label layer; drag pans, scroll zooms (`scrollZoom={false}` where it sits in a scrolling page; pinch and the buttons still zoom), click selects. Colours are read from the tokens and re-read when the theme changes. |
+| `TerritoryMap` | The whole company graph as territories (section 6, The graph map). Canvas plus an HTML label layer; drag pans, scroll zooms (`scrollZoom={false}` where it sits in a scrolling page; pinch and the buttons still zoom), click selects. Colours are read from the tokens and re-read when the theme changes. With `trail` (and `here`) it draws an agent's run over the map (section 6, The Systems page). |
+| `AgentRun` | One agent run in the Systems page's rail: who and when, the question, a status (Working now in ink, Done, Stopped, Failed in danger), "n steps · m not on the map", then every step numbered as on the map, its tool and rows. Links to the chat an Ask run came from. |
 | `NodeInspector` | The selected node: kind, territory and state, its fields (`get_entity`), where its neighbours live, its links by relationship, and its most linked neighbours, which select in turn. Counts come from the links the map draws. "Open on GitHub" only when the node has a url. |
-| `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". |
+| `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". The sidebar folds to icons (`--sidebar-folded`) from the top bar's fold button or the `[` key; the choice is kept in `citadel-sidebar`. `/graph`, `/ask` and `/systems` are bleed pages: no width cap, no padding. |
 
 Adding a component:
 
@@ -213,7 +290,13 @@ Adding a component:
   colour alone.
 - Icons next to text are `aria-hidden`; icon-only controls have an accessible name.
 - Motion is short (120 to 180ms, ease-out), only answers a user action, and is removed under
-  `prefers-reduced-motion`.
+  `prefers-reduced-motion`. `--duration-slow` (320ms) is for motion that shows where something
+  came from in a walk: a link drawing on from its ends and a node gliding to its new place (with
+  its links). The scroll to a new question is the browser's native smooth scroll, not a token.
+- Micro-interactions in the frame are `--duration-fast`: hover fills and colours fade, pressed
+  controls give a little (`scale(0.97)` for sidebar items, `0.94` for rail tiles, `0.92` for the
+  fold button), tooltips fade in a few pixels from their trigger, and the drawer's scrim fades in.
+  The press is dropped under reduced motion.
 
 ## 9. Writing
 

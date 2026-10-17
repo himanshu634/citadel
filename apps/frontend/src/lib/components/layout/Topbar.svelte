@@ -1,12 +1,13 @@
 <!--
 @component
-Top bar: menu button (narrow screens), the ask field, the current company's status, theme. Below
+Top bar: the sidebar's fold button (wide screens) or the menu button (narrow screens), the ask
+field, the current company's status, theme. Below
 900px the menu button is the current company's monogram tile, the same ink tile as on the rail, so
 the drawer it opens reads as "this company's navigation". The ask field is closed while there is
 nothing to ask (building, empty, unreachable, invalid) and says why in its placeholder.
 -->
 <script lang="ts">
-	import { CircleAlert, CloudOff, LoaderCircle, Menu as MenuIcon, Search } from '@lucide/svelte';
+	import { CircleAlert, CloudOff, LoaderCircle, Menu as MenuIcon, PanelLeftClose, Search } from '@lucide/svelte';
 	import type { Component } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -16,8 +17,14 @@ nothing to ask (building, empty, unreachable, invalid) and says why in its place
 	import { monogram } from '$lib/companies';
 	import { askFieldOf, statusLineOf } from '$lib/topbar';
 
-	type Props = { onmenu: () => void; menuOpen: boolean };
-	let { onmenu, menuOpen }: Props = $props();
+	type Props = {
+		onmenu: () => void;
+		menuOpen: boolean;
+		/** The sidebar is folded to its icons. */
+		folded?: boolean;
+		onfold?: () => void;
+	};
+	let { onmenu, menuOpen, folded = false, onfold }: Props = $props();
 
 	const companies = getCompanies();
 	const company = $derived(companies.currentCompany);
@@ -56,6 +63,19 @@ nothing to ask (building, empty, unreachable, invalid) and says why in its place
 </script>
 
 <header class="topbar">
+	<button
+		type="button"
+		class="fold-button"
+		aria-label={folded ? 'Show the sidebar' : 'Hide the sidebar'}
+		aria-expanded={!folded}
+		aria-controls="app-sidebar"
+		aria-keyshortcuts="["
+		title={folded ? 'Show the sidebar ([)' : 'Hide the sidebar ([)'}
+		onclick={onfold}
+	>
+		<!-- One icon: its chevron turns to point where the sidebar will go. -->
+		<PanelLeftClose class={['fold-icon', { folded }]} aria-hidden="true" />
+	</button>
 	<button
 		type="button"
 		class={['menu-button', { tile: mono !== null }]}
@@ -129,6 +149,48 @@ nothing to ask (building, empty, unreachable, invalid) and says why in its place
 		color: var(--color-text);
 		cursor: pointer;
 	}
+	.fold-button {
+		display: grid;
+		flex: none;
+		place-items: center;
+		width: var(--control-md);
+		height: var(--control-md);
+		margin-left: calc(-1 * var(--space-2));
+		border: 0;
+		border-radius: var(--radius-md);
+		background: none;
+		color: var(--color-text-muted);
+		cursor: pointer;
+		transition:
+			background-color var(--duration-fast) var(--ease-out),
+			color var(--duration-fast) var(--ease-out),
+			transform var(--duration-fast) var(--ease-out);
+	}
+	.fold-button:hover {
+		background: var(--color-surface-sunken);
+		color: var(--color-text);
+	}
+	.fold-button:active {
+		transform: scale(0.92);
+	}
+	.fold-button :global(svg) {
+		width: 1.15rem;
+		height: 1.15rem;
+	}
+	/* The chevron (the icon's last path) turns over in place, in step with the sidebar. */
+	.fold-button :global(.fold-icon path:last-child) {
+		transform-box: fill-box;
+		transform-origin: center;
+		transition: transform var(--duration-base) var(--ease-out);
+	}
+	.fold-button :global(.fold-icon.folded path:last-child) {
+		transform: scaleX(-1);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.fold-button:active {
+			transform: none;
+		}
+	}
 	.menu-button :global(svg) {
 		width: 1.25rem;
 		height: 1.25rem;
@@ -177,6 +239,9 @@ nothing to ask (building, empty, unreachable, invalid) and says why in its place
 	@media (max-width: 900px) {
 		.menu-button {
 			display: grid;
+		}
+		.fold-button {
+			display: none;
 		}
 	}
 	@media (max-width: 640px) {
