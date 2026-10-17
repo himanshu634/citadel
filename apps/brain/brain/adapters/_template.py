@@ -17,7 +17,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Literal
 
-from brain.adapters.base import SourceUnavailable
+from brain.adapters.base import SourceProblem, SourceUnavailable
 from brain.canonical import CanonicalRecord, WorkItem
 from brain.config import CompanyConfig, SourceConfig
 
@@ -32,6 +32,7 @@ class TemplateSource(SourceConfig):
 class TemplateAdapter:
     name = "template"
     source_model = TemplateSource
+    downloads = True  # fetch does network I/O (the Sources page offers Sync for this source)
 
     def key(self, source: TemplateSource) -> str:
         return f"{self.name}:{source.team}"
@@ -40,6 +41,14 @@ class TemplateAdapter:
         cache_dir.mkdir(parents=True, exist_ok=True)
         # page = httpx.get(...).json()
         # (cache_dir / "page_0001.json").write_text(json.dumps(page))
+
+    def check(
+        self, company: CompanyConfig, source: TemplateSource, cache_dir: Path
+    ) -> SourceProblem | None:
+        """Optional: what would stop the next build reading this source (no network)."""
+        # if not get_settings().template_api_key:
+        #     return SourceProblem("No API key: set TEMPLATE_API_KEY in .env", blocks=True)
+        return None
 
     def records(
         self, company: CompanyConfig, source: TemplateSource, cache_dir: Path

@@ -2,7 +2,8 @@
 @component
 The dashboard frame: company rail and sidebar on the left, top bar, scrolling content. The top
 bar's fold button (or the [ key) folds the sidebar to its icons; the choice is kept in this
-browser (`citadel-sidebar`). Below 900px the rail and sidebar become one drawer, side by side,
+browser (`citadel-sidebar`). The fold animates the sidebar column's width (`--duration-base`);
+the page load never does, so a kept fold is drawn folded from the start. Below 900px the rail and sidebar become one drawer, side by side,
 opened from the top bar, and the sidebar is never folded there (the kept choice comes back
 above 900px; `[` does nothing below it). Provides the tooltip context for
 everything inside.
@@ -22,14 +23,16 @@ everything inside.
 	import Topbar from './Topbar.svelte';
 
 	let { children }: { children: Snippet } = $props();
-	// Graph and Ask fill the window under the top bar: no content width cap, no padding (design-system.md).
-	const bleed = $derived(/\/(graph|ask)$/.test(page.url.pathname));
+	// Graph, Ask and Systems fill the window under the top bar: no content width cap, no padding (design-system.md).
+	const bleed = $derived(/\/(graph|ask|systems)$/.test(page.url.pathname));
 	const companies = getCompanies();
 	let navOpen = $state(false);
 	const close = () => (navOpen = false);
 
 	const FOLD_KEY = 'citadel-sidebar';
 	let folded = $state(false);
+	// Motion answers a fold, never the page load: it is off until the kept choice has been painted.
+	let moving = $state(false);
 	// Read once in the browser: storage can be blocked (private window), and then it stays open.
 	$effect(() => {
 		try {
@@ -37,6 +40,9 @@ everything inside.
 		} catch {
 			// keep it open
 		}
+		// Two frames: the first paints the kept state, the second turns the transitions on.
+		let frame = requestAnimationFrame(() => (frame = requestAnimationFrame(() => (moving = true))));
+		return () => cancelAnimationFrame(frame);
 	});
 	function fold() {
 		folded = !folded;
@@ -69,7 +75,7 @@ everything inside.
 <svelte:window {onkeydown} />
 
 <Tooltip.Provider delayDuration={300}>
-	<div class={['shell', { folded: sideFolded }]}>
+	<div class={['shell', { folded: sideFolded, moving }]}>
 		<div id="app-sidebar" class={['side', { open: navOpen }]}>
 			<CompanyRail
 				companies={companies.list}
@@ -101,6 +107,12 @@ everything inside.
 		display: grid;
 		grid-template-columns: calc(var(--rail-width) + var(--sidebar-width)) minmax(0, 1fr);
 		min-height: 100dvh;
+		/* Read by the sidebar's fades: 0 until the first paint, then 1. */
+		--fold-motion: 0;
+	}
+	.shell.moving {
+		--fold-motion: 1;
+		transition: grid-template-columns var(--duration-base) var(--ease-out);
 	}
 	.shell.folded {
 		grid-template-columns: calc(var(--rail-width) + var(--sidebar-folded)) minmax(0, 1fr);
@@ -159,12 +171,16 @@ everything inside.
 			z-index: 31;
 			width: min(calc(var(--rail-width) + var(--sidebar-width)), 92vw);
 			transform: translateX(-100%);
-			transition: transform var(--duration-base) var(--ease-out);
+			/* Hidden only once it has slid out, so closing slides too. */
+			transition:
+				transform var(--duration-base) var(--ease-out),
+				visibility 0s linear var(--duration-base);
 			visibility: hidden;
 		}
 		.side.open {
 			transform: none;
 			visibility: visible;
+			transition: transform var(--duration-base) var(--ease-out);
 		}
 		.scrim {
 			display: block;
@@ -173,6 +189,12 @@ everything inside.
 			z-index: 30;
 			border: 0;
 			background: var(--color-scrim);
+			animation: scrim-in var(--duration-base) var(--ease-out);
+		}
+	}
+	@keyframes scrim-in {
+		from {
+			opacity: 0;
 		}
 	}
 </style>

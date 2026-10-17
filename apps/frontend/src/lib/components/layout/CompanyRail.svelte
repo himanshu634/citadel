@@ -178,10 +178,22 @@ accessible name says the same in words. The tile list scrolls; the add tile stay
 		background: var(--color-surface);
 		color: var(--color-text);
 		text-decoration: none;
-		transition: background var(--duration-fast) var(--ease-out);
+		transition:
+			background var(--duration-fast) var(--ease-out),
+			border-color var(--duration-fast) var(--ease-out),
+			color var(--duration-fast) var(--ease-out),
+			transform var(--duration-fast) var(--ease-out);
 	}
 	.tile:hover {
 		background: var(--color-surface-sunken);
+	}
+	.tile:active {
+		transform: scale(0.94);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.tile:active {
+			transform: none;
+		}
 	}
 	.mono {
 		font-size: var(--rail-mark);

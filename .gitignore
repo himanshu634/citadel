@@ -8,3 +8,7 @@ data/*
 !data/.gitkeep
 node_modules/
 .DS_Store
+
+# Local only: agent plans/specs and the ASD-STE100 system docs
+docs/superpowers/
+docs/systems/

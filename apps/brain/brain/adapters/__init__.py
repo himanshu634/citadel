@@ -6,7 +6,7 @@ line here. See _template.py.
 
 from __future__ import annotations
 
-from brain.adapters.base import Adapter, SourceUnavailable
+from brain.adapters.base import Adapter, SourceProblem, SourceUnavailable
 from brain.adapters.canonical_jsonl import CanonicalJsonlAdapter
 from brain.adapters.github import GithubAdapter
 from brain.adapters.linear import LinearAdapter
@@ -27,4 +27,4 @@ def get(source_type: str) -> Adapter:
         raise KeyError(f"no adapter registered for source type {source_type!r}") from None
 
 
-__all__ = ["REGISTRY", "Adapter", "SourceUnavailable", "get"]
+__all__ = ["REGISTRY", "Adapter", "SourceProblem", "SourceUnavailable", "get"]
