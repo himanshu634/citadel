@@ -286,17 +286,15 @@ def load(slug: str, records: Iterable[CanonicalRecord], origin: str | None = Non
         rep,
     )
     comments: list[Comment] = of(Comment)
-    _run(
+    _write_comment_chunks(
         slug,
-        "load/comment_chunk",
         [
             {
                 **_base(c),
-                "uid": f"chunk:{c.uid}",
+                "comment_uid": c.uid,
                 "work_item_uid": c.work_item_uid,
                 "author_uid": person_uid(c.author_login),
                 "text": c.body,
-                "text_hash": text_hash(c.body),
                 "created_at": iso(c.created_at),
                 "ts": epoch(c.created_at),
             }
@@ -330,29 +328,81 @@ def load(slug: str, records: Iterable[CanonicalRecord], origin: str | None = Non
     return rep
 
 
+def _pieces(first_uid: str, text: str, row: dict[str, Any]) -> list[dict[str, Any]]:
+    """Chunk rows for `text` cut by `split_text`, each a copy of `row`. Piece 0 keeps
+    `first_uid`, the uid the whole text had before long text was cut, so a short text's chunk
+    and its vector stay as they were; piece i is `<first_uid>:<i>`. A blank text keeps one
+    empty chunk, so a blank comment is still counted."""
+    texts = split_text(text) or [text]
+    return [
+        {
+            **row,
+            "uid": first_uid if i == 0 else f"{first_uid}:{i}",
+            "idx": i,
+            "text": t,
+            "text_hash": text_hash(t),
+        }
+        for i, t in enumerate(texts)
+    ]
+
+
+def _write_body_chunks(slug: str, items: list[dict[str, Any]], rep: LoadReport) -> None:
+    """Write the chunks of work-item texts: {uid (the work item), title, body, created_at, ts,
+    source, url}. A text now cut into fewer pieces loses the extra chunks."""
+    rows, prune = [], []
+    for w in items:
+        base = {k: w[k] for k in ("created_at", "ts", "source", "url")}
+        pieces = _pieces(
+            f"chunk:{w['uid']}:body",
+            _titled(w["title"], w["body"] or ""),
+            {**base, "work_item_uid": w["uid"]},
+        )
+        rows += pieces
+        prune.append({"work_item_uid": w["uid"], "keep": len(pieces)})
+    _run(slug, "load/work_item_chunk", rows, rep)
+    _run(slug, "load/prune_work_item_chunks", prune, rep)
+
+
+def _write_comment_chunks(slug: str, comments: list[dict[str, Any]], rep: LoadReport) -> None:
+    """Write the chunks of comments: {comment_uid, work_item_uid, author_uid, text, created_at,
+    ts, source, url}. A comment now cut into fewer pieces loses the extra chunks."""
+    rows, prune = [], []
+    for c in comments:
+        pieces = _pieces(f"chunk:{c['comment_uid']}", c["text"], c)
+        rows += pieces
+        prune.append(
+            {
+                "work_item_uid": c["work_item_uid"],
+                "comment_uid": c["comment_uid"],
+                "keep": len(pieces),
+            }
+        )
+    _run(slug, "load/comment_chunk", rows, rep)
+    _run(slug, "load/prune_comment_chunks", prune, rep)
+
+
 def _load_body_chunks(
     slug: str, items: list[WorkItem], docs: list[Document], rep: LoadReport
 ) -> None:
-    """Chunks for the text of work items (one each) and documents (cut by `split_text`).
+    """Chunks for the text of work items and documents, both cut by `split_text`.
 
     Only the records of this load are written, so an incremental ingest touches only what
-    changed. A document that now has fewer chunks loses the extra ones.
+    changed. A text that now has fewer chunks loses the extra ones.
     """
-    item_rows = []
-    for w in items:
-        text = _titled(w.title, w.body)
-        item_rows.append(
+    _write_body_chunks(
+        slug,
+        [
             {
                 **_base(w),
-                "uid": f"chunk:{w.uid}:body",
-                "work_item_uid": w.uid,
-                "text": text,
-                "text_hash": text_hash(text),
+                "title": w.title,
+                "body": w.body,
                 "created_at": iso(w.created_at),
                 "ts": epoch(w.created_at),
             }
-        )
-    _run(slug, "load/work_item_chunk", item_rows, rep)
+            for w in items
+        ],
+        rep,
+    )
 
     doc_rows = []
     prune_rows = []
@@ -375,11 +425,18 @@ def _load_body_chunks(
     _run(slug, "load/prune_document_chunks", prune_rows, rep)
 
 
-def backfill_body_chunks(slug: str) -> int:
-    """Write the body chunk of every work item that has none (a graph built before work items
-    had them; an incremental ingest skips the old items). Returns the chunks written."""
-    result = db.run(slug, "load/backfill_body_chunks", {"company": slug})
-    return result[0]["n"] if result else 0
+def backfill_chunks(slug: str) -> int:
+    """Cut the text of graphs built before it was cut: give every work item that has no body
+    chunk its chunks, and split each body or comment chunk written whole (it has no idx). An
+    incremental ingest never reloads old items, so they would stay as they are. Chunks are
+    written exactly as a load writes them; a short text's chunk keeps its text and hash, so it
+    is not embedded again. Returns the texts written (0 when nothing was left to do)."""
+    rep = LoadReport()
+    items = db.run(slug, "load/unsplit_bodies", read_only=True)
+    _write_body_chunks(slug, items, rep)
+    comments = db.run(slug, "load/unsplit_comments", read_only=True)
+    _write_comment_chunks(slug, comments, rep)
+    return len(items) + len(comments)
 
 
 def _load_ownership(slug: str, owns: list[Ownership], rep: LoadReport) -> None:

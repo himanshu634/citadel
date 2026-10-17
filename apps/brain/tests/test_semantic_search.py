@@ -100,3 +100,19 @@ def test_bot_text_embedded_before_the_filter_is_never_returned():
     finally:
         embeddings.set_embedder(None)
         db.delete_graph(slug)
+
+
+def test_a_graph_with_no_vectors_says_to_embed(synthetic_graph):
+    # brain_test_synthetic is loaded but never embedded
+    embeddings.set_embedder(FakeEmbedder())
+    try:
+        with pytest.raises(EmbeddingUnavailable, match="make embed SLUG=test_synthetic"):
+            tools.semantic_search(synthetic_graph, text="invoice")
+    finally:
+        embeddings.set_embedder(None)
+
+
+def test_vectors_from_another_model_are_an_error_not_nonsense(embedded_graph):
+    embeddings.set_embedder(FakeEmbedder(model="other"))  # the fixture resets it afterwards
+    with pytest.raises(EmbeddingUnavailable, match="embedded with fake, not other"):
+        tools.semantic_search(embedded_graph, text="rounding off by a cent on annual plans")

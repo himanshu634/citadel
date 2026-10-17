@@ -5,6 +5,7 @@
 //          tools.py embeds the question with the same model as the chunks.
 // params:  $vector (the question's embedding, list of floats), $k (nearest chunks to fetch),
 //          $kinds (list of chunk kinds 'comment' / 'work_item' / 'document', or null for all),
+//          $model (the embedder's model: vectors from another model are not comparable),
 //          $limit (int, rows)
 // returns: uid (the source WorkItem / Document), label, kind (the WorkItem's kind:
 //          pull_request / issue / ticket / thread; 'document' for a Document), number, title,
@@ -19,11 +20,12 @@
 //          a source with two AUTHORED edges is still one row. Bot text (a comment by, or the
 //          body of a work item authored by, a Person with is_bot = true) is never returned, as
 //          chunks_to_embed never embeds it; this also hides vectors written before that rule.
-//          Like $kinds it filters after the nearest-neighbour step. Never returns a vector.
+//          Like $kinds it filters after the nearest-neighbour step, as does $model; when the
+//          search returns nothing, tools.py asks embedded_models why. Never returns a vector.
 // example: make query TOOL=semantic_search P="text='why do invoices get charged twice'"
 CALL db.idx.vector.queryNodes('Chunk', 'embedding', $k, vecf32($vector)) YIELD node, score
 WITH node AS c, score
-WHERE $kinds IS NULL OR c.kind IN $kinds
+WHERE c.embed_model = $model AND ($kinds IS NULL OR c.kind IN $kinds)
 OPTIONAL MATCH (commenter:Person {uid: c.author_uid})
 WITH c, score, commenter
 WHERE coalesce(commenter.is_bot, false) = false

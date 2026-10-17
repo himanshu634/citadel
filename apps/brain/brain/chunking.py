@@ -1,16 +1,20 @@
 """Split text into chunks and fingerprint it.
 
-Why: semantic search embeds short passages, not whole PR bodies or documents. The loader turns
-each work-item body, document and comment into `Chunk` nodes; this module decides where long
-text is cut and gives each text a hash, so the embed stage can tell which chunks changed. Pure:
-no database, no model.
+Why: semantic search embeds short passages, not whole PR bodies or documents. The embedding
+model reads only the start of a text (bge: 512 tokens, about 2000 characters of English) and
+ignores the rest, so text past that would never be found. The loader cuts each work-item body,
+document and comment with `split_text` and writes each piece as a `Chunk`; this module decides
+where long text is cut and gives each text a hash, so the embed stage can tell which chunks
+changed. Pure: no database, no model.
 """
 
 from __future__ import annotations
 
 import hashlib
 
-MAX_CHARS = 1200  # about 300 tokens: inside every embedding model's input limit
+# About 300 tokens of English prose, well inside bge's 512. Code, URLs and non-English text
+# take more tokens per character, so a piece of those can still be cut short by the model.
+MAX_CHARS = 1200
 
 
 def text_hash(text: str) -> str:

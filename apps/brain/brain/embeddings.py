@@ -1,10 +1,15 @@
-"""Text embeddings: the interface, the fastembed provider and the process-wide embedder.
+"""Text embeddings: the interface, its two providers and the process-wide embedder.
 
 Why: the embed stage (writes Chunk.embedding) and the semantic search tool (embeds the question)
 must use the same model, and the engine must keep working without one. Code asks `get_embedder()`
 and gets None when embeddings are off (`EMBEDDING_PROVIDER=none`), so every caller has one place
-to handle "no embeddings". fastembed runs a small ONNX model on the CPU, so it needs no API key
-and no GPU; it is imported only when the model first loads, so importing this module is cheap.
+to handle "no embeddings". Two providers:
+- `fastembed` (default) runs a small ONNX model on this machine's CPU: no API key, no GPU, and no
+  text leaves the machine. It is imported only when the model first loads, so importing this
+  module is cheap.
+- `gemini` calls Google's Gemini embedding API with GEMINI_API_KEY: no model in memory, but chunk
+  text and questions go to Google (Google's terms keep paid use, credits included, out of
+  product training).
 Tests swap in a fake with `set_embedder` (`brain.testing.FakeEmbedder`).
 
 The embed stage (`embed_pending`) runs after ingest. A chunk is embedded again only when its
@@ -19,10 +24,14 @@ batches.
 
 from __future__ import annotations
 
+import math
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
+
+import httpx
 
 from brain import loader
 from brain.chunking import text_hash
@@ -36,9 +45,23 @@ class EmbeddingUnavailable(RuntimeError):
     """The embedding model cannot be used. The message is a sentence for a person."""
 
 
+DEFAULT_MODEL = {"fastembed": "BAAI/bge-base-en-v1.5", "gemini": "gemini-embedding-2"}
+
+
+def _check_dim(model: str, dim: int, actual: int) -> None:
+    if actual != dim:
+        raise EmbeddingUnavailable(
+            f"Embedding model {model} produces {actual}-dimensional vectors but "
+            f"EMBEDDING_DIM={dim}. Set EMBEDDING_DIM={actual} (and rebuild the vector "
+            "index), or choose a model with that size."
+        )
+
+
 class Embedder(Protocol):
     """Turns text into vectors of `dim` floats. Passages and queries are embedded differently
-    (retrieval models take an instruction on the query side), so they are separate calls."""
+    (retrieval models take an instruction on the query side), so they are separate calls.
+    An embedder may also have `start_message`: what the build page shows while the embed stage
+    starts (else `LOADING_MODEL`)."""
 
     model: str
     dim: int
@@ -50,43 +73,169 @@ class Embedder(Protocol):
 
 class FastEmbedEmbedder:
     """fastembed's TextEmbedding. The model loads on the first call (and downloads into
-    data/models the first time); `dim` is checked against the loaded model right away."""
+    data/models the first time); `dim` is checked against the loaded model right away.
 
-    def __init__(self, model: str, dim: int) -> None:
+    A failed load (no network, a wrong EMBEDDING_DIM) is remembered for `RETRY_AFTER` seconds:
+    every call in that time raises the same sentence at once instead of trying the download
+    again (semantic search asks on every question). One thread loads; a question (`query`)
+    that comes while it does is refused with a sentence rather than kept waiting for a
+    download, while the embed stage (`passages`) waits for it."""
+
+    RETRY_AFTER = 300.0  # seconds a failed load is remembered
+    start_message = "Loading the embedding model (the first run downloads about 0.2 GB)"
+
+    def __init__(self, model: str, dim: int, clock: Callable[[], float] = time.monotonic) -> None:
         self.model = model
         self.dim = dim
         self._engine: Any = None
         self._lock = threading.Lock()
+        self._clock = clock
+        self._failed: tuple[float, str] | None = None  # when the last load failed, and why
 
     def check_dim(self, actual: int) -> None:
-        if actual != self.dim:
-            raise EmbeddingUnavailable(
-                f"Embedding model {self.model} produces {actual}-dimensional vectors but "
-                f"EMBEDDING_DIM={self.dim}. Set EMBEDDING_DIM={actual} (and rebuild the vector "
-                "index), or choose a model with that size."
-            )
+        _check_dim(self.model, self.dim, actual)
 
-    def _load(self) -> Any:
-        with self._lock:
-            if self._engine is None:
-                try:
-                    from fastembed import TextEmbedding
+    def _raise_recent_failure(self) -> None:
+        if self._failed is not None and self._clock() - self._failed[0] < self.RETRY_AFTER:
+            raise EmbeddingUnavailable(self._failed[1])
 
-                    engine = TextEmbedding(self.model, cache_dir=str(MODEL_CACHE))
-                    size = engine.embedding_size
-                except Exception as exc:
-                    raise EmbeddingUnavailable(
-                        f"Could not load embedding model {self.model}: {exc}"
-                    ) from exc
-                self.check_dim(size)
-                self._engine = engine
+    def _load(self, wait: bool) -> Any:
+        if self._engine is not None:
             return self._engine
+        self._raise_recent_failure()
+        if not self._lock.acquire(blocking=wait):
+            raise EmbeddingUnavailable(
+                f"Embedding model {self.model} is still loading (the first run downloads it). "
+                "Try again in a minute."
+            )
+        try:
+            if self._engine is None:
+                self._raise_recent_failure()  # the load this thread waited on failed
+                try:
+                    self._engine = self._new_engine()
+                except EmbeddingUnavailable as exc:
+                    self._failed = (self._clock(), str(exc))
+                    raise
+                self._failed = None
+            return self._engine
+        finally:
+            self._lock.release()
+
+    def _new_engine(self) -> Any:
+        try:
+            from fastembed import TextEmbedding
+
+            engine = TextEmbedding(self.model, cache_dir=str(MODEL_CACHE))
+            size = engine.embedding_size
+        except Exception as exc:
+            raise EmbeddingUnavailable(
+                f"Could not load embedding model {self.model}: {exc}"
+            ) from exc
+        self.check_dim(size)
+        return engine
 
     def passages(self, texts: list[str]) -> list[list[float]]:
-        return [v.tolist() for v in self._load().passage_embed(texts)]
+        return [v.tolist() for v in self._load(wait=True).passage_embed(texts)]
 
     def query(self, text: str) -> list[float]:
-        return next(iter(self._load().query_embed(text))).tolist()
+        return next(iter(self._load(wait=False).query_embed(text))).tolist()
+
+
+GEMINI_API = "https://generativelanguage.googleapis.com/v1beta"
+
+
+class GeminiEmbedder:
+    """Google's Gemini embedding API (`batchEmbedContents`), asked for `dim`-sized vectors so
+    the vector index keeps its size (768 is one of the sizes Google recommends).
+
+    gemini-embedding-2 takes the retrieval task as a prefix of the text; gemini-embedding-001
+    takes it as `taskType`. Vectors are L2-normalised here, since 001 returns shortened vectors
+    unnormalised. Rate limits and server errors are retried with backoff; every other failure
+    is an `EmbeddingUnavailable` sentence, so the embed stage skips with it and semantic search
+    reports it."""
+
+    BATCH = 100  # texts per request
+    TRIES = 4  # attempts per request on a rate limit or a server error
+    RETRY_STATUS = {429, 500, 502, 503, 504}
+
+    def __init__(
+        self,
+        model: str,
+        dim: int,
+        api_key: str | None,
+        client: httpx.Client | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self.model = model
+        self.dim = dim
+        self.start_message = f"Embedding with {model} (Google Gemini API)"
+        self._key = api_key
+        self._client = client or httpx.Client(timeout=60.0)
+        self._sleep = sleep
+
+    def passages(self, texts: list[str]) -> list[list[float]]:
+        return self._embed(texts, "RETRIEVAL_DOCUMENT", "title: none | text: {}")
+
+    def query(self, text: str) -> list[float]:
+        return self._embed([text], "RETRIEVAL_QUERY", "task: search result | query: {}")[0]
+
+    def _embed(self, texts: list[str], task: str, prefix: str) -> list[list[float]]:
+        if not self._key:
+            raise EmbeddingUnavailable(
+                "GEMINI_API_KEY is not set, so the Gemini embedding model cannot be used. Set "
+                "it in .env, or set EMBEDDING_PROVIDER=fastembed."
+            )
+        old = self.model.endswith("embedding-001")  # takes taskType, not a text prefix
+        out: list[list[float]] = []
+        for i in range(0, len(texts), self.BATCH):
+            requests = [
+                {
+                    "model": f"models/{self.model}",
+                    "content": {"parts": [{"text": t if old else prefix.format(t)}]},
+                    "outputDimensionality": self.dim,
+                    **({"taskType": task} if old else {}),
+                }
+                for t in texts[i : i + self.BATCH]
+            ]
+            out += [_normalised(v) for v in self._post(requests)]
+        return out
+
+    def _post(self, requests: list[dict[str, Any]]) -> list[list[float]]:
+        url = f"{GEMINI_API}/models/{self.model}:batchEmbedContents"
+        for attempt in range(self.TRIES):
+            try:
+                r = self._client.post(
+                    url, json={"requests": requests}, headers={"x-goog-api-key": self._key or ""}
+                )
+            except httpx.HTTPError as exc:
+                raise EmbeddingUnavailable(
+                    f"Could not reach the Gemini API for embedding model {self.model}: {exc}"
+                ) from exc
+            if r.status_code in self.RETRY_STATUS and attempt < self.TRIES - 1:
+                self._sleep(2.0**attempt)
+                continue
+            if r.status_code != 200:
+                raise EmbeddingUnavailable(self._error(r))
+            vectors = [e["values"] for e in r.json()["embeddings"]]
+            for v in vectors:
+                _check_dim(self.model, self.dim, len(v))
+            return vectors
+        raise AssertionError("unreachable")  # the last attempt returns or raises
+
+    def _error(self, r: httpx.Response) -> str:
+        try:
+            message = r.json()["error"]["message"]
+        except (ValueError, KeyError, TypeError):
+            message = r.text[:200]
+        sentence = f"Gemini embedding model {self.model} failed (HTTP {r.status_code}): {message}"
+        if r.status_code == 404:
+            sentence += " Set EMBEDDING_MODEL to a Gemini embedding model, e.g. gemini-embedding-2."
+        return sentence
+
+
+def _normalised(v: list[float]) -> list[float]:
+    norm = math.sqrt(sum(x * x for x in v))
+    return [x / norm for x in v] if norm else v
 
 
 _lock = threading.Lock()
@@ -105,7 +254,12 @@ def get_embedder() -> Embedder | None:
         return None
     with _lock:
         if _default is None:
-            _default = FastEmbedEmbedder(settings.embedding_model, settings.embedding_dim)
+            provider = settings.embedding_provider
+            model = settings.embedding_model or DEFAULT_MODEL[provider]
+            if provider == "gemini":
+                _default = GeminiEmbedder(model, settings.embedding_dim, settings.gemini_api_key)
+            else:
+                _default = FastEmbedEmbedder(model, settings.embedding_dim)
         return _default
 
 
@@ -123,12 +277,13 @@ def set_embedder(e: Embedder | None) -> None:
 
 EMBEDDINGS_OFF = (
     "Embeddings are off (EMBEDDING_PROVIDER=none), so semantic search finds nothing. "
-    "Set EMBEDDING_PROVIDER=fastembed and run make embed."
+    "Set EMBEDDING_PROVIDER=fastembed (or gemini) and run make embed."
 )
 
 
-# On the stage's first event, before any model call: the first load (and download) takes a while.
-LOADING_MODEL = "Loading the embedding model (the first run downloads about 0.2 GB)"
+# On the stage's first event, before any model call, unless the embedder has its own
+# `start_message`: the first load (and download) of a local model takes a while.
+LOADING_MODEL = FastEmbedEmbedder.start_message
 
 PROGRESS_EVERY = 1.0  # seconds between two progress events of the embed stage
 _clock = time.monotonic  # tests replace it to control which batches report
@@ -158,7 +313,7 @@ def embed_pending(
     e = embedder if embedder is not None else get_embedder()
     if e is None:
         return _skip(slug, report, EMBEDDINGS_OFF, emit)
-    emit(BuildEvent(slug, "embed", "running", message=LOADING_MODEL))
+    emit(BuildEvent(slug, "embed", "running", message=getattr(e, "start_message", LOADING_MODEL)))
     if everything:
         loader.clear_embedded(slug)
     done: set[str] = set()
@@ -190,8 +345,11 @@ def embed_pending(
             e.model,
         )
         report.embedded += written
-        if written == 0:
-            break  # nothing was stored, so the same batch would come back
+        if written == 0:  # the same batch would come back: stop, and say so
+            reason = (
+                f"No vectors were stored for {len(rows)} chunks (were they deleted meanwhile?)."
+            )
+            return _skip(slug, report, reason, emit)
         done.update(uids)
         # Progress, and the point where a build job's stop (raised by on_event) takes effect.
         now = _clock()

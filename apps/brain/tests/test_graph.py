@@ -264,9 +264,9 @@ def test_backfill_writes_missing_body_chunks_as_a_load_would():
         loaded = db.run_text(slug, BODY_CHUNKS).result_set
         assert len(loaded) == 3
         db.run_text(slug, "MATCH (c:Chunk {kind: 'work_item'}) DETACH DELETE c")
-        assert loader.backfill_body_chunks(slug) == 3
+        assert loader.backfill_chunks(slug) == 3
         assert db.run_text(slug, BODY_CHUNKS).result_set == loaded
-        assert loader.backfill_body_chunks(slug) == 0
+        assert loader.backfill_chunks(slug) == 0
     finally:
         db.delete_graph(slug)
 
@@ -279,7 +279,7 @@ def test_a_backfilled_body_chunk_is_not_embedded_again_by_a_later_load():
     try:
         loader.load(slug, backfill_items())
         db.run_text(slug, "MATCH (c:Chunk {kind: 'work_item'}) DETACH DELETE c")
-        loader.backfill_body_chunks(slug)
+        loader.backfill_chunks(slug)
         assert embed_pending(slug, FakeEmbedder()).embedded == 3
         hashed = "MATCH (c:Chunk) RETURN count(c.text_hash)"
         assert db.run_text(slug, hashed).result_set[0][0] == 3  # filled when embedded
