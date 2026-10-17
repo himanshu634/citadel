@@ -49,6 +49,15 @@ def test_zero_source_answer_opens_gap(store):
     assert [g.kind for g in store.gaps.values()] == ["failed_question"]
 
 
+def test_an_interview_turn_with_nothing_to_ask_opens_no_gap(store):
+    """ "Ask me questions" with no open gaps answers without a source; that is not a failure."""
+    told = trace(question="Ask me questions.", text="No open questions.", sources=0, cited=[],
+                 tools=["open_gaps"])  # fmt: skip
+    assert note_trace(store, told, NOW) is None
+    died = told.model_copy(update={"text": None, "stop": "error"})
+    assert note_trace(store, died, NOW) is not None
+
+
 def test_good_turn_no_gap(store):
     assert note_trace(store, trace(sources=2, cited=["pr:1", "pr:2"]), NOW) is None
     assert store.gaps == {}

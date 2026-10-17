@@ -199,3 +199,15 @@
         tools_any: [semantic_search]
         text_any: [backup]
         max_steps: 5
+
+# --- interview: the person offers to answer ----------------------------------------------------
+
+- id: interview-asks
+  tags: [interview]
+  why: Asked for questions, the brain asks from its open gaps, not a menu of what it can answer; nothing is filed before the person replies.
+  turns:
+    - question: Ask me questions.
+      expect:
+        tools_all: [open_gaps]
+        tools_none: [record_testimony]
+        max_steps: 6

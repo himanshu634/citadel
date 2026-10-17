@@ -80,6 +80,29 @@ def graph_toolset() -> Toolset:
     return Toolset(tools=tools.TOOLS, run=tools.call)
 
 
+def ask_toolset() -> Toolset:
+    """What Ask uses: the graph tools plus the interview tools on the real ledger."""
+    return with_interview(graph_toolset())
+
+
+def with_interview(
+    base: Toolset, ledger: Callable[[str], Any] | None = None, brain: Any = None
+) -> Toolset:
+    """`base` plus the interview tools (`keeper/interview.py`), which read the Keeper's gaps
+    and file a person's reply for a lead. `ledger(slug)` gives the keeper_<slug> store
+    (default: FalkorDB); tests pass a `MemoryKeeperStore` and a fake brain."""
+    from agents.keeper import interview
+
+    extra, run_extra = interview.ask_tools(ledger or interview.keeper_ledger, brain)
+
+    def run(slug: str, name: str, **params: Any) -> list[BaseModel]:
+        if name in extra:
+            return run_extra(slug, name, **params)
+        return base.run(slug, name, **params)
+
+    return Toolset(tools={**base.tools, **extra}, run=run)
+
+
 def _definition(tool: GraphTool) -> dict[str, Any]:
     schema = tool.params.model_json_schema()
     schema.pop("title", None)

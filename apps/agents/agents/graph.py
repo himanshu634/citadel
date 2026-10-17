@@ -3,7 +3,8 @@
     START -> brain loop (loop.py: call_claude <-> run_tools) -> END
 
 Every turn is a question for the brain loop. Knowledge is written by the Keeper
-(`agents/keeper`), not by this graph.
+(`agents/keeper`), not by this graph: a turn may file what a person said as a claim waiting for
+a lead (`keeper/interview.py`), but only a lead's approval puts it in the brain.
 
 Compiled with a checkpointer (`checkpoint.checkpointer(slug)`: graph agent_<slug> on the same
 FalkorDB), every step is saved under the run's `thread_id`.

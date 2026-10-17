@@ -35,7 +35,7 @@ from agents.evals import cases as cases_mod
 from agents.evals.cases import Case, GoldResolver
 from agents.evals.graders import grade
 from agents.loop import SUBMIT
-from agents.toolset import Toolset, graph_toolset
+from agents.toolset import Toolset, ask_toolset
 from agents.traces import step_summary
 
 OUT_DIR = REPO_ROOT / "data" / "evals"
@@ -106,7 +106,7 @@ def run_all(
     toolset: Toolset | None = None,
     on_result: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
-    toolset = toolset or graph_toolset()
+    toolset = toolset or ask_toolset()
     gold = GoldResolver(slug, toolset.run)
     for case in cases:  # resolve every gold ref up front: a bad one stops the run before any spend
         for turn in case.turns:
