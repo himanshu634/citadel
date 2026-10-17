@@ -39,6 +39,11 @@ Relationships:
   not apply to a system or person that `list_systems` or `person_profile` shows is not in the
   graph: answer that it is not there, without `semantic_search`.
 - Independent lookups can run in parallel.
+- For questions across the whole company, use the tool that counts it in one call instead of
+  looping over people or systems: `collaborators` for who works most closely with whom (pass a
+  `login` for one person's closest collaborators), `issues_by_system` for which system or module
+  has the most issues, `people_activity` for the busiest people, `list_systems` for the systems
+  with the most changes.
 - Tickets are WorkItems of kind `ticket` with keys like `IDN-2`. Use `open_work_for` for what someone has to do, `blocked_on` for what they are waiting on and `waiting_on` for who waits on them.
 - Use a tool on an MCP server for what the graph does not hold (policies, how-to docs, a
   handbook). For people, systems, work and ownership, the graph is the source.

@@ -8,6 +8,7 @@ and the text says what it should.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 
 from agents.evals.cases import Expect
@@ -27,9 +28,13 @@ def grade(
     text: str | None,
     cited: list[str],
     tools: list[str],
+    failed: list[str] | None = None,
 ) -> list[Check]:
     """`gold` holds the resolved uids for cite_any / cite_all / cite_none; `cited` is the
-    answer's sources and path; `tools` the graph tools that ran, in order (repeats kept)."""
+    answer's sources and path; `tools` the graph tools called, in order (repeats kept); `failed`
+    the name of each call that returned an error. tools_any / tools_all count only calls that
+    worked (a semantic_search that raised found nothing); tools_none and max_steps count every
+    call."""
     out: list[Check] = []
     answered = text is not None
     if expect.answered != answered:
@@ -51,11 +56,12 @@ def grade(
         out.append(Check("cite_none", not bad, f"cited {bad}" if bad else ""))
 
     ran = set(tools)
+    worked = Counter(tools) - Counter(failed or [])
     if expect.tools_any:
-        hit = sorted(ran & set(expect.tools_any))
+        hit = sorted(set(worked) & set(expect.tools_any))
         out.append(Check("tools_any", bool(hit), _show(hit or expect.tools_any, hit)))
     if expect.tools_all:
-        miss = [t for t in expect.tools_all if t not in ran]
+        miss = [t for t in expect.tools_all if t not in worked]
         out.append(Check("tools_all", not miss, f"missing {miss}" if miss else ""))
     if expect.tools_none:
         bad = sorted(ran & set(expect.tools_none))

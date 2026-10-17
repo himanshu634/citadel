@@ -146,7 +146,7 @@ make lint         # ruff check + format check
 make fmt          # ruff format + autofix
 make fe-check     # svelte-check
 make fe-test      # vitest
-make eval         # agent evals on brain_synthetic; calls the API, so not part of make test
+make eval         # agent evals on brain_synthetic (SLUG=falkordb: the live repo); calls the API, so not part of make test
 ```
 
 Graph tests create throwaway graphs and delete them afterwards, so they don't touch your

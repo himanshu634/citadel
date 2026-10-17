@@ -68,7 +68,11 @@ def run_case(
         ms = round((time.perf_counter() - started) * 1000)
         summary = step_summary(steps, SUBMIT)
         cited = [s.uid for s in answer.sources] + [p.uid for p in answer.path]
-        checks = grade(turn.expect, expected, text=answer.text, cited=cited, tools=summary["tools"])
+        failed = [s["tool"] for s in steps if s.get("tool") != SUBMIT and s.get("error")]
+        checks = grade(
+            turn.expect, expected, text=answer.text, cited=cited, tools=summary["tools"],
+            failed=failed,
+        )  # fmt: skip
         turns.append(
             {
                 "question": turn.question,
