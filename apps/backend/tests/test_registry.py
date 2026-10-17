@@ -65,6 +65,13 @@ def test_validate_draft_reports_source_field_paths():
     assert [e.loc for e in errors] == [["sources", 0, "repo"]]
 
 
+def test_validate_draft_linear_errors_name_the_field_and_team():
+    # The form puts these under the Linear card's workspace field and names the bad team keys.
+    source = {"type": "linear", "workspace": "Acme", "teams": ["IDN", "eng-1"]}
+    _, errors = registry.validate_draft({**VALID_DRAFT, "sources": [source]})
+    assert [e.loc for e in errors] == [["sources", 0, "workspace"], ["sources", 0, "teams", 1]]
+
+
 def test_validate_draft_slug_error_path():
     _, errors = registry.validate_draft({**VALID_DRAFT, "slug": "Acme-Labs"})
     assert ["slug"] in [e.loc for e in errors]
