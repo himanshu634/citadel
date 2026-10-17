@@ -568,6 +568,9 @@ describe('Linear sources', () => {
 			'ENG-1, 1AB: team keys are a capital letter, then up to six capitals or digits, like ENG.'
 		);
 		expect(teamsMessage([], 0, teams)).toBeUndefined();
+		// The API checks the cleaned list: a hand-edited [eng, ENG, PAY-1] errs at teams.1.
+		const cleaned = normalizeTeams(['eng', 'ENG', 'PAY-1']);
+		expect(teamsMessage([err(['sources', 0, 'teams', 1], teamPattern)], 0, cleaned)).toMatch(/^PAY-1: /);
 		expect(teamsMessage([err(['sources', 0, 'teams'], 'Input should be a valid list')], 0, [])).toBe(
 			'Input should be a valid list'
 		);

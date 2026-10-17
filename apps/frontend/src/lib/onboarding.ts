@@ -257,7 +257,8 @@ export function workspaceMessage(errors: FieldError[], index: number, workspace:
 
 /**
  * The message under a Linear card's teams field: the keys that break the pattern, named once in a
- * single sentence, then any other error of the list (such as it not being a list).
+ * single sentence, then any other error of the list (such as it not being a list). Pass `teams`
+ * through `normalizeTeams` first: the API indexes the cleaned list, not a hand-edited file's.
  */
 export function teamsMessage(errors: FieldError[], index: number, teams: string[]): string | undefined {
 	const prefix = ['sources', index, 'teams'];

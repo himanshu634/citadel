@@ -205,7 +205,7 @@ listed at its foot.
 				placeholder="ENG"
 				bind:values={() => teams, (v) => (source.teams = normalizeTeams(v))}
 				hint="Team keys, like ENG in ENG-123. Leave empty to read every team the key can see."
-				error={teamsMessage(errors, index, teams)}
+				error={teamsMessage(errors, index, normalizeTeams(teams))}
 			/>
 		</div>
 	{:else}
