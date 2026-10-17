@@ -13,10 +13,13 @@ on "Review now" (`keeper_budget`) and after an approval (budget 0, so pm's follo
   `start` and `start_soon` raise `BrainBuilding`, and the brain the reviews see reads as
   missing (`graph_exists` False), so a running review stops `brain_unavailable` instead of
   judging claims against the rebuild's empty brain_<slug>. A rebuild calls `stop_for_rebuild`
-  before it drops the graph: stop, then wait up to `rebuild_wait` seconds for the end.
+  before it drops the graph: mark the run `rebuilt`, stop, then wait up to `rebuild_wait`
+  seconds for the end. A rebuilt run's brain reads as missing for the rest of the run, also
+  once the build is over, so a job whose tool loop spanned the rebuild (its reads empty or
+  partial) writes nothing; the review ends stopped `brain_unavailable`, its gaps open again.
 - Without an API key (`has_key`) every run is `skip_review`: re-projection and noticing only,
   recorded `skipped`. No LLM job runs, also not a budget-0 follow-up.
-- A stop sets a flag the review checks between jobs.
+- A stop sets a flag the review checks between jobs; the job running then still writes.
 - `is_running(slug, uid)` says whether this process is running that review (the run's uid is
   made here and handed to the review), so the activity route can tell a live review from one a
   server lost.
@@ -103,18 +106,25 @@ class BrainBuilding(Exception):
 
 
 class _BuildingAware:
-    """The review's brain facts, with brain_<slug> missing while the company builds: the review
-    and decide steps already stop (`BrainUnavailable`) on a missing brain before any write an
-    empty one would make wrong. Asked after the real check, so a check that was waiting when a
-    rebuild began still says "missing"."""
+    """The review's brain facts, with brain_<slug> missing while the company builds, and, for a
+    run's brain, from the moment a rebuild touched the run (`rebuilt`): the review and decide
+    steps already stop (`BrainUnavailable`) on a missing brain before any write an empty one
+    would make wrong. Asked after the real check, so a check that was waiting when a rebuild
+    began still says "missing"."""
 
-    def __init__(self, brain: BrainFacts, building: Callable[[str], bool]):
+    def __init__(
+        self,
+        brain: BrainFacts,
+        building: Callable[[str], bool],
+        rebuilt: Callable[[], bool] = lambda: False,
+    ):
         self._brain = brain
         self._building = building
+        self._rebuilt = rebuilt
 
     def graph_exists(self, slug: str) -> bool:
         exists = self._brain.graph_exists(slug)
-        return exists and not self._building(slug)
+        return exists and not self._building(slug) and not self._rebuilt()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._brain, name)
@@ -125,6 +135,7 @@ class _Run:
     slug: str
     uid: str = field(default_factory=review_uid)  # the review it runs (unless one was running)
     stop: threading.Event = field(default_factory=threading.Event)
+    rebuilt: threading.Event = field(default_factory=threading.Event)  # never cleared
     started: threading.Event = field(default_factory=threading.Event)  # first event, or the end
     done: threading.Event = field(default_factory=threading.Event)  # set with `ended`
     events: list[ReviewEvent] = field(default_factory=list)
@@ -169,9 +180,15 @@ class KeeperRuns:
 
     @property
     def brain(self) -> BrainFacts:
-        """The brain facts reviews and approvals use: missing while the slug builds."""
+        """The brain facts approvals use: missing while the slug builds."""
+        return self._brain_for(None)
+
+    def _brain_for(self, run: _Run | None) -> BrainFacts:
+        """The brain facts of one run (or of an approval, `None`): missing while the slug
+        builds, and for the rest of the run once a rebuild touched it."""
         base = self._brain if self._brain is not None else self._default_brain()
-        return _BuildingAware(base, lambda slug: self.building(slug))  # type: ignore[return-value]
+        rebuilt = run.rebuilt.is_set if run is not None else (lambda: False)
+        return _BuildingAware(base, lambda slug: self.building(slug), rebuilt)  # type: ignore[return-value]
 
     @property
     def graph_run(self) -> Runner | None:
@@ -235,11 +252,15 @@ class KeeperRuns:
             return True
 
     def stop_for_rebuild(self, slug: str) -> None:
-        """A rebuild is about to drop brain_<slug>: stop the slug's review and wait up to
-        `rebuild_wait` seconds for it to end. A job still thinking then has its writes refused
-        (the brain reads as missing while the slug builds), so the reset may go ahead."""
+        """A rebuild is about to drop brain_<slug>: mark the slug's review `rebuilt`, stop it
+        and wait up to `rebuild_wait` seconds for it to end. A job still thinking then has its
+        writes refused (the run's brain reads as missing from now on, also after the build), so
+        the reset may go ahead."""
         with self._lock:
             self._pending.pop(slug, None)  # the rebuild's own hook reviews after it
+            run = self._runs.get(slug)
+            if run is not None and not run.ended:
+                run.rebuilt.set()
         if self.stop(slug) and not self.wait(slug, self.rebuild_wait):
             log.warning("the Keeper review of %s did not stop before its rebuild", slug)
 
@@ -306,6 +327,7 @@ class KeeperRuns:
 
         try:
             store = self.store_for(run.slug)
+            brain = self._brain_for(run)
             if self.has_key():
                 run.result = review(
                     store,
@@ -314,7 +336,7 @@ class KeeperRuns:
                     trigger=trigger,
                     client_for=self.client_for,
                     graph_run=self.graph_run,
-                    brain=self.brain,  # type: ignore[arg-type]  # DEFAULT_BRAIN also notices
+                    brain=brain,  # type: ignore[arg-type]  # DEFAULT_BRAIN also notices
                     on_event=on_event,
                     should_stop=run.stop.is_set,
                     uid=run.uid,
@@ -325,7 +347,7 @@ class KeeperRuns:
                     run.slug,
                     trigger=trigger,
                     budget=budget,
-                    brain=self.brain,  # type: ignore[arg-type]
+                    brain=brain,  # type: ignore[arg-type]
                     on_event=on_event,
                     uid=run.uid,
                 )

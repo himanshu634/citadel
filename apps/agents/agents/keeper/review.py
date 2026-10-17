@@ -20,7 +20,8 @@ production, `policies.offline_client` offline.
 The run ends early, between jobs:
 - `should_stop()` -> `stopped`, stop "requested". A job already running finishes and writes
   (its model calls are paid for); a rebuild's empty brain is refused through `graph_exists`,
-  which the backend's brain reports False while the company builds.
+  which the backend's brain reports False while the company builds and, once a rebuild
+  touched the run, until the run ends (a job whose tool loop spanned the rebuild writes nothing).
 - brain_<slug> missing (`graph_exists` False, `BrainUnavailable`) or a FalkorDB `ResponseError`
   -> `stopped`, stop "brain_unavailable". `run_job` catches a job's errors, so the jobs' writes
   are wrapped to pass these two through.

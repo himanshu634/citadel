@@ -288,6 +288,36 @@ def test_a_build_that_begins_during_a_job_refuses_its_writes(ledger, brain, comp
     assert (ledger.gaps[gap].status, ledger.gaps[gap].attempts) == ("open", 0)
 
 
+def test_a_rebuild_that_ends_during_a_job_still_refuses_its_writes(ledger, brain, company):
+    """A whole rebuild (stop, reset, ingest) runs while a consult job is in its tool loop, and
+    building is over again when the job applies: the run was touched by a rebuild, so its tool
+    reads may be empty or partial, and it writes nothing."""
+    gap = seed_gap(ledger)
+    building = threading.Event()
+    rebuilt = threading.Event()
+
+    def graph_run(slug, name, **params):
+        if not rebuilt.is_set():
+            rebuilt.set()
+            building.set()
+            runs.stop_for_rebuild(slug)  # the rebuild's before_reset (it cannot wait on us)
+            building.clear()  # ... reset, ingest: the rebuild is done before the job applies
+        return fake_brain(slug, name, **params)
+
+    runs = KeeperRuns(store_for=lambda slug: ledger, client_for=offline_client,
+                      has_key=lambda: True, brain=brain, graph_run=graph_run,
+                      building=lambda slug: building.is_set(), rebuild_wait=0)  # fmt: skip
+    runs.start(SLUG, "manual", 5)
+    assert runs.wait(SLUG, 5)
+    assert rebuilt.is_set()
+    [r] = ledger.reviews
+    assert (r.state, r.stop) == ("stopped", "brain_unavailable")
+    assert {c.status for c in ledger.consults.values()} == {"open"}  # no answer written
+    assert ledger.claims == {}
+    assert (ledger.gaps[gap].status, ledger.gaps[gap].attempts) == ("open", 0)
+    assert runs.brain.graph_exists(SLUG)  # approvals after the rebuild still see it
+
+
 def test_a_rebuild_stops_the_running_review_before_it_empties_the_brain(
     keeper, ledger, brain, company, tmp_path
 ):
