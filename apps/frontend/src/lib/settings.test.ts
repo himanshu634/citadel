@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'vitest';
 import { ApiError } from './api/client';
-import { classifySaveError, isDirty, rebuildDialog, settingsReason, syncLine } from './settings';
+import {
+	changedSections,
+	classifySaveError,
+	isDirty,
+	rebuildDialog,
+	saveCost,
+	settingsReason,
+	syncLine,
+	unsavedLine
+} from './settings';
 import type { CompanyConfig, ConfigChange } from './types';
 
 function config(over: Partial<CompanyConfig> = {}): CompanyConfig {
@@ -127,19 +136,98 @@ describe('syncLine', () => {
 });
 
 describe('settingsReason', () => {
-	test('drops the wizard step wording', () => {
+	test('drops the wizard step wording and names the tab to go to', () => {
 		expect(settingsReason(null)).toBeNull();
-		expect(settingsReason('Checking')).toBe('Checking');
-		expect(settingsReason('Checking GitHub')).toBe('Checking GitHub');
-		expect(settingsReason('Fix the fields marked above.')).toBe('Fix the fields marked above.');
-		expect(settingsReason('Fix the errors in Sources (step 2) first.')).toBe(
-			'Fix the fields marked above.'
+		expect(settingsReason('Checking')).toEqual({ text: 'Checking', section: null });
+		expect(settingsReason('Checking GitHub')).toEqual({ text: 'Checking GitHub', section: null });
+		expect(settingsReason('Fix the fields marked above.')).toEqual({
+			text: 'Fix the fields marked in Systems and people.',
+			section: 'rules'
+		});
+		expect(settingsReason('Fix the errors in Sources (step 2) first.')).toEqual({
+			text: 'Fix the fields marked in Sources.',
+			section: 'sources'
+		});
+		expect(settingsReason('Company (step 1): Enter the company name to continue.')).toEqual({
+			text: 'Enter the company name to save.',
+			section: 'company'
+		});
+		expect(settingsReason('Sources (step 2): Add at least one source to continue.')).toEqual({
+			text: 'Add at least one source to save.',
+			section: 'sources'
+		});
+		expect(settingsReason('Enter the company name to continue.')).toEqual({
+			text: 'Enter the company name to save.',
+			section: null
+		});
+	});
+});
+
+describe('changedSections', () => {
+	test('is empty for an untouched copy', () => {
+		expect(changedSections(config(), config())).toEqual([]);
+	});
+
+	test('names each tab whose part of the file changed, in tab order', () => {
+		const draft = config({
+			people: { bots: ['ci-bot', 'renovate[bot]'], aliases: {} },
+			name: 'Acme'
+		});
+		expect(changedSections(draft, config())).toEqual(['company', 'rules']);
+	});
+
+	test('ignores what cleaning removes', () => {
+		const draft = config({ name: ' Acme Labs  ' });
+		draft.systems!.rules!.push({ match: '', system: '' });
+		expect(changedSections(draft, config())).toEqual([]);
+	});
+
+	test('a removed source is a Sources change', () => {
+		expect(changedSections(config({ sources: [] }), config())).toEqual(['sources']);
+	});
+});
+
+describe('unsavedLine', () => {
+	test('lists the tabs as a sentence', () => {
+		expect(unsavedLine([])).toBe('Unsaved changes.');
+		expect(unsavedLine(['sources'])).toBe('Unsaved changes in Sources.');
+		expect(unsavedLine(['company', 'rules'])).toBe(
+			'Unsaved changes in Company and Systems and people.'
 		);
-		expect(settingsReason('Sources (step 2): Add at least one source to continue.')).toBe(
-			'Add at least one source to save.'
+		expect(unsavedLine(['company', 'sources', 'rules'])).toBe(
+			'Unsaved changes in Company, Sources and Systems and people.'
 		);
-		expect(settingsReason('Enter the company name to continue.')).toBe(
-			'Enter the company name to save.'
+	});
+});
+
+describe('saveCost', () => {
+	test('is unknown without a dry run or a change', () => {
+		expect(saveCost(null)).toBeNull();
+		expect(saveCost(change({ changed: false, rebuild: false }))).toBeNull();
+	});
+
+	test('a change that touches nothing saves plainly', () => {
+		expect(saveCost(change({ rebuild: false }))).toEqual({
+			label: 'Save',
+			rebuild: false,
+			line: 'Saves at once. The graph is not touched.'
+		});
+	});
+
+	test('an added source starts a build without a rebuild', () => {
+		expect(saveCost(change({ rebuild: false, refetch: ['github:acme/web'] }))?.line).toBe(
+			'Saving starts a build to download github:acme/web.'
+		);
+	});
+
+	test('a rebuild names itself on the button', () => {
+		expect(saveCost(change())).toEqual({
+			label: 'Save and rebuild',
+			rebuild: true,
+			line: 'Saving rebuilds the graph from the data already downloaded.'
+		});
+		expect(saveCost(change({ refetch: ['github:acme/platform'] }))?.line).toBe(
+			'Saving downloads github:acme/platform again and rebuilds the graph.'
 		);
 	});
 });
