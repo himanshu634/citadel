@@ -11,7 +11,9 @@ this store:
 Two implementations with the same behaviour:
 - `KeeperStore` runs `apps/brain/queries/ledger/<name>.cypher` on keeper_<slug>. Dedupe and
   guards (one live gap per question, one consult per role per gap, one follow-up per claim,
-  guarded gap and claim status moves, one running review) are in the Cypher.
+  guarded gap and claim status moves, one running review, a step finished once) are in the
+  Cypher. A review's steps (`ledger/write_step`, `finish_step`, `review_steps`) are the activity
+  trail's; a step's `input` is stored as JSON text and read back as a dict.
 - `MemoryKeeperStore` is the offline and test double: the same names, guards and row shapes in
   Python, under one lock (FalkorDB serialises the writes on a graph the same way).
 
@@ -23,6 +25,7 @@ the runner's `work/write_episode` / `memory/write_episode` into a LogEntry with 
 from __future__ import annotations
 
 import copy
+import json
 import re
 import threading
 from collections.abc import Mapping
@@ -45,6 +48,7 @@ from agents.keeper.model import (
     GapStatus,
     LogEntry,
     Review,
+    ReviewStep,
     consult_uid,
     followup_uid,
     iso,
@@ -59,6 +63,8 @@ READS: tuple[str, ...] = (
     "ledger/latest_gap_for_subject",
     "ledger/read_log",
     "ledger/review_current",
+    "ledger/recent_reviews",
+    "ledger/review_steps",
     "ledger/queue_consult",
     "ledger/consults_for_gap",
     "ledger/get_claim",
@@ -78,6 +84,9 @@ WRITES: tuple[str, ...] = (
     "ledger/review_start",
     "ledger/review_finish",
     "ledger/review_stop_running",
+    "ledger/review_picked",
+    "ledger/write_step",
+    "ledger/finish_step",
     "ledger/post_consult",
     "ledger/answer_consult",
     "ledger/write_claim",
@@ -94,6 +103,16 @@ OPTIONAL: dict[str, dict[str, Any]] = {
     "ledger/log": {"why": None, "gap": None, "claim": None, "evidence": []},
     "ledger/read_log": {"gap": None, "claim": None},
     "ledger/review_finish": {"stop": None},
+    "ledger/review_picked": {"gap_text": None},
+    "ledger/write_step": {
+        "kind": "graph",
+        "input": {},
+        "status": "running",
+        "count": None,
+        "error": None,
+        "touched": [],
+    },
+    "ledger/finish_step": {"count": None, "error": None, "touched": []},
     "ledger/answer_consult": {
         "kind": None,
         "subject": None,
@@ -117,6 +136,8 @@ RECORDS: dict[str, type[BaseModel]] = {
     "ledger/latest_gap_for_subject": Gap,
     "ledger/read_log": LogEntry,
     "ledger/review_current": Review,
+    "ledger/recent_reviews": Review,
+    "ledger/review_steps": ReviewStep,
     "ledger/queue_consult": Consult,
     "ledger/consults_for_gap": Consult,
     "ledger/get_claim": Claim,
@@ -133,15 +154,22 @@ _UID = re.compile(r"[a-z_]+:\S+")  # a uid, e.g. claim:1a2b3c4d5e6f (not an acti
 _STATUS: dict[str, tuple[str, ...]] = {
     "ledger/set_gap_status": get_args(GapStatus),
     "ledger/set_claim_status": get_args(ClaimStatus),
+    "ledger/write_step": ("running", "done", "failed"),
+    "ledger/finish_step": ("done", "failed"),
 }
+_STATUS_KEY = {"ledger/write_step": "status", "ledger/finish_step": "status"}  # else "to"
 
 
 def _validate(name: str, p: dict[str, Any]) -> None:
     """Refuse a bad write before anything is stored (a ValueError; pydantic's ValidationError is
     one): an unknown status, or a gap or claim its model rejects. A claim's timestamps default
-    to `now`, and the claim is written as its model dumps it."""
-    if name in _STATUS and p.get("to") not in _STATUS[name]:
-        raise ValueError(f"{name}: unknown status {p.get('to')!r}")
+    to `now`, and the claim is written as its model dumps it. A step's `input` is stored as
+    JSON text (FalkorDB holds no maps)."""
+    key = _STATUS_KEY.get(name, "to")
+    if name in _STATUS and p.get(key) not in _STATUS[name]:
+        raise ValueError(f"{name}: unknown status {p.get(key)!r}")
+    if name == "ledger/write_step" and not isinstance(p["input"], str):
+        p["input"] = json.dumps(p["input"], default=str, ensure_ascii=False)
     if name == "ledger/open_gap":
         trace = p.get("trace_id")
         Gap(
@@ -298,6 +326,7 @@ class MemoryKeeperStore(_LedgerStore):
         self.gaps: dict[str, Gap] = {}
         self.log: list[LogEntry] = []  # in write order (the Cypher's `seq`)
         self.reviews: list[Review] = []  # in start order
+        self.steps: dict[tuple[str, int], dict[str, Any]] = {}  # (review, n) -> stored props
         self.consults: dict[str, Consult] = {}
         self.claims: dict[str, Claim] = {}
         self.followups: dict[str, FollowUp] = {}
@@ -422,6 +451,43 @@ class MemoryKeeperStore(_LedgerStore):
                 r.state, r.stop, r.ended_at = "stopped", "restart", p["now"]
                 out.append({"uid": r.uid})
         return out
+
+    def _r_recent_reviews(self, p: Mapping[str, Any]) -> list[Row]:
+        return [r.model_dump() for r in reversed(self.reviews)][: p["limit"]]
+
+    def _w_review_picked(self, p: Mapping[str, Any]) -> list[Row]:
+        for r in self.reviews:
+            if r.uid == p["uid"]:
+                r.gaps, r.gap_text = list(p["gaps"]), p["gap_text"]
+                return [{"uid": r.uid}]
+        return []
+
+    # --- review steps -------------------------------------------------------------------------
+
+    def _w_write_step(self, p: Mapping[str, Any]) -> list[Row]:
+        if not any(r.uid == p["review"] for r in self.reviews):
+            return []
+        keys = ("review", "n", "actor", "tool", "kind", "input", "status", "count", "error")
+        self.steps[(p["review"], p["n"])] = {
+            **{k: p[k] for k in keys},
+            "touched": list(p["touched"]),
+            "started_at": p["at"],
+            "ended_at": None if p["status"] == "running" else p["at"],
+        }
+        return [{"review": p["review"], "n": p["n"]}]
+
+    def _w_finish_step(self, p: Mapping[str, Any]) -> list[Row]:
+        s = self.steps.get((p["review"], p["n"]))
+        if s is None or s["status"] != "running":
+            return []
+        s.update(status=p["status"], count=p["count"], error=p["error"],
+                 touched=list(p["touched"]), ended_at=p["at"])  # fmt: skip
+        return [{"review": s["review"], "n": s["n"], "status": s["status"]}]
+
+    def _r_review_steps(self, p: Mapping[str, Any]) -> list[Row]:
+        rows = sorted((s for (r, _), s in self.steps.items() if r == p["review"]),
+                      key=lambda s: s["n"])  # fmt: skip
+        return [ReviewStep(**s).model_dump() for s in rows]
 
     # --- consults -----------------------------------------------------------------------------
 

@@ -11,12 +11,13 @@ Records point at brain nodes by uid string; graphs cannot link to each other.
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 GapKind = Literal["failed_question", "thumbs_down", "stale_owner", "unowned_hot_system"]
 GapStatus = Literal["open", "in_review", "resolved", "needs_person", "dismissed"]
@@ -72,6 +73,35 @@ class Review(BaseModel):
     started_at: str
     ended_at: str | None = None
     stop: str | None = None  # why it ended early, e.g. "restart" or "brain_unavailable"
+    gaps: list[str] = Field(default_factory=list)  # the gaps it picked, in pick order
+    gap_text: str | None = None  # the first picked gap's text (a gap's text never changes)
+
+
+StepStatus = Literal["running", "done", "failed"]
+
+
+class ReviewStep(BaseModel):
+    """One step of a review, for the Systems page's activity trail (`agents/activity.py`): a
+    graph-tool call of a pm, qa or keeper job (kind "graph"), or a job's submit (kind
+    "submit"). Numbered 1.. in the order they ran within the review."""
+
+    review: str  # the Review's uid
+    n: int
+    actor: str  # "pm", "qa" or "keeper"
+    tool: str
+    kind: Literal["graph", "submit"] = "graph"
+    input: dict[str, Any] = Field(default_factory=dict)  # stored as JSON text
+    status: StepStatus = "running"
+    count: int | None = None  # rows the tool returned
+    error: str | None = None
+    touched: list[str] = Field(default_factory=list)  # brain_<slug> uids, deduped in order
+    started_at: str
+    ended_at: str | None = None
+
+    @field_validator("input", mode="before")
+    @classmethod
+    def _parse_input(cls, v: Any) -> Any:
+        return json.loads(v) if isinstance(v, str) else v
 
 
 class Consult(BaseModel):

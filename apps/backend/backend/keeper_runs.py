@@ -11,6 +11,9 @@ on "Review now" (`keeper_budget`) and after an approval (budget 0, so pm's follo
 - Without an API key (`has_key`) every run is `skip_review`: re-projection and noticing only,
   recorded `skipped`. No LLM job runs, also not a budget-0 follow-up.
 - A stop sets a flag the review checks between jobs.
+- `is_running(slug, uid)` says whether this process is running that review (the run's uid is
+  made here and handed to the review), so the activity route can tell a live review from one a
+  server lost.
 - `subscribe` replays the events of the company's latest run in this process, then follows it
   live, then ends; so a page that opens the stream after a quick run still sees all of it.
 - `recover` (at startup) marks a review a previous server process left `running` as stopped
@@ -38,7 +41,7 @@ from agents import llm
 from agents.keeper import decide
 from agents.keeper.decide import DB_USER, BrainFacts
 from agents.keeper.gaps import utc_now
-from agents.keeper.model import Review
+from agents.keeper.model import Review, review_uid
 from agents.keeper.review import ReviewEvent, review, skip_review
 from agents.keeper.store import KeeperStore
 from agents.toolset import Runner
@@ -86,6 +89,7 @@ class ReviewNotStarted(Exception):
 @dataclass(eq=False)
 class _Run:
     slug: str
+    uid: str = field(default_factory=review_uid)  # the review it runs (unless one was running)
     stop: threading.Event = field(default_factory=threading.Event)
     started: threading.Event = field(default_factory=threading.Event)  # first event, or the end
     done: threading.Event = field(default_factory=threading.Event)  # set with `ended`
@@ -186,6 +190,12 @@ class KeeperRuns:
             run = self._runs.get(slug)
             return run is not None and not run.ended
 
+    def is_running(self, slug: str, uid: str) -> bool:
+        """This process is running the slug's review `uid` now."""
+        with self._lock:
+            run = self._runs.get(slug)
+            return run is not None and not run.ended and run.uid == uid
+
     def current(self, slug: str) -> Review | None:
         """The ledger's latest review of the slug (running or not), else None."""
         rows = self.store_for(slug).read("ledger/review_current", {})
@@ -249,6 +259,7 @@ class KeeperRuns:
                     brain=self.brain,  # type: ignore[arg-type]  # DEFAULT_BRAIN also notices
                     on_event=on_event,
                     should_stop=run.stop.is_set,
+                    uid=run.uid,
                 )
             else:
                 run.result = skip_review(
@@ -258,6 +269,7 @@ class KeeperRuns:
                     budget=budget,
                     brain=self.brain,  # type: ignore[arg-type]
                     on_event=on_event,
+                    uid=run.uid,
                 )
         except Exception as exc:
             log.exception("Keeper review of %s failed", run.slug)

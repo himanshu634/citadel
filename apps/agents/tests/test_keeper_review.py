@@ -96,6 +96,80 @@ def test_review_end_to_end_offline():
     assert store.read("ledger/review_current", {})[0]["state"] == "done"
 
 
+def steps_of(store, review_uid: str) -> list[dict]:
+    return store.read("ledger/review_steps", {"review": review_uid})
+
+
+def test_each_graph_tool_call_and_submit_is_a_step():
+    """Every graph-tool call of a pm, qa or keeper job is a step, written `running` before the
+    tool runs and finished `done` with its count and touched uids; each job adds a submit step."""
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
+    gap = seed_gap(store, GROUNDED)
+    seen_running: list[tuple[str, str]] = []
+
+    def probe(slug, name, **params):
+        [*_, last] = steps_of(store, store.reviews[-1].uid)  # written before the tool runs
+        seen_running.append((last["tool"], last["status"]))
+        return fake_brain(slug, name, **params)
+
+    r, _ = run_review(store, brain, graph_run=probe)
+    assert r.state == "done"
+    steps = steps_of(store, r.uid)
+    assert [s["n"] for s in steps] == list(range(1, len(steps) + 1))
+    graph = [s for s in steps if s["kind"] == "graph"]
+    assert seen_running and all(status == "running" for _, status in seen_running)
+    assert [t for t, _ in seen_running] == [s["tool"] for s in graph]
+    assert all(s["status"] == "done" and s["ended_at"] == NOW for s in graph)
+    assert {s["actor"] for s in graph} <= {"pm", "qa", "keeper"}
+    assert any(s["touched"] for s in graph)
+    for s in graph:
+        assert len(s["touched"]) == len(set(s["touched"]))
+        assert s["count"] is not None
+    submits = [(s["actor"], s["tool"], s["status"]) for s in steps if s["kind"] == "submit"]
+    assert submits == [
+        ("pm", "submit_consult", "done"),
+        ("qa", "submit_consult", "done"),
+        ("keeper", "submit_keeper_decision", "done"),
+    ]  # a fact claim needs no follow-up
+    decision = next(s for s in steps if s["tool"] == "submit_keeper_decision")
+    [claim] = store.read("ledger/claims_for_gap", {"gap": gap, "statuses": ALL})
+    assert decision["input"]["subject"] == gap and decision["input"]["claim"] == claim["uid"]
+    assert decision["input"]["outcome"] == "claim" and decision["touched"] == []
+    assert (store.reviews[-1].gaps, store.reviews[-1].gap_text) == ([gap], GROUNDED)
+
+
+def test_a_failing_graph_tool_is_a_failed_step():
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
+    seed_gap(store, GROUNDED)
+
+    def broken(slug, name, **params):
+        raise RuntimeError("query timed out")
+
+    r, _ = run_review(store, brain, graph_run=broken)
+    graph = [s for s in steps_of(store, r.uid) if s["kind"] == "graph"]
+    assert graph and all(s["status"] == "failed" for s in graph)
+    assert graph[0]["error"] == "RuntimeError: query timed out" and graph[0]["touched"] == []
+
+
+def test_a_job_that_wrote_nothing_is_a_failed_submit_step():
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
+    seed_gap(store, GROUNDED)
+    r = review(store, SLUG, budget=5, trigger="manual", client_for=lambda role, job: object(),
+               graph_run=fake_brain, brain=brain, now=clock)  # fmt: skip
+    submits = [s for s in steps_of(store, r.uid) if s["kind"] == "submit"]
+    assert [(s["actor"], s["status"]) for s in submits] == [("pm", "failed"), ("qa", "failed")]
+    assert all(s["error"].startswith("error: AttributeError") for s in submits)
+
+
+def test_a_review_given_its_uid_uses_it():
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
+    r, _ = run_review(store, brain, uid="review:given")
+    assert r.uid == "review:given" == store.reviews[-1].uid
+    s = skip_review(store, SLUG, trigger="build", budget=3, brain=brain, now=clock,
+                    uid="review:skipped")  # fmt: skip
+    assert s.uid == "review:skipped"
+
+
 def test_stale_consults_from_an_earlier_attempt_are_ignored():
     """A reopened gap is asked again for its current attempt; the old open consult is left."""
     store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
@@ -270,6 +344,10 @@ def test_budget_zero_reprojects_notices_and_follows_up():
     [f] = store.read("ledger/followups", {"limit": 5})
     assert f["claim"] == claim
     assert [g.kind for g in store.gaps.values()].count("stale_owner") == 1
+    submits = [s for s in steps_of(store, r.uid) if s["kind"] == "submit"]
+    assert [(s["actor"], s["tool"], s["status"], s["input"]["subject"]) for s in submits] == [
+        ("pm", "submit_follow_up", "done", claim)]  # fmt: skip
+    assert store.reviews[-1].gaps == []  # budget 0 picks nothing
 
 
 def test_follow_up_without_a_decision_runs_once():

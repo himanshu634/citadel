@@ -191,9 +191,10 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
   `apps/agents/tests/test_history_graph.py` runs the Cypher (needs `make up`).
 
 - Agent activity (`agents/activity.py`): the Systems page's runs, one `ActivityRun` per run with
-  `ActivityStep`s (actor, tool, input, the brain uids each step touched). Today every Ask turn
-  in the chat history is a run (`runs_from_thread`); Keeper reviews are meant to fill the same
-  shape. `GET .../activity` (`backend/api/activity.py`) lists the latest, newest first.
+  `ActivityStep`s (actor, tool, input, the brain uids each step touched). Every Ask turn in the
+  chat history is a run (`runs_from_thread`), and so is every Keeper review (`runs_from_reviews`:
+  its pm, qa and keeper steps from the ledger; a review the server lost shows `stopped`).
+  `GET .../activity` (`backend/api/activity.py`) merges both, newest first.
 
 ### Evals (`apps/agents/agents/evals`)
 
@@ -216,7 +217,7 @@ Reviews what the brain could not answer and updates it (spec: docs/agents.md "Th
 `docs/superpowers/specs/2026-10-16-keeper-design.md`). The demo's agents are `brain`, `keeper`,
 `pm` and `qa`. Pieces:
 - Ledger graph `keeper_<slug>` (survives rebuilds; `make reset` deletes it): Gap, Consult, Claim,
-  FollowUp, LogEntry, Review (`keeper/model.py`), through the `WorkStore` protocol
+  FollowUp, LogEntry, Review, ReviewStep (`keeper/model.py`), through the `WorkStore` protocol
   (`keeper/store.py`: `KeeperStore` runs `queries/ledger/*`, `MemoryKeeperStore` for tests).
   Records point at brain uids by string. Every status move is guarded in its Cypher.
 - Gaps: a failed Ask turn (no answer or zero sources) or a thumbs-down (`keeper/gaps.py`, written
@@ -224,7 +225,9 @@ Reviews what the brain could not answer and updates it (spec: docs/agents.md "Th
   `unowned_hot_system` (`keeper/notice.py`, cap `KEEPER_NOTICE_CAP`; a subject whose latest gap
   was dismissed or needs a person is not raised again).
 - Review run (`keeper/review.py`): one per company; re-project, notice, pick the budget's gaps,
-  pm and qa `consult` jobs, the keeper `decide` job, pm `follow_up`. Releases gaps it did not
+  pm and qa `consult` jobs, the keeper `decide` job, pm `follow_up`. Each job's graph-tool calls
+  and its submit are written as `ReviewStep`s as they run (best effort), so the review appears
+  step by step on `/activity`. Releases gaps it did not
   decide; stops with `brain_unavailable` when brain_<slug> is gone. No API key: `skip_review`
   (re-project + notice only, recorded `skipped`); `--offline` plays the policies.
 - Fixed rules (`keeper/rules.py`, `keeper/decide.py`), never the model: evidence uids must exist;
@@ -237,8 +240,8 @@ Reviews what the brain could not answer and updates it (spec: docs/agents.md "Th
 - Backend: `keeper_runs.py` (one review per company in a thread; after every finished build,
   Review now, budget 0 after an approval; `recover` marks a review a restart cut off `stopped`)
   and `api/keeper.py` (`/api/companies/{slug}/keeper/...`: gaps, claims, log, followups,
-  approve/reject, review, review/stop, review/events SSE). No Keeper page: its UI lands with the
-  Systems page.
+  approve/reject, review, review/stop, review/events SSE). No Keeper page: reviews show on the
+  Systems page's activity trail (`GET .../activity`), its controls in that page's rail.
 
 ### Agent roles (`agents/roles`, `agents/work`, `agents/sim`)
 

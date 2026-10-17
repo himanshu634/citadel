@@ -173,6 +173,62 @@ def test_review_current_empty(store):
     assert store.read("ledger/review_current", {}) == []
 
 
+def start_review(store, uid=None, *, now=T1):
+    uid = uid or review_uid()
+    store.write("ledger/review_start", KEEPER, {"uid": uid, "trigger": "build", "budget": 3,
+                                                "now": now})  # fmt: skip
+    return uid
+
+
+def test_review_steps_round_trip(store):
+    rid, other = start_review(store), None
+    step = {"review": rid, "n": 1, "actor": "pm", "tool": "work_history",
+            "input": '{"system": "Auth", "limit": 10}', "at": T1}  # fmt: skip
+    assert store.write("ledger/write_step", KEEPER, step) == [{"review": rid, "n": 1}]
+    [running] = store.read("ledger/review_steps", {"review": rid})
+    assert running == {
+        "review": rid, "n": 1, "actor": "pm", "tool": "work_history", "kind": "graph",
+        "input": {"system": "Auth", "limit": 10}, "status": "running", "count": None,
+        "error": None, "touched": [], "started_at": T1, "ended_at": None}  # fmt: skip
+
+    done = {"review": rid, "n": 1, "status": "done", "count": 2, "touched": ["system:Auth", "pr:1"],
+            "at": T2}  # fmt: skip
+    assert store.write("ledger/finish_step", KEEPER, done) == [
+        {"review": rid, "n": 1, "status": "done"}]  # fmt: skip
+    assert store.write("ledger/finish_step", KEEPER, {**done, "status": "failed"}) == []  # once
+    submit = {"review": rid, "n": 2, "actor": "pm", "tool": "submit_consult", "kind": "submit",
+              "input": {"can_ground": True}, "status": "failed", "error": "write_refused",
+              "at": T3}  # fmt: skip
+    store.write("ledger/write_step", KEEPER, submit)  # a dict input is stored as JSON text
+    first, second = store.read("ledger/review_steps", {"review": rid})
+    assert (first["status"], first["count"], first["touched"], first["ended_at"]) == (
+        "done", 2, ["system:Auth", "pr:1"], T2)  # fmt: skip
+    assert (second["kind"], second["input"], second["status"], second["error"]) == (
+        "submit", {"can_ground": True}, "failed", "write_refused")  # fmt: skip
+    assert (second["started_at"], second["ended_at"]) == (T3, T3)  # written ended
+
+    store.write("ledger/review_finish", KEEPER, {"uid": rid, "state": "done", "now": T3})
+    other = start_review(store)
+    assert store.read("ledger/review_steps", {"review": other}) == []
+    no_review = {**step, "review": "review:nope"}
+    assert store.write("ledger/write_step", KEEPER, no_review) == []  # only on a known review
+    with pytest.raises(ValueError):
+        store.write("ledger/write_step", KEEPER, {**step, "n": 3, "status": "lost"})
+
+
+def test_recent_reviews_newest_first_and_picked_gaps(store):
+    first = start_review(store)
+    store.write("ledger/review_finish", KEEPER, {"uid": first, "state": "done", "now": T2})
+    second = start_review(store)  # the same `now`: start order decides
+    picked = {"uid": second, "gaps": ["gap:a", "gap:b"], "gap_text": "Who owns Auth?"}
+    assert store.write("ledger/review_picked", KEEPER, picked) == [{"uid": second}]
+    rows = store.read("ledger/recent_reviews", {"limit": 5})
+    assert [r["uid"] for r in rows] == [second, first]
+    assert (rows[0]["gaps"], rows[0]["gap_text"]) == (["gap:a", "gap:b"], "Who owns Auth?")
+    assert (rows[1]["gaps"], rows[1]["gap_text"], rows[1]["state"]) == ([], None, "done")
+    assert [r["uid"] for r in store.read("ledger/recent_reviews", {"limit": 1})] == [second]
+
+
 def test_log_and_read_log(store):
     for i, (gap, claim) in enumerate([("gap:1", None), ("gap:2", "claim:1"), ("gap:1", None)]):
         entry = {"uid": f"log:{i}", "at": T1, "actor": "keeper", "action": "gap_opened"}

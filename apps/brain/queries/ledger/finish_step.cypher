@@ -1,0 +1,16 @@
+// purpose: End a running step of a review: done or failed, with the rows it returned, its error
+//          and the brain uids it touched.
+// params:  $review (Review uid), $n, $status ('done' | 'failed'), $count, $error (each may be
+//          null), $touched: [brain uid], $at (ISO)
+// returns: review, n, status. No rows: no such step is running.
+// example: store.write("ledger/finish_step", "citadel_keeper", {"review": "review:1a2b3c4d",
+//          "n": 1, "status": "done", "count": 2, "touched": ["system:Auth"],
+//          "at": "2026-10-17T10:00:01Z"})
+MATCH (s:ReviewStep {review: $review, n: $n})
+WHERE s.status = 'running'
+SET s.status = $status,
+    s.count = $count,
+    s.error = $error,
+    s.touched = $touched,
+    s.ended_at = $at
+RETURN s.review AS review, s.n AS n, s.status AS status

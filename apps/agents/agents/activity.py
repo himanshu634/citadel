@@ -4,24 +4,27 @@ Why: the Systems page shows where an agent is working now and every step it took
 over the company map. It needs each step's tool and the brain_<slug> nodes that step touched,
 whichever agent ran it. This is that shape, independent of where a run is stored:
 
-- `ActivityRun`: one run of one agent (today an Ask turn; later a Keeper review, whose pm, qa
-  and keeper steps fill the same `ActivityStep`s with their own `actor`).
+- `ActivityRun`: one run of one agent: an Ask turn, or a Keeper review, whose pm, qa and keeper
+  steps fill the same `ActivityStep`s with their own `actor`.
 - `ActivityStep`: one tool call, in order, with its input (so the page can say what it did and
   which node it was about) and the uids it touched (so the page can draw it).
 
-Today the only source is the chat history (`agents/history.py`): `runs_from_thread` turns each
-Ask turn into a run. Steps that touch nothing on the map (the answer check, MCP calls) keep their
-place in the list with no `touched`.
+Two sources: the chat history (`agents/history.py`), where `runs_from_thread` turns each Ask turn
+into a run, and the Keeper's ledger (`keeper/review.py` writes each review's steps), where
+`runs_from_reviews` turns each review into one. Steps that touch nothing on the map (the answer
+check, a job's submit, MCP calls) keep their place in the list with no `touched`.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel
 
 from agents.history import Thread
+from agents.keeper.model import Review, ReviewStep
 
 RunStatus = Literal["running", "done", "stopped", "failed"]
 StepStatus = Literal["running", "done", "failed"]
@@ -40,10 +43,10 @@ class ActivityStep(BaseModel):
 
 
 class ActivityRun(BaseModel):
-    id: str  # "ask:<thread id>:<turn n>"
-    source: Literal["ask"] = "ask"
+    id: str  # "ask:<thread id>:<turn n>" or "keeper:<review uid>"
+    source: Literal["ask", "keeper"] = "ask"
     actor: str = "brain"
-    title: str  # what the run was for: the question
+    title: str  # what the run was for: the question, or the review's first gap
     status: RunStatus
     started_at: datetime
     ended_at: datetime | None = None
@@ -89,6 +92,75 @@ def runs_from_thread(thread: Thread) -> list[ActivityRun]:
                 ended_at=turn.ended_at,
                 thread_id=thread.id,
                 steps=steps,
+            )
+        )
+    return runs
+
+
+TRIGGER_TITLES = {
+    "build": "Keeper review after a build",
+    "manual": "Keeper review on request",
+    "approval": "Keeper review after an approval",
+}
+_REVIEW_STATUS: dict[str, RunStatus] = {
+    "done": "done",
+    "stopped": "stopped",
+    "failed": "failed",
+    "skipped": "done",
+}
+
+
+def _review_title(review: Review) -> str:
+    if not review.gaps:
+        return TRIGGER_TITLES[review.trigger]
+    first = review.gap_text or review.gaps[0]
+    more = len(review.gaps) - 1
+    return f"{first} (+{more} more)" if more else first
+
+
+def runs_from_reviews(
+    reviews: list[Review],
+    steps_by_review: Mapping[str, list[ReviewStep]],
+    *,
+    live: Callable[[str], bool],
+) -> list[ActivityRun]:
+    """One run per Keeper review, in the order given. A `running` review stays running only
+    when `live(uid)` (this process runs it); else no run can finish it, so it is `stopped` and
+    its running steps `failed` ("interrupted"). A skipped review is `done`; one with no steps
+    did nothing to show and is left out."""
+    runs = []
+    for review in reviews:
+        steps = sorted(steps_by_review.get(review.uid, []), key=lambda s: s.n)
+        if review.state == "skipped" and not steps:
+            continue
+        if review.state == "running":
+            status: RunStatus = "running" if live(review.uid) else "stopped"
+        else:
+            status = _REVIEW_STATUS[review.state]
+        lost = status != "running"
+        runs.append(
+            ActivityRun(
+                id=f"keeper:{review.uid}",
+                source="keeper",
+                actor="keeper",
+                title=_review_title(review),
+                status=status,
+                started_at=review.started_at,  # type: ignore[arg-type]  # ISO text, parsed
+                ended_at=review.ended_at,  # type: ignore[arg-type]
+                steps=[
+                    ActivityStep(
+                        n=s.n,
+                        actor=s.actor,
+                        tool=s.tool,
+                        kind=s.kind,
+                        input=s.input,
+                        status="failed" if lost and s.status == "running" else s.status,
+                        count=s.count,
+                        error="interrupted" if lost and s.status == "running" else s.error,
+                        touched=list(dict.fromkeys(s.touched)),
+                    )
+                    for s in steps
+                ],
             )
         )
     return runs
