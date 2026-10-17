@@ -146,7 +146,11 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   citations). `call(slug, name, **params)` is the one entry point; typed wrappers sit on top.
   `prepare` only converts params (days → epoch, text → RediSearch OR query, login → uid). No
   LLM-generated Cypher anywhere. `path_between` uses `algo.SPpaths` (FalkorDB's `shortestPath`
-  rejects undirected traversals). `semantic_search` sits beside the full-text tools
+  rejects undirected traversals). `central_nodes` ranks one label by `algo.pageRank(NULL, NULL)`
+  (whole graph; `algo.pageRank` follows only edges whose both ends have the label it is given,
+  so a System-only run is flat). `bottlenecks` sums 8 seeded runs of `algo.betweenness` over
+  WorkItem and BLOCKS/CLOSES/MENTIONS: FalkorDB's betweenness is directed only and samples its
+  start nodes with replacement, so one run can miss nodes on a small graph. `semantic_search` sits beside the full-text tools
   (`related_*`): it embeds the question (`prepare`), queries the `Chunk` vector index, keeps the
   best chunk per source and returns the source WorkItem/Document uid to cite; similarity is
   1 - cosine distance, `kinds` filters chunk kinds. With embeddings off it raises
@@ -291,7 +295,7 @@ demo's agents are `brain`, `keeper`, `pm` and `qa`. Pieces:
   that opens no task is recorded (`ledger/follow_up_tried`, logged `follow_up_skipped`).
 - Fixed rules (`keeper/rules.py`, `keeper/decide.py`), never the model: evidence uids must exist;
   sources win (`conflicts_with_source`, never projected, pm follow-up); critical =
-  `replaces_claim`, `high_impact_system` (top quarter by co-change) or `no_source_evidence`, and
+  `replaces_claim`, `high_impact_system` (top quarter of systems by whole-graph PageRank) or `no_source_evidence`, and
   waits for a lead (`approve`/`reject`, guarded: a second decision raises `ClaimNotPending`, 409).
   A claim that goes stale when it is accepted uses an attempt (`needs_person` at 2, as a
   rejection); re-projection's stales after a build do not.

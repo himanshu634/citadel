@@ -69,7 +69,9 @@ when any of these hold; the reasons are stored in `critical_reasons`:
 
 - `replaces_claim`: an accepted claim with the same kind and subject exists (for a decision: any
   accepted decision about the same system);
-- `high_impact_system`: one of its `about` systems is in the top quarter by co-change coupling;
+- `high_impact_system`: one of its `about` systems is in the top quarter of systems by PageRank
+  over the whole graph (`brain.keeper.high_impact_systems`; ties at the cut are kept). Accepted
+  claims about a system add `ABOUT` edges, so they raise its PageRank too;
 - `no_source_evidence`: none of its evidence is a `Change`, `WorkItem` or `Document`.
 
 ### Deciding a gap (`agents/keeper/decide.py`)

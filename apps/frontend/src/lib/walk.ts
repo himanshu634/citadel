@@ -365,6 +365,11 @@ const SAID: Record<string, (p: Record<string, unknown>) => Said> = {
 			? [`Finding who works most with ${str(p.login)}`, `Found who works most with ${str(p.login)}`]
 			: ['Finding who works most closely together', 'Found who works most closely together'],
 	issues_by_system: () => ['Counting issues per system', 'Counted issues per system'],
+	central_nodes: (p) => {
+		const what = { WorkItem: 'work items', Document: 'documents' }[str(p.label)] ?? 'systems';
+		return [`Ranking the most central ${what}`, `Ranked the most central ${what}`];
+	},
+	bottlenecks: () => ['Finding the work everything else goes through', 'Found the work everything else goes through'],
 	graph_stats: () => ['Counting what the graph holds', 'Counted what the graph holds'],
 	submit_answer: () => ['Checking the answer against what was found', 'Checked the answer against what was found'],
 	// Ask interviewing the person about the brain's gaps.
@@ -680,12 +685,13 @@ export function rowViews(step: Pick<WalkStep, 'tool' | 'rows'>): RowView[] {
 		}
 		const nameKey = NAME_KEYS.find((k) => typeof row[k] === 'string');
 		let name = nameKey ? str(row[nameKey]) : '';
-		if (typeof row.number === 'number' && nameKey === 'title') name = `#${row.number} ${name}`;
+		if (typeof row.number === 'number' && (nameKey === 'title' || nameKey === 'name')) name = `#${row.number} ${name}`;
 		const numbers = NUMBER_KEYS.filter(([k]) => typeof row[k] === 'number')
 			.slice(0, 3)
 			.map(([k, label]) => {
 				const v = row[k] as number;
-				const n = Number.isInteger(v) ? String(v) : v.toFixed(2);
+				// PageRank scores are small: 0.0068 keeps two digits instead of reading 0.01
+				const n = Number.isInteger(v) ? String(v) : Math.abs(v) < 0.01 ? v.toPrecision(2) : v.toFixed(2);
 				return label ? `${label} ${n}` : n;
 			});
 		const url = refUrl(typeof row.uid === 'string' ? row.uid : null, typeof row.url === 'string' ? row.url : null);

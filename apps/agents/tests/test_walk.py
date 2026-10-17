@@ -212,3 +212,30 @@ def test_issues_by_system_links_example_issues_to_their_system():
         "x:issue:1": "WorkItem",
     }
     assert ("x:issue:1", "MENTIONS", "system:graph/src", True) in rels(rs)
+
+
+def test_central_nodes_draw_each_label_as_its_node():
+    rows = [
+        {"uid": "system:Infra", "label": "System", "name": "Infra", "score": 0.04},
+        {"uid": "x:issue:11", "label": "WorkItem", "name": "DB load spikes", "number": 11,
+         "kind": "issue", "url": "https://x/issues/11", "score": 0.03},
+        {"uid": "x:doc:README.md", "label": "Document", "name": "Readme", "kind": "document",
+         "url": "https://x/README.md", "score": 0.01},
+    ]  # fmt: skip
+    nodes, rs = walk.subgraph("central_nodes", {"label": "System"}, rows)
+    assert {n["uid"]: (n["label"], n["title"]) for n in nodes} == {
+        "system:Infra": ("System", "Infra"),
+        "x:issue:11": ("WorkItem", "#11 DB load spikes"),
+        "x:doc:README.md": ("Document", "Readme"),
+    }
+    assert rs == []
+
+
+def test_bottlenecks_draw_their_work_items():
+    rows = [{"uid": "x:ticket:PAY-2", "kind": "ticket", "number": 2, "key": "PAY-2",
+             "title": "Per-seat pricing", "url": "https://x/PAY-2", "score": 3.0}]  # fmt: skip
+    nodes, rs = walk.subgraph("bottlenecks", {}, rows)
+    assert [(n["uid"], n["label"], n["url"]) for n in nodes] == [
+        ("x:ticket:PAY-2", "WorkItem", "https://x/PAY-2")
+    ]
+    assert rs == []

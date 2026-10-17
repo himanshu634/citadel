@@ -241,6 +241,17 @@ describe('rowViews', () => {
 		expect(pr[0].text).toBe('#3 feat: y');
 	});
 
+	test('a central_nodes row keeps its small PageRank score readable', () => {
+		const rows = rowViews({
+			tool: 'central_nodes',
+			rows: [
+				{ uid: 'system:graph/src', label: 'System', name: 'graph/src', number: null, score: 0.0395 },
+				{ uid: 'x:issue:636', label: 'WorkItem', name: 'Crash found in fuzzer', number: 636, score: 0.00685 }
+			]
+		});
+		expect(rows.map((r) => r.text)).toEqual(['graph/src · score 0.04', '#636 Crash found in fuzzer · score 0.0069']);
+	});
+
 	test('a row and a hop carry where their node opens', () => {
 		const [row] = rowViews({ tool: 'work_history', rows: [{ uid: 'github:o/r:pr:3', number: 3, title: 'feat: y', url: null }] });
 		expect(row.url).toBe('https://github.com/o/r/pull/3');
@@ -418,6 +429,12 @@ describe('stepSentence', () => {
 		const step = { tool: 'semantic_search', input: { text: 'why charges double' } };
 		expect(stepSentence(step)).toBe('Searching by meaning for "why charges double"');
 		expect(stepSentence(step, true)).toBe('Searched by meaning for "why charges double"');
+	});
+
+	test('central_nodes names what it ranks; bottlenecks reads as finding the work in the middle', () => {
+		expect(stepSentence({ tool: 'central_nodes', input: {} })).toBe('Ranking the most central systems');
+		expect(stepSentence({ tool: 'central_nodes', input: { label: 'WorkItem' } }, true)).toBe('Ranked the most central work items');
+		expect(stepSentence({ tool: 'bottlenecks', input: {} }, true)).toBe('Found the work everything else goes through');
 	});
 
 	test('a tool it does not know is named as it is', () => {
