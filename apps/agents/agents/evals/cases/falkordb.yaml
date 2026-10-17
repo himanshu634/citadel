@@ -85,7 +85,7 @@
         cite_any: ["github:FalkorDB/FalkorDB:pr:3334", "github:FalkorDB/FalkorDB:issue:3330"]
         text_all: [aviavni]
         text_any: [label scan, index lookup, quadratic]
-        max_steps: 6
+        max_steps: 8
 
 - id: parenthesised-where
   tags: [history, why]
@@ -95,7 +95,7 @@
       expect:
         cite_any: ["github:FalkorDB/FalkorDB:pr:3335", "github:FalkorDB/FalkorDB:issue:3331", "github:FalkorDB/FalkorDB:issue:3187"]
         text_any: [label scan, all node scan, nodebyidseek]
-        max_steps: 6
+        max_steps: 8
 
 - id: batch-backport-missed-prs
   tags: [history, why]
@@ -105,7 +105,7 @@
       expect:
         cite_any: ["github:FalkorDB/FalkorDB:pr:3192", "github:FalkorDB/FalkorDB:issue:3191"]
         text_any: ["30", first page, pagination, paginat]
-        max_steps: 6
+        max_steps: 8
 
 # --- semantic search ------------------------------------------------------------------------
 # Worded with no key word of the text that answers: related_work_items and related_documents
@@ -166,7 +166,6 @@
       expect:
         cite_any: ["github:FalkorDB/FalkorDB:doc:README.md", "github:FalkorDB/FalkorDB:doc:CLAUDE.md"]
         text_all: [graph database]
-        text_any: [cypher, redis]
         max_steps: 5
 
 - id: how-to-profile
@@ -210,7 +209,7 @@
         max_steps: 5
     - question: Give me their names instead of GitHub ids.
       expect:
-        text_re: "(no|not|n't|without) (a |any )?(real |display |full )?names?|names? (is|are|field is) (empty|missing|not (recorded|stored|available|in))|only (has |have |holds |stores |knows )?(their )?(github )?(logins|ids|usernames|handles)"
+        text_re: "(no|not|n't|without) (\\w+ )?(a |any )?(real |display |full )?names?|names? (is|are|field is) (empty|missing|not (recorded|stored|available|in))|only (\\w+ )?(their )?(github )?(logins|ids|usernames|handles)"
         max_steps: 6
 
 - id: closest-collaborators

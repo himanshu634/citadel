@@ -34,7 +34,7 @@ make tools                     # list the named query tools and their params
 make query TOOL=impact_of P="system=CI"   # run one (SLUG=..., JSON=1 for raw rows)
 make ask SLUG=synthetic Q="who knows Auth?"   # `agents ask`: Claude answers from the graph (THREAD=<id> follows up)
 make chat SLUG=synthetic OFFLINE=1   # `agents chat`: one scripted turn, no API key: graph + tools + checkpointer
-make eval                      # agent evals on brain_synthetic (calls the API): CASE=id|tag REPEAT=3 MODEL=.. EFFORT=.. BASELINE=<file>
+make eval                      # agent evals on brain_synthetic, SLUG=falkordb for the live repo (calls the API): CASE=id|tag REPEAT=3 MODEL=.. EFFORT=.. BASELINE=<file>
 make traces SLUG=x DAYS=7      # live Ask traffic: no-answer/step-limit/nudge/... rates, p50/p95 latency and tokens, thumbs
 make eval-drafts SLUG=x        # thumbs-down answers as draft eval cases (WRITE=1 appends to evals/cases/x.yaml)
 make chats-backfill SLUG=x     # chat history for threads asked before it existed (checkpoints + traces; ALL=1 adds untraced)
@@ -253,7 +253,9 @@ and grades it with deterministic checks (`graders.py`): uids cited (`cite_any/al
 tools that ran, answer text (substrings or a regex) and a step budget. Expected uids are literals
 or gold refs (`{tool, params, field, top}`) read from the graph when the run starts, so cases
 follow the data. Each case runs `REPEAT` times and reports a pass rate; turns of one case share a
-thread. Results: `data/evals/<slug>/<time>-<model>-<effort>.jsonl`; `BASELINE=` diffs pass rates
+thread. Case files: `synthetic.yaml` (the offline company, fixed answers) and `falkordb.yaml` (the
+live FalkorDB repo: rankings only as gold refs, literals only for merged PR/issue pairs and bot
+uids, several questions taken from real Ask traces). Results: `data/evals/<slug>/<time>-<model>-<effort>.jsonl`; `BASELINE=` diffs pass rates
 against an earlier file. The `[semantic]` cases ask in words with no full-text overlap (the
 graph must be embedded). It calls the API, so it is not part of `make test`;
 `apps/agents/tests/test_evals.py` checks the case files and the harness with the scripted client.
