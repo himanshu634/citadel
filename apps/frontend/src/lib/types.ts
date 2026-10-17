@@ -288,6 +288,70 @@ export interface Overview {
 	people: PersonActivity[];
 }
 
+/** How a configured source stands (GET .../sources). blocked: its download fails, so every
+ * build fails until fixed; skipped: builds skip it; synced: loaded at least once; never: not yet. */
+export type SourceStatus = 'synced' | 'never' | 'skipped' | 'blocked';
+
+export interface KindCount {
+	/** Node label: WorkItem, Change, Document, Chunk, Person, Team, System. */
+	label: string;
+	/** Work items only: pull_request, issue, ticket, thread. */
+	kind: string | null;
+	count: number;
+	/** Work items only: how many in each state. */
+	states: Record<string, number>;
+}
+
+/** The nodes carrying one `source` label: an adapter type (two folders of one type share it), a
+ * JSONL record's own label (`slack_export`), or `derived` (made from links). */
+export interface LabelCounts {
+	source: string;
+	total: number;
+	kinds: KindCount[];
+}
+
+export interface SourceRow {
+	/** The adapter key, which also keys its sync record, like `github:FalkorDB/FalkorDB`. */
+	key: string;
+	type: string;
+	/** The repository, folder or workspace it reads. */
+	location: string;
+	/** GitHub: what to read; Linear: the teams; else empty. */
+	reads: string[];
+	/** Has a download step, so syncing this source alone means something. */
+	downloads: boolean;
+	status: SourceStatus;
+	/** Why it is blocked or skipped, with what to do. */
+	problem: string | null;
+	last_run: string | null;
+	/** Records loaded in the last run, not a total. */
+	records: number | null;
+	/** The newest record read: the next sync starts here. */
+	cursor: string | null;
+	/** The window moved since the last sync: the next one reloads everything in it. */
+	window_changed: boolean;
+}
+
+/** A sync record whose key is no longer in the company file. */
+export interface SyncRecord {
+	key: string;
+	adapter: string | null;
+	last_run: string | null;
+	records: number | null;
+	cursor: string | null;
+}
+
+export interface SourcesOut {
+	slug: string;
+	since: string;
+	/** The graph exists; false: nothing has been loaded yet. */
+	built: boolean;
+	sources: SourceRow[];
+	/** Biggest first. */
+	labels: LabelCounts[];
+	leftovers: SyncRecord[];
+}
+
 /** A node label as the brain graph spells it; `LABEL_TYPES` maps it to a NodeType. */
 export type GraphLabel = 'Person' | 'Team' | 'System' | 'WorkItem' | 'Change' | 'Document';
 
