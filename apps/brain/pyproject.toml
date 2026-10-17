@@ -5,6 +5,7 @@ description = "Company Brain engine: adapters, ingestion, the FalkorDB graph and
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "falkordb>=1.8.0",
+    "fastembed>=0.7",
     "httpx>=0.28.1",
     "pydantic>=2",
     "pydantic-settings>=2.16.0",

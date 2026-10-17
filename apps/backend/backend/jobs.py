@@ -8,20 +8,23 @@ last build of a company survives a server restart; `recover()` marks a build tha
 a restart as `stopped`. Async subscribers (the SSE routes) get every event as it happens.
 
 A stop sets a per-job flag; the runner's `on_event` wrapper raises `BuildStopped` at the next
-event, and the runner checks the flag between steps. The pipeline itself knows nothing of jobs.
+event (except the one that finishes the last stage: the work is complete, so the job ends
+`done`), and the runner checks the flag between steps. The pipeline itself knows nothing of jobs.
 
 "Step n of N" is counted here, not in the UI: the ingest stages repeat per source, so a stage's
 place in `stages` goes backwards on the second source. Before it runs, a job lists every
-(stage, source) it will go through (its trail, from the company's sources); `steps` is its
-length and `step` only moves forward along it. Every event carries the step it happened at, so
-a live stream keeps the count without reading the snapshot again.
+(stage, source) it will go through (its trail, from the company's sources, ending with the
+company's one embed stage); `steps` is its length and `step` only moves forward along it.
+Every event carries the step it happened at, so a live stream keeps the count without reading
+the snapshot again.
 
 `on_done(slug)` (the app starts a Keeper review with it) runs in its own daemon thread after a
-build ends `done`, never after a failed or stopped one; its errors are logged, and the build stays
-done. `before_reset(slug)` (the app stops the company's Keeper review with it) runs in the worker
-just before a rebuild drops the graph; its errors are logged and the rebuild goes on.
-`building(slug)` says whether the company has a queued or running job: the Keeper refuses to
-review or decide on a brain that is being rebuilt (it exists, but empty, once prepare ran).
+build ends `done` (embed stage included), never after a failed or stopped one; its errors are
+logged, and the build stays done. `before_reset(slug)` (the app stops the company's Keeper review
+with it) runs in the worker just before a rebuild drops the graph; its errors are logged and the
+rebuild goes on. `building(slug)` says whether the company has a queued or running job (until
+its embed stage ends): the Keeper refuses to review or decide on a brain that is being rebuilt
+(it exists, but empty, once prepare ran).
 """
 
 from __future__ import annotations
@@ -54,7 +57,7 @@ _STEP_STAGES: dict[Step, tuple[Stage, ...]] = {
     "reset": ("reset",),
     "prepare": ("prepare",),
     "fetch": ("fetch",),  # repeated for each source
-    "ingest": _INGEST,
+    "ingest": (*_INGEST, "embed"),  # embed once, after every source
 }
 
 
@@ -83,7 +86,8 @@ class BuildSnapshot(BaseModel):
     def _full_plan_for_old_files(self) -> BuildSnapshot:
         """Snapshots written before `stages` existed: assume every source was fetched."""
         if not self.stages:
-            self.stages = list(_plan(self.kind, None))
+            # such files predate the embed stage too, so they never ran it
+            self.stages = [s for s in _plan(self.kind, None) if s != "embed"]
         return self
 
 
@@ -174,6 +178,7 @@ def _trail(plan: tuple[Stage, ...], fetched: list[str], ingested: list[str]) -> 
     if "fetch" in plan:
         trail += [("fetch", key) for key in fetched]
     trail += [(stage, key) for key in ingested for stage in _INGEST]
+    trail += [(s, None) for s in plan if s == "embed"]
     return tuple(trail)
 
 
@@ -195,14 +200,32 @@ def _plan(kind: Kind, refetch: set[str] | None) -> tuple[Stage, ...]:
     """The stages a job goes through, in order."""
     first: tuple[Stage, ...] = ("reset", "prepare") if kind == "rebuild" else ("prepare",)
     fetch: tuple[Stage, ...] = ("fetch",) if refetch is None or refetch else ()
-    return (*first, *fetch, *_INGEST)
+    return (*first, *fetch, *_INGEST, "embed")
 
 
-def _after(plan: tuple[Stage, ...], last: BuildEvent) -> tuple[Stage, str | None]:
-    """The stage (and source) that comes after `last` finished."""
+def _last_ingested(trail: Trail | None) -> str | None:
+    """The source the trail ingests last, or None when there is none or no trail."""
+    keys = [key for stage, key in trail or () if stage == "records"]
+    return keys[-1] if keys else None
+
+
+def _completes(plan: tuple[Stage, ...], event: BuildEvent) -> bool:
+    """Whether `event` finishes the plan's last stage (embed, once for the company): after it
+    only the closing `done` is left, so a stop has nothing left to stop."""
+    return event.stage == plan[-1] == "embed" and event.status in ("done", "skipped")
+
+
+def _after(
+    plan: tuple[Stage, ...], last: BuildEvent, trail: Trail | None = None
+) -> tuple[Stage, str | None]:
+    """The stage (and source) that comes after `last` finished. After a source's ingest it is
+    the next source's records, or embed after the last source; without a trail the last
+    source cannot be told apart, so it is records."""
     if last.status != "skipped" and last.stage in ("records", "normalize"):
         return _INGEST[_INGEST.index(last.stage) + 1], last.source  # same source, next stage
     if last.stage in _INGEST:
+        if "embed" in plan and last.source is not None and last.source == _last_ingested(trail):
+            return "embed", None
         return "records", None  # the next source
     if last.stage in plan[:-1]:
         return plan[plan.index(last.stage) + 1], None
@@ -215,6 +238,7 @@ def _closing_event(
     plan: tuple[Stage, ...],
     step: Step | None = None,
     message: str | None = None,
+    trail: Trail | None = None,
 ) -> BuildEvent | None:
     """The event that ends a failed or stopped job, on the stage (and source) that was in
     progress: never on a stage that already reported `done`. None when that stage already
@@ -237,7 +261,7 @@ def _closing_event(
     elif status == "failed" and step == "fetch":
         stage, source = "fetch", None
     else:
-        stage, source = _after(plan, last)
+        stage, source = _after(plan, last, trail)
     return BuildEvent(snap.slug, stage, status, source, message=message)
 
 
@@ -436,7 +460,8 @@ class JobRunner:
 
         def on_event(event: BuildEvent) -> None:
             self._emit(job, event)
-            check_stop()
+            if not _completes(job.plan, event):
+                check_stop()
 
         try:
             if snap.kind == "rebuild":
@@ -461,12 +486,13 @@ class JobRunner:
             self._after_done(slug)
         except BuildStopped:
             with self._lock:
-                self._finish(job, "stopped", _closing_event(snap, "stopped", job.plan))
+                event = _closing_event(snap, "stopped", job.plan, trail=job.trail)
+                self._finish(job, "stopped", event)
         except Exception as exc:
             log.exception("build of %s failed", slug)
             error = str(exc) or type(exc).__name__
             with self._lock:
-                event = _closing_event(snap, "failed", job.plan, job.step, error)
+                event = _closing_event(snap, "failed", job.plan, job.step, error, job.trail)
                 self._finish(job, "failed", event, error)
 
     def _before_reset(self, slug: str) -> None:

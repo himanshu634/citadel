@@ -160,3 +160,42 @@
         tools_any: [person_profile, related_work_items, recent_work_items, get_entity, work_history]
         text_none: [alice wrote, bob wrote]
         max_steps: 6
+
+# --- semantic search ------------------------------------------------------------------------
+# Questions worded so they share no key words with the text that answers them, so full-text
+# search can't find it: related_work_items and related_documents return none of the cited uids for
+# these exact questions (full-text ORs every word, so avoid even "the"). Needs embeddings on
+# (EMBEDDING_PROVIDER=fastembed) when the graph is built.
+
+- id: semantic-login-state
+  tags: [semantic]
+  why: the question never says session, JWT, login or server; PR #1 and issue #11 say why sessions moved to JWTs.
+  turns:
+    - question: What drove dropping per-user records kept by our backend in favour of signed credentials?
+      expect:
+        cite_any: [synthetic:pr:1, synthetic:issue:11, "synthetic:doc:docs/auth-design.md"]
+        tools_any: [semantic_search]
+        text_any: [session table, sessions table, db load, database load]
+        max_steps: 5
+
+- id: semantic-overcharge
+  tags: [semantic]
+  why: the question never says month, upgrade, customer, charged, billing or plan; issue #12 and PR #3 (proration) explain it.
+  turns:
+    - question: Why did people owe a whole period's fee after moving to a higher tier midway through?
+      expect:
+        cite_any: [synthetic:issue:12, synthetic:pr:3]
+        tools_any: [semantic_search]
+        text_any: [prorat, full month]
+        max_steps: 6
+
+- id: semantic-own-database
+  tags: [semantic]
+  why: the question never says Postgres, managed or backups; PR #8 and ADR-001 give the reason.
+  turns:
+    - question: What went wrong that made us outsource running our relational data store to a vendor?
+      expect:
+        cite_any: [synthetic:pr:8, "synthetic:doc:docs/adr/001-managed-postgres.md"]
+        tools_any: [semantic_search]
+        text_any: [backup]
+        max_steps: 5

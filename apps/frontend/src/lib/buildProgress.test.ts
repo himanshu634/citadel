@@ -34,7 +34,7 @@ function ev(
 	};
 }
 
-const BUILD_STAGES: BuildStage[] = ['prepare', 'fetch', 'records', 'normalize', 'load'];
+const BUILD_STAGES: BuildStage[] = ['prepare', 'fetch', 'records', 'normalize', 'load', 'embed'];
 const REBUILD_STAGES: BuildStage[] = ['reset', ...BUILD_STAGES];
 
 function snap(
@@ -75,12 +75,15 @@ function twoSources(): BuildEvent[] {
 		ev('records', 'done', b, 40),
 		ev('normalize', 'done', b, 30),
 		ev('load', 'running', b),
-		ev('load', 'done', b, 30)
+		ev('load', 'done', b, 30),
+		ev('embed', 'running'),
+		ev('embed', 'running', null, 64),
+		ev('embed', 'done', null, 120)
 	];
 }
 
-/** What the backend stamps on `twoSources()`: each (stage, source) is one step of 9. */
-const TWO_SOURCE_STEPS = [1, 1, 2, 2, 3, 3, 4, 4, 5, 6, 6, 7, 7, 8, 9, 9];
+/** What the backend stamps on `twoSources()`: each (stage, source), and embed, is one step of 10. */
+const TWO_SOURCE_STEPS = [1, 1, 2, 2, 3, 3, 4, 4, 5, 6, 6, 7, 7, 8, 9, 9, 10, 10, 10];
 
 function twoSourcesStamped(): BuildEvent[] {
 	return twoSources().map((event, i) => ({ ...event, step: TWO_SOURCE_STEPS[i] }));
@@ -141,7 +144,7 @@ describe('withEvent and the step counter', () => {
 describe('two sources: header and meter agree', () => {
 	test('neither the step nor the meter ever goes back, and the count is per source', () => {
 		const events = twoSourcesStamped();
-		let live = snap([], 'running', { step: 1, steps: 9 });
+		let live = snap([], 'running', { step: 1, steps: 10 });
 		let lastStep = 0;
 		let lastPercent = 0;
 		const headers: string[] = [];
@@ -149,27 +152,28 @@ describe('two sources: header and meter agree', () => {
 			live = withEvent(live, event);
 			const header = headerOf(live);
 			headers.push(header);
-			const n = Number(/^Step (\d+) of 9: /.exec(header)?.[1]);
+			const n = Number(/^Step (\d+) of 10: /.exec(header)?.[1]);
 			expect(n).toBeGreaterThanOrEqual(lastStep);
 			const percent = percentOf(live);
 			expect(percent).toBeGreaterThanOrEqual(lastPercent);
 			lastStep = n;
 			lastPercent = percent;
 		}
-		expect(headers[11]).toBe('Step 7 of 9: records'); // the second source, not "Step 3" again
-		expect(headers.at(-1)).toBe('Step 9 of 9: load');
+		expect(headers[11]).toBe('Step 7 of 10: records'); // the second source, not "Step 3" again
+		expect(headers[15]).toBe('Step 9 of 10: load');
+		expect(headers.at(-1)).toBe('Step 10 of 10: embed');
 	});
 });
 
 describe('headerOf', () => {
 	test('running: step n of N and the stage, counting a rebuild\'s reset and prepare', () => {
 		const build = snap([ev('prepare', 'done'), ev('records', 'running', 'github:a/b')]);
-		expect(headerOf(build)).toBe('Step 3 of 5: records');
+		expect(headerOf(build)).toBe('Step 3 of 6: records');
 		const rebuild = snap([ev('reset', 'done'), ev('prepare', 'running')], 'running', {
 			kind: 'rebuild',
 			stages: REBUILD_STAGES
 		});
-		expect(headerOf(rebuild)).toBe('Step 2 of 6: prepare');
+		expect(headerOf(rebuild)).toBe('Step 2 of 7: prepare');
 	});
 
 	test('a rebuild that fetches nothing plans no fetch step', () => {
@@ -243,6 +247,13 @@ describe('percentOf', () => {
 		expect(percentOf(snap(events, 'failed'))).toBe(running);
 	});
 
+	test('embed counts as work: finishing it moves the meter', () => {
+		const all = twoSources();
+		const beforeEmbed = percentOf(snap(all.slice(0, -3)));
+		expect(percentOf(snap(all))).toBeGreaterThan(beforeEmbed);
+		expect(percentOf(snap(all.slice(0, -1)))).toBe(beforeEmbed); // running is not finished
+	});
+
 	test('a skipped source counts as finished work', () => {
 		const events = [
 			ev('prepare', 'done'),
@@ -311,6 +322,20 @@ describe('cellNote', () => {
 		expect(cellNote('records', { status: 'running', count: 1204 })).toBe('1,204 read');
 		expect(cellNote('normalize', { status: 'done', count: 90 })).toBe('90 kept');
 		expect(cellNote('load', { status: 'done', count: 1 })).toBe('1 written');
+		expect(cellNote('embed', { status: 'running', count: 1280 })).toBe('1,280 embedded');
+	});
+
+	test('embed running before its first batch says the model is loading', () => {
+		const loading = 'Loading the embedding model (the first run downloads about 0.2 GB)';
+		expect(cellNote('embed', { status: 'running', message: loading })).toBe(loading);
+	});
+
+	test('embed skipped says why', () => {
+		const reason = 'Embeddings are off (EMBEDDING_PROVIDER=none), so semantic search finds nothing.';
+		expect(cellNote('embed', { status: 'skipped', message: reason })).toBe(reason);
+		expect(cellNote('embed', { status: 'skipped', count: 4, message: 'onnx went away' })).toBe(
+			'4 embedded, onnx went away'
+		);
 	});
 
 	test('adds the message, and is empty for a bare cell', () => {

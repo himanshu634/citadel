@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
 
-Stage = Literal["reset", "prepare", "fetch", "records", "normalize", "load", "done"]
+Stage = Literal["reset", "prepare", "fetch", "records", "normalize", "load", "embed", "done"]
 Status = Literal["waiting", "running", "done", "skipped", "failed", "stopped"]
 
 

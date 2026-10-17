@@ -8,18 +8,66 @@ FalkorDB (`make up`) and are skipped without one.
 
 from __future__ import annotations
 
+import hashlib
+import math
+import os
+import re
 from pathlib import Path
 
 import pytest
 import yaml
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from brain import config, db, loader, schema
+from brain import config, db, embeddings, loader, schema
 from brain.adapters.canonical_jsonl import CanonicalJsonlAdapter, CanonicalJsonlSource
-from brain.config import CompanyConfig
+from brain.config import CompanyConfig, get_settings
 from brain.normalize import normalize
 
 SYNTHETIC = Path(__file__).resolve().parents[1] / "examples" / "synthetic_company"
+
+
+def pytest_configure(config) -> None:
+    """No test may load the real embedding model: embeddings are off for the whole session.
+    A test that needs vectors calls `set_embedder(FakeEmbedder())`, which wins over this.
+    This module's import already read the settings (`needs_graph` pings FalkorDB), so the
+    cached copy is dropped to pick up the new value."""
+    os.environ["EMBEDDING_PROVIDER"] = "none"
+    get_settings.cache_clear()
+    embeddings.set_embedder(None)
+
+
+class FakeEmbedder:
+    """A bag-of-words embedder for tests: each word (lowercased) adds 1.0 to one of `dim`
+    buckets chosen by its hash, then the vector is L2-normalised. Texts that share words are
+    close; an empty text is the zero vector. Passages and queries embed the same way."""
+
+    def __init__(self, dim: int = 768, model: str = "fake") -> None:
+        self.dim = dim
+        self.model = model
+
+    def _embed(self, text: str) -> list[float]:
+        vec = [0.0] * self.dim
+        for word in re.findall(r"\w+", text.lower()):
+            vec[int(hashlib.sha256(word.encode()).hexdigest(), 16) % self.dim] += 1.0
+        norm = math.sqrt(sum(x * x for x in vec))
+        return [x / norm for x in vec] if norm else vec
+
+    def passages(self, texts: list[str]) -> list[list[float]]:
+        return [self._embed(t) for t in texts]
+
+    def query(self, text: str) -> list[float]:
+        return self._embed(text)
+
+
+@pytest.fixture
+def embeddings_off(monkeypatch):
+    """No embedder at all, whatever the session or .env says; undone afterwards."""
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "none")
+    get_settings.cache_clear()
+    embeddings.set_embedder(None)
+    yield
+    get_settings.cache_clear()
+    embeddings.set_embedder(None)
 
 
 def falkordb_up() -> bool:
@@ -104,3 +152,34 @@ def ticket_graph():
     load_company(synthetic_company(slug, with_tickets=True))
     yield slug
     db.delete_graph(slug)
+
+
+@pytest.fixture(scope="session")
+def embedded_graph_built():
+    """brain_test_embedded: the synthetic company with every chunk embedded by a FakeEmbedder,
+    built once per run; deleted afterwards. The fake is the process embedder only while
+    embedding, so the session default (no embedder) holds for every other test. Tests ask for
+    `embedded_graph`, which also sets the fake for the question side."""
+    if not falkordb_up():
+        pytest.skip("FalkorDB not reachable (make up)")
+    slug = "test_embedded"
+    db.delete_graph(slug)
+    load_company(synthetic_company(slug))
+    embeddings.set_embedder(FakeEmbedder())
+    try:
+        report = embeddings.embed_pending(slug)
+    finally:
+        embeddings.set_embedder(None)
+    assert report.skipped_reason is None and report.embedded > 0, report
+    yield slug
+    db.delete_graph(slug)
+
+
+@pytest.fixture
+def embedded_graph(embedded_graph_built):
+    """The embedded synthetic graph, with a FakeEmbedder set for this test only (so tools embed
+    questions the way the chunks were embedded); reset to the settings default afterwards.
+    Request `embeddings_off` after it to run with no embedder at all."""
+    embeddings.set_embedder(FakeEmbedder())
+    yield embedded_graph_built
+    embeddings.set_embedder(None)

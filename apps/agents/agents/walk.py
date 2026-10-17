@@ -169,6 +169,18 @@ def _related_documents(b: _Builder, params: Row, rows: list[Row]) -> None:
             b.rel(doc, b.item(m), "MENTIONS")
 
 
+def _semantic_search(b: _Builder, params: Row, rows: list[Row]) -> None:
+    for r in rows:
+        is_doc = r.get("label") == "Document"
+        if is_doc:
+            hit = b.node(r.get("uid"), "Document", r.get("title"), r.get("url"))
+        else:
+            hit = b.item(r)
+        b.rel(b.person(r.get("author")), hit, "AUTHORED")
+        for s in r.get("systems") or []:
+            b.rel(hit, b.system(s), "about" if is_doc else "touches", inferred=True)
+
+
 def _get_entity(b: _Builder, params: Row, rows: list[Row]) -> None:
     for r in rows:
         me = b.node(r.get("uid"), r.get("label") or "Node", r.get("title"), r.get("url"))
@@ -225,6 +237,7 @@ _BY_TOOL: dict[str, Callable[[_Builder, Row, list[Row]], None]] = {
     "recent_work_items": _recent_work_items,
     "related_documents": _related_documents,
     "related_work_items": _related_work_items,
+    "semantic_search": _semantic_search,
     "work_history": _work_history,
 }
 
