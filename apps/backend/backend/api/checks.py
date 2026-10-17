@@ -1,8 +1,10 @@
-"""GitHub checks for the onboarding form: is a token available, and is a repo public.
+"""Source checks for the onboarding form: is a GitHub token available, is a repo public, and is a
+Linear API key set.
 
-Why: the form asks these when a GitHub source card appears, so the user learns about a missing
-token or a private repo (which needs `data_permission: own`) before saving. Only the token's
-source is ever reported; its value is never returned, logged or put in an error message.
+Why: the form asks these when a source card appears, so the user learns about a missing token or
+key, or a private repo (which needs `data_permission: own`), before saving. Only whether a secret
+exists (and for GitHub, where from) is ever reported; its value is never returned, logged or put
+in an error message.
 """
 
 from __future__ import annotations
@@ -40,6 +42,13 @@ def github_client() -> GithubClient:
 @router.get("/github")
 def github_token() -> dict[str, str | None]:
     return {"token": token_source()}
+
+
+@router.get("/linear")
+def linear_key() -> dict[str, bool]:
+    """Whether LINEAR_API_KEY is set, as the build sees it: settings are read once per process,
+    so a key added to .env counts only after the API restarts."""
+    return {"key": get_settings().linear_api_key is not None}
 
 
 OWNER = Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9-]*$")

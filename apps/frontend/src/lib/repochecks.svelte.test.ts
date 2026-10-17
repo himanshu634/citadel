@@ -9,7 +9,7 @@ vi.mock('./api/client', async () => {
 			super(String(detail));
 		}
 	}
-	return { ApiError, api: { githubToken: vi.fn(), githubRepo: vi.fn() } };
+	return { ApiError, api: { githubToken: vi.fn(), githubRepo: vi.fn(), linearKey: vi.fn() } };
 });
 
 import { ApiError, api } from './api/client';
@@ -17,10 +17,12 @@ import { RepoChecks } from './repochecks.svelte';
 
 const token = vi.mocked(api.githubToken);
 const repo = vi.mocked(api.githubRepo);
+const linearKey = vi.mocked(api.linearKey);
 
 beforeEach(() => {
 	token.mockReset();
 	repo.mockReset();
+	linearKey.mockReset();
 });
 
 describe('checkToken', () => {
@@ -40,6 +42,26 @@ describe('checkToken', () => {
 		token.mockRejectedValue(new Error('offline'));
 		await checks.checkToken();
 		expect(checks.token).toBeUndefined();
+	});
+});
+
+describe('checkLinearKey', () => {
+	test('records whether the key is set', async () => {
+		const checks = new RepoChecks();
+		expect(checks.linearKey).toBeUndefined();
+		linearKey.mockResolvedValue({ key: false });
+		await checks.checkLinearKey();
+		expect(checks.linearKey).toBe(false);
+		linearKey.mockResolvedValue({ key: true });
+		await checks.checkLinearKey();
+		expect(checks.linearKey).toBe(true);
+	});
+
+	test('an unreachable API leaves the key unknown, not missing', async () => {
+		const checks = new RepoChecks();
+		linearKey.mockRejectedValue(new Error('offline'));
+		await checks.checkLinearKey();
+		expect(checks.linearKey).toBeUndefined();
 	});
 });
 

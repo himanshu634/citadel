@@ -184,12 +184,18 @@
 	let levelLong = $state('long');
 	/** Fixed answers for the source cards: no calls to the API from the gallery. */
 	class FixedChecks extends RepoChecks {
-		constructor(token: 'env' | 'gh' | null, results: Record<string, RepoResult> = {}) {
+		constructor(
+			token: 'env' | 'gh' | null,
+			results: Record<string, RepoResult> = {},
+			linearKey = true
+		) {
 			super();
 			this.token = token;
+			this.linearKey = linearKey;
 			for (const [repo, result] of Object.entries(results)) this.results.set(repo, result);
 		}
 		override async checkToken() {}
+		override async checkLinearKey() {}
 		override check() {
 			return Promise.resolve();
 		}
@@ -275,6 +281,7 @@
 
 	const checksFound = new FixedChecks('env', { 'acme-labs/platform': { kind: 'found', private: false } });
 	const checksNoToken = new FixedChecks(null);
+	const checksNoLinearKey = new FixedChecks('env', {}, false);
 	const checksPrivate = new FixedChecks('gh', { 'acme-labs/secret': { kind: 'found', private: true } });
 	const checksMissing = new FixedChecks('env', {
 		'acme-labs/typo': { kind: 'missing' },
@@ -302,6 +309,7 @@
 		{ loc: ['sources', 10, 'teams', 2], msg: "String should match pattern '^[A-Z][A-Z0-9]{0,6}$'" }
 	];
 	let srcLinearPublic = $state<SourceConfig>({ type: 'linear', workspace: 'acme', teams: [] });
+	let srcLinearNoKey = $state<SourceConfig>({ type: 'linear', workspace: 'acme', teams: ['ENG'] });
 	const previewYaml = [
 		'slug: acme_labs',
 		'name: Acme Labs',
@@ -683,8 +691,9 @@
 			One card per source in the add-company form. GitHub: the repository, what to read, and what
 			GitHub said about it (found, rate limited), a note when no token exists, and an error when
 			GitHub cannot find the repository or when it is private while the data permission is not Own. Folder sources take one
-			path. Linear: the workspace and its team keys; an error banner while the data permission is
-			Public, and the API's pattern errors as sentences under their field.
+			path. Linear: the workspace and its team keys; a warning with "Check again" when the API has
+			no LINEAR_API_KEY, an error banner while the data permission is Public, and the API's pattern
+			errors as sentences under their field.
 		</p>
 		<div class="sources">
 			<SourceCard bind:source={srcFound} index={0} dataPermission="public" errors={[]} onremove={noop} checks={checksFound} />
@@ -713,6 +722,7 @@
 			<SourceCard bind:source={srcLinearEmpty} index={9} dataPermission="own" errors={[{ loc: ['sources', 9, 'workspace'], msg: "String should match pattern '^[a-z0-9-]+$'" }]} onremove={noop} checks={checksFound} />
 			<SourceCard bind:source={srcLinearBad} index={10} dataPermission="own" errors={linearBadErrors} onremove={noop} checks={checksFound} />
 			<SourceCard bind:source={srcLinearPublic} index={11} dataPermission="public" errors={[]} onremove={noop} checks={checksFound} />
+			<SourceCard bind:source={srcLinearNoKey} index={12} dataPermission="own" errors={[]} onremove={noop} checks={checksNoLinearKey} />
 		</div>
 	</Card>
 

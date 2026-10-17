@@ -1,4 +1,5 @@
-"""GitHub checks: is a token available, and does a repo exist / is it private. No network."""
+"""Source checks: is a GitHub token available, does a repo exist / is it private, is a Linear key
+set. No network."""
 
 from __future__ import annotations
 
@@ -21,6 +22,14 @@ def test_token_check_without_token(client, monkeypatch):
 def test_token_check_reports_the_source_only(client, monkeypatch, source):
     monkeypatch.setattr(checks, "token_source", lambda: source)
     assert client.get("/api/checks/github").json() == {"token": source}
+
+
+@pytest.mark.parametrize(("key", "found"), [("lin_api_s3cr3t", True), (None, False)])
+def test_linear_key_check_reports_presence_only(client, monkeypatch, key, found):
+    monkeypatch.setattr(checks, "get_settings", lambda: SimpleNamespace(linear_api_key=key))
+    response = client.get("/api/checks/linear")
+    assert response.json() == {"key": found}
+    assert "s3cr3t" not in response.text
 
 
 def _no_gh(*args, **kwargs):

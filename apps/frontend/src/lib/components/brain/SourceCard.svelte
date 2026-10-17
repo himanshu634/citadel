@@ -5,8 +5,9 @@ front), the six things to read, a note when no GitHub token exists, what GitHub 
 repository, and "Check again". "Not found", a rate limit and an outage are warnings; only a private
 repository while the data permission is not Own is an error (the build refuses it). Linear: the
 workspace's URL key (a pasted linear.app address is cut down to it) and the team keys (typed keys
-turn to capitals; none means every team), a note that the key is read from `LINEAR_API_KEY`, and an
-error banner while the data permission is Public (the build refuses it). Documents folder and
+turn to capitals; none means every team), a note that the key is read from `LINEAR_API_KEY`, a
+warning with "Check again" when the API has no such key, and an error banner while the data
+permission is Public (the build refuses it). Documents folder and
 JSONL records: one path, relative to the Citadel folder. Errors for this card (`loc`
 starting `['sources', index]`) show under the field they name; any other error of the card is
 listed at its foot.
@@ -92,6 +93,7 @@ listed at its foot.
 	});
 	onMount(() => {
 		if (source.type === 'github') void checks.checkToken();
+		if (source.type === 'linear') void checks.checkLinearKey();
 	});
 
 	async function checkAgain() {
@@ -208,6 +210,15 @@ listed at its foot.
 				error={teamsMessage(errors, index, normalizeTeams(teams))}
 			/>
 		</div>
+		{#if checks.linearKey === false}
+			<Banner tone="warning" title="No Linear API key found">
+				Citadel reads <code>LINEAR_API_KEY</code> from <code>.env</code> when the API starts. Add it,
+				restart the API, then check again. The build cannot read this workspace without it.
+				{#snippet action()}
+					<Button size="sm" onclick={() => checks.checkLinearKey()}>Check again</Button>
+				{/snippet}
+			</Banner>
+		{/if}
 	{:else}
 		<Input
 			label={source.type === 'local_docs' ? 'Folder' : 'Folder with the JSONL files'}
