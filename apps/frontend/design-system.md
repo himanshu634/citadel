@@ -157,7 +157,9 @@ Rules:
 - The Systems page is the Graph page's map with an agent's run drawn over it. It answers "where is
   an agent working, and what has it done on the graph" (canvas: Systems · Agent at work).
 - **The agent is ink, never accent or status.** Each step sits on the node it was about (the system
-  it read, the node it opened), else on the first drawn node it returned. Its number is an ink
+  it read, the node it opened), else on the first drawn node it returned when all it returned
+  sits in one territory. A step spread over several (listing the systems) gets no point: its nodes
+  are lit and the rail says "across the graph". Its number is an ink
   disc (`--color-text` with `--color-surface` text). One ink line joins the steps in order.
   Steps in a row on one node share a disc ("1, 2").
 - While the run is going, the agent's node has an ink ring, its territory an ink outline, and an

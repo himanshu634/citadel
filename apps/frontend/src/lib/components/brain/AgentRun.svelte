@@ -2,8 +2,9 @@
 @component
 One agent run as the Systems page's rail lists it (design direction A): what the run was for,
 then every step in order, numbered as on the map. A step with a point on the map has a solid ink
-number; the step running now has a ring; a step that touched nothing the map draws (the answer
-check, an MCP call) has a dash and says so. Links to the chat an Ask run came from.
+number; the step running now has a ring; a step spread over several territories (listing the
+systems) says "across the graph"; a step that touched nothing the map draws (the answer check, an
+MCP call) has a dash and says so. Links to the chat an Ask run came from.
 -->
 <script lang="ts">
 	import { ArrowUpRight } from '@lucide/svelte';
@@ -48,6 +49,7 @@ check, an MCP call) has a dash and says so. Links to the chat an Ask run came fr
 		<ol>
 			{#each run.steps as step (step.n)}
 				{@const on = placed.has(step.n)}
+				{@const across = trail.spread.has(step.n)}
 				<li class={{ off: !on }}>
 					<span
 						class={['n', { now: step.status === 'running', off: !on && step.status !== 'running' }]}
@@ -60,7 +62,8 @@ check, an MCP call) has a dash and says so. Links to the chat an Ask run came fr
 							{#if step.error}<span class="error">{step.error}</span>
 							{:else if step.status === 'running'}running
 							{:else if step.count !== null}{step.count} {step.count === 1 ? 'row' : 'rows'}{/if}
-							{#if !on && step.status !== 'running'}<span>not on the map</span>{/if}
+							{#if across}<span>across the graph</span>
+							{:else if !on && step.status !== 'running'}<span>not on the map</span>{/if}
 						</span>
 					</div>
 				</li>

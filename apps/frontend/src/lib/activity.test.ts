@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { actorName, anchorOf, doingNow, featured, stepLine, stepsSummary, trailOf } from './activity';
+import { actorName, anchorOf, doingNow, featured, shownRun, stepLine, stepsSummary, trailOf } from './activity';
 import type { ActivityRun, ActivityStep } from './types';
 
 function step(n: number, tool: string, input: Record<string, unknown>, touched: string[], extra: Partial<ActivityStep> = {}): ActivityStep {
@@ -10,7 +10,12 @@ function run(steps: ActivityStep[], status: ActivityRun['status'] = 'done', id =
 	return { id, source: 'ask', actor: 'brain', title: 'Who owns Auth?', status, started_at: '2026-10-17T09:00:00Z', ended_at: null, thread_id: 't', steps };
 }
 
-const drawn = (uid: string) => !uid.startsWith('chunk:');
+/** Where the test map draws a node: systems and their work by name, chunks nowhere. */
+const drawn = (uid: string): string | null => {
+	if (uid.startsWith('chunk:')) return null;
+	if (uid === 'system:Billing' || uid === 'pr:9') return 'billing';
+	return 'auth';
+};
 
 describe('anchorOf', () => {
 	it('puts a step on the node it was about', () => {
@@ -18,6 +23,9 @@ describe('anchorOf', () => {
 	});
 	it('falls back to the first drawn node it returned', () => {
 		expect(anchorOf(step(1, 'related_work_items', { text: 'jwt' }, ['chunk:9', 'pr:4']), drawn)).toBe('pr:4');
+	});
+	it('gives no point to a step spread over several territories', () => {
+		expect(anchorOf(step(1, 'list_systems', {}, ['system:Auth', 'system:Billing']), drawn)).toBeNull();
 	});
 	it('gives no point to a step that touched nothing drawn, or is not a graph call', () => {
 		expect(anchorOf(step(1, 'related_documents', { text: 'x' }, ['chunk:1']), drawn)).toBeNull();
@@ -41,6 +49,20 @@ describe('trailOf', () => {
 			{ uid: 'pr:1', ns: [3] }
 		]);
 		expect([...t.lit].sort()).toEqual(['person:alice', 'pr:1', 'system:Auth']);
+		expect(t.current).toBeNull();
+	});
+	it('lights a spread step without a point and counts it as on the map', () => {
+		const r = run([step(1, 'list_systems', {}, ['system:Auth', 'system:Billing'])]);
+		const t = trailOf(r, drawn);
+		expect(t.points).toEqual([]);
+		expect([...t.spread]).toEqual([1]);
+		expect(stepsSummary(r, t)).toBe('1 step');
+	});
+	it('puts no ring on an old node while the latest step has no point', () => {
+		const t = trailOf(
+			run([step(1, 'get_entity', { uid: 'pr:1' }, ['pr:1']), step(2, 'list_systems', {}, ['system:Auth', 'system:Billing'])], 'running'),
+			drawn
+		);
 		expect(t.current).toBeNull();
 	});
 	it('marks where a running run is now', () => {
@@ -71,6 +93,23 @@ describe('words', () => {
 		expect(stepsSummary(r, trailOf(r, drawn))).toBe('2 steps · 1 not on the map');
 		const one = run([step(1, 'get_entity', { uid: 'pr:1' }, ['pr:1'])]);
 		expect(stepsSummary(one, trailOf(one, drawn))).toBe('1 step');
+	});
+});
+
+describe('shownRun', () => {
+	const old = run([], 'done', 'old');
+	const last = run([], 'done', 'last');
+	it('keeps a pick while the featured run is the one it was picked over', () => {
+		expect(shownRun([last, old], { id: 'old', featuredAt: 'last' })?.id).toBe('old');
+	});
+	it('lets a run that starts take the map, and keep it after it finishes', () => {
+		const pick = { id: 'old', featuredAt: 'last' };
+		expect(shownRun([run([], 'running', 'new'), last, old], pick)?.id).toBe('new');
+		expect(shownRun([run([], 'done', 'new'), last, old], pick)?.id).toBe('new');
+	});
+	it('falls back to the featured run when the pick is gone', () => {
+		expect(shownRun([last], { id: 'old', featuredAt: 'last' })?.id).toBe('last');
+		expect(shownRun([], null)).toBeNull();
 	});
 });
 

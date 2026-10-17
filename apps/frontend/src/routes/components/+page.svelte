@@ -406,7 +406,8 @@
 
 	// The graph map and inspector, on the synthetic company's real graph view.
 	const mapLayout = layoutMap(syntheticGraph, { ticks: 300 });
-	const drawnUid = (uid: string) => syntheticGraph.nodes.some((n) => n.uid === uid);
+	const mapTerritory = new Map(syntheticGraph.nodes.map((n) => [n.uid, n.territory]));
+	const drawnUid = (uid: string) => mapTerritory.get(uid) ?? null;
 	const runningTrail = trailOf(runningRun, drawnUid);
 	const doneTrail = trailOf(doneRun, drawnUid);
 	const failedTrail = trailOf(failedRun, drawnUid);

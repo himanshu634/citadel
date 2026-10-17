@@ -14,7 +14,7 @@ The map is laid out once per graph; only the trail moves.
 	import { CloudOff, LoaderCircle } from '@lucide/svelte';
 	import { resolve } from '$app/paths';
 	import { AgentRun, Banner, Button, EmptyState, TerritoryMap } from '$lib';
-	import { actorName, doingNow, featured, trailOf } from '$lib/activity';
+	import { actorName, doingNow, featured, shownRun, trailOf, type Pick } from '$lib/activity';
 	import { api, describeError } from '$lib/api/client';
 	import { getCompanies } from '$lib/companies.svelte';
 	import type { MapLayout } from '$lib/graph';
@@ -105,16 +105,15 @@ The map is laid out once per graph; only the trail moves.
 	});
 
 	// The run on the map: the one picked in the rail, else one that is going, else the newest.
-	// A pick holds while the same run (or none) is going; a run that starts takes the map back.
+	// A pick holds while the run it was picked over is still the featured one (see `shownRun`).
 	const working = $derived(runs?.find((r) => r.status === 'running') ?? null);
-	let picked = $state<{ id: string; working: string | null } | null>(null);
-	const run = $derived.by(() => {
-		if (!runs) return null;
-		const held = picked && picked.working === (working?.id ?? null) ? picked.id : null;
-		return runs.find((r) => r.id === held) ?? featured(runs);
-	});
-	const byUid = $derived(new Set((graph?.nodes ?? []).map((n) => n.uid)));
-	const trail = $derived(run && graph ? trailOf(run, (uid) => byUid.has(uid)) : null);
+	let picked = $state<Pick | null>(null);
+	const run = $derived(runs ? shownRun(runs, picked) : null);
+	function pick(id: string) {
+		picked = { id, featuredAt: featured(runs ?? [])?.id ?? null };
+	}
+	const territoryOf = $derived(new Map((graph?.nodes ?? []).map((n) => [n.uid, n.territory])));
+	const trail = $derived(run && graph ? trailOf(run, (uid) => territoryOf.get(uid) ?? null) : null);
 	const here = $derived(run?.status === 'running' ? `${actorName(run.actor)} · ${doingNow(run)}` : null);
 	const others = $derived((runs ?? []).filter((r) => r.id !== run?.id));
 	const chatHref = (threadId: string | null) =>
@@ -199,7 +198,7 @@ The map is laid out once per graph; only the trail moves.
 								<ul>
 									{#each others as r (r.id)}
 										<li>
-											<button type="button" onclick={() => (picked = { id: r.id, working: working?.id ?? null })}>
+											<button type="button" onclick={() => pick(r.id)}>
 												<span class="q">{r.title}</span>
 												<span class="when">
 													{r.status === 'running' ? 'Working now' : ago(r.started_at)} · {r.steps.length}
