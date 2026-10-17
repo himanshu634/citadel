@@ -56,10 +56,12 @@ make fe-install | fe-dev | fe-check | fe-test | fe-build   # frontend: pnpm inst
 
 Configuration comes from `.env` (see `.env.example`): FalkorDB host/port/credentials and
 `FALKORDB_TLS` (the same code runs against local Docker or FalkorDB Cloud), `GITHUB_TOKEN`
-(falls back to `gh auth token`). `EMBEDDING_PROVIDER` (`fastembed` | `none`), `EMBEDDING_MODEL`
-(default `BAAI/bge-base-en-v1.5`, cached in `data/models/`) and `EMBEDDING_DIM` (768; the vector
-index size, must equal the model's output size) drive the embed stage. `ANTHROPIC_API_KEY`,
-`ANTHROPIC_MODEL` (default `claude-haiku-5-5`) and `ANTHROPIC_EFFORT` (default `medium`) drive
+(falls back to `gh auth token`). `EMBEDDING_PROVIDER` (`fastembed` | `gemini` | `none`),
+`EMBEDDING_MODEL` (empty: the provider's default, `BAAI/bge-base-en-v1.5` cached in
+`data/models/`, or `gemini-embedding-2`) and `EMBEDDING_DIM` (768; the vector index size, must
+equal the model's output size) drive the embed stage. `gemini` uses Google's Gemini embedding
+API (`GEMINI_API_KEY`) instead of the local model, and sends chunk text there.
+`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (default `claude-haiku-5-5`) and `ANTHROPIC_EFFORT` (default `medium`) drive
 `agents ask`. Settings live in `brain/config.py` (also `REPO_ROOT`).
 
 ## Brain architecture (`apps/brain/brain`)
@@ -118,8 +120,11 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   `pipeline.embed` (end of ingest, and `brain embed`) first runs `loader.backfill_chunks`: text
   still without chunks or held whole in one chunk with no idx (an upgraded graph; the cursor
   skips old items) is cut as a load would, then `embed_pending`.
-- **`embeddings.py`**: `Embedder` protocol (`passages` / `query`), fastembed provider
-  (`BAAI/bge-base-en-v1.5`, 768 dims, ONNX on CPU, no key), `get_embedder()` (None when
+- **`embeddings.py`**: `Embedder` protocol (`passages` / `query`, optional `start_message`),
+  fastembed provider (`BAAI/bge-base-en-v1.5`, 768 dims, ONNX on CPU, no key) and gemini
+  provider (`GeminiEmbedder`: `batchEmbedContents` over httpx, 100 texts a request, asked for
+  `EMBEDDING_DIM`-sized vectors, L2-normalised, 429/5xx retried; tests mock the transport),
+  `get_embedder()` (None when
   `EMBEDDING_PROVIDER=none`) / `set_embedder()`. `embed_pending` is incremental: it embeds chunks
   whose `text_hash` differs from `embedded_hash` or whose `embed_model` differs (`--all` clears
   `embedded_hash` first). Bot text (comments by, and bodies of work items authored by, an

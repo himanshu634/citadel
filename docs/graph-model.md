@@ -77,7 +77,9 @@ again only when `text_hash` differs from `embedded_hash` or the model changed, s
 costs nothing for unchanged text. `brain embed --all` clears `embedded_hash` to embed every chunk
 once more. Bot text (a comment by, or the body of a work item authored by, a Person with
 `is_bot`) is never embedded, and `semantic_search` never returns it. `get_entity` lists comment
-chunks as neighbours but not work-item or document chunks (their text is the node's `body`). With `EMBEDDING_PROVIDER=none`, or a model that cannot load, chunks not yet embedded stay without a
+chunks as neighbours but not work-item or document chunks (their text is the node's `body`). Vectors come from the local fastembed model by default, or from Google's Gemini API with
+`EMBEDDING_PROVIDER=gemini` (then chunk text and questions are sent to Google). With
+`EMBEDDING_PROVIDER=none`, or a model that cannot load, chunks not yet embedded stay without a
 vector and semantic search is unavailable. `semantic_search` compares the question only with
 vectors from the current model, and says so in a sentence (not an empty result) when the graph
 has no vectors yet or only another model's. A vector never leaves the graph: no tool row, `get_entity` result

@@ -391,7 +391,9 @@ def _text(p: dict[str, Any]) -> dict[str, Any]:
     return {"query": query, "words": query.split("|") if query else [], "limit": p["limit"]}
 
 
-SEMANTIC_OFF = "Semantic search is off: set EMBEDDING_PROVIDER=fastembed and run make embed."
+SEMANTIC_OFF = (
+    "Semantic search is off: set EMBEDDING_PROVIDER=fastembed (or gemini) and run make embed."
+)
 SEMANTIC_MAX_K = 200
 
 
