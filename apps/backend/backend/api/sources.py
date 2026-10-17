@@ -15,15 +15,14 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from brain import db, pipeline
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 
-from backend.api.companies import Runner, StartLock, read_config
-from backend.api.deps import company_slug
+from backend.api.companies import read_config, source_keys
+from backend.api.deps import Runner, Slug, StartLock
 from backend.api.models import KindCount, LabelCounts, SourceRow, SourcesOut, SyncRecord
-from backend.jobs import ACTIVE
+from backend.jobs import is_active
 
 router = APIRouter(prefix="/companies/{slug}", tags=["sources"])
-Slug = Annotated[str, Depends(company_slug)]
 
 
 def _location(config: Any) -> tuple[str, list[str]]:
@@ -118,11 +117,10 @@ def forget_leftover(
 ) -> None:
     """Delete one leftover sync record. 409 when the key is still configured or a build of this
     company is running (it could write the record again); 404 when there is no such record."""
-    read_config(slug)
-    if key in set(pipeline.planned_sources(slug)[1]):
+    if key in source_keys(slug):
         raise HTTPException(status_code=409, detail=f"{key} is still a source of {slug}")
     with lock:  # no build can start between the check and the delete
-        if (snap := runner.current(slug)) is not None and snap.state in ACTIVE:
+        if is_active(runner.current(slug)):
             raise HTTPException(
                 status_code=409, detail=f"A build of {slug} is running; try again when it ends"
             )

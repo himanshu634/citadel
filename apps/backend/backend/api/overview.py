@@ -7,13 +7,11 @@ was never built gets empty lists, not an error, so the page can show its empty s
 
 from __future__ import annotations
 
-from typing import Annotated
-
 from brain import db, tools
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
 from backend.api.companies import read_config
-from backend.api.deps import company_slug
+from backend.api.deps import Slug
 from backend.api.models import Overview
 
 router = APIRouter(prefix="/companies/{slug}", tags=["overview"])
@@ -24,7 +22,7 @@ PEOPLE = 8
 
 
 @router.get("/overview")
-def get_overview(slug: Annotated[str, Depends(company_slug)]) -> Overview:
+def get_overview(slug: Slug) -> Overview:
     cfg = read_config(slug)
     overview = Overview(
         slug=slug,

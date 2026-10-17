@@ -317,13 +317,10 @@ def _keeper_client_for(offline: bool):
 
 
 def _has_api_key() -> bool:
-    """A key in .env (Settings) or in the environment. The SDK may find other credentials (an
-    `ant auth login` profile); the Keeper only runs its LLM jobs on a key it can see."""
-    import os
+    """A key the Keeper can see (`llm.has_api_key`)."""
+    from agents import llm
 
-    from brain import config
-
-    return bool(config.get_settings().anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY"))
+    return llm.has_api_key()
 
 
 def _keeper_ready(slug: str):
@@ -336,7 +333,7 @@ def _jobs_dir():
     """Where the backend's job runner keeps each company's last build (backend/jobs.py)."""
     from brain import config
 
-    return config.REPO_ROOT / "data" / "jobs"
+    return config.jobs_dir()
 
 
 def _build_running(slug: str) -> bool:

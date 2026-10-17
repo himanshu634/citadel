@@ -219,7 +219,7 @@ def run(company: CompanyConfig, source, cache: Path, log=print) -> None:
     include = set(source.include)
     cache.mkdir(parents=True, exist_ok=True)
     client = GithubClient(log=log)
-    window_start = datetime.combine(company.window.since, datetime.min.time(), tzinfo=UTC)
+    window_start = company.window.start
 
     meta = fetch_meta(client, owner, name, cache)
     check_permission(meta, company)  # before any data is pulled
@@ -269,7 +269,8 @@ def run(company: CompanyConfig, source, cache: Path, log=print) -> None:
 
     wanted = []
     if "codeowners" in include:
-        wanted += [p for p in CODEOWNERS_PATHS if p in set(paths)]
+        present = set(paths)
+        wanted += [p for p in CODEOWNERS_PATHS if p in present]
     docs = pick_docs(paths, company) if "repo_docs" in include else []
     wanted += docs
     if wanted:

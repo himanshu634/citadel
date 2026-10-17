@@ -18,7 +18,6 @@ queries/keeper/, run through `db.run`.
 from __future__ import annotations
 
 import math
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -125,7 +124,7 @@ def notice(slug: str, kind: str, limit: int) -> list[dict[str, Any]]:
         raise ValueError(f"unknown noticing kind {kind!r}; known: {', '.join(NOTICING_KINDS)}")
     params: dict[str, Any] = {"limit": limit}
     if kind == "unowned_hot_system":
-        params["since_ts"] = int(time.time()) - HOT_DAYS * tools.DAY
+        params["since_ts"] = tools.since_ts(HOT_DAYS)
     rows = db.run(slug, f"keeper/notice_{kind}", params, read_only=True)
     text = _stale_owner_text if kind == "stale_owner" else _unowned_text
     return [

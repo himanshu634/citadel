@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Iterator
-from datetime import UTC, datetime, time
+from datetime import datetime
 from functools import cache
 
 from brain.canonical import (
@@ -172,7 +172,7 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
     Yields the cleaned records, then any Person/Team/System that was referenced but never
     defined, so every relationship has both ends.
     """
-    since = datetime.combine(cfg.window.since, time.min, tzinfo=UTC)
+    since = cfg.window.start
     people, systems = cfg.people, cfg.systems
 
     defined_people: set[str] = set()
@@ -183,6 +183,12 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
     referenced_systems: dict[str, str | None] = {}  # name -> path rule
     maybe_items: dict[str, WorkItem] = {}  # only updated in the window; kept if active
     active_items: set[str] = set()  # work items with a comment or review in the window
+    path_systems: dict[str, tuple[str, str] | None] = {}  # raw file path -> system_for_path
+
+    def system_of(path: str) -> tuple[str, str] | None:
+        if path not in path_systems:
+            path_systems[path] = system_for_path(path, systems)
+        return path_systems[path]
 
     def ref_system(name: str, rule: str | None) -> None:
         """Remember a referenced system; a real path rule beats an earlier None."""
@@ -229,7 +235,7 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
                 continue
             touches: dict[str, list[str]] = {name: [] for name in rec.systems}
             for f in rec.files:
-                if hit := system_for_path(f, systems):
+                if hit := system_of(f):
                     touches.setdefault(hit[0], []).append(_clean_path(f))
                     ref_system(hit[0], hit[1])
             for name in rec.systems:
@@ -247,7 +253,7 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
             # open tickets stay visible however old they are
             if rec.is_open_ticket() or any(d is not None and to_utc(d) >= since for d in own_dates):
                 yield clean_item(rec)
-            elif _in_window(to_utc(rec.updated_at), since) and rec.updated_at is not None:
+            elif rec.updated_at is not None and to_utc(rec.updated_at) >= since:
                 maybe_items[rec.uid] = rec  # decided after all comments/reviews are seen
         elif isinstance(rec, Review):
             if _in_window(rec.changed_at(), since):

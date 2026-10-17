@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from brain.canonical import CanonicalRecord
-from brain.config import CompanyConfig, SourceConfig
+from brain.config import CompanyConfig, PathSource, SourceConfig
 
 
 class SourceUnavailable(Exception):
@@ -51,3 +51,38 @@ class Adapter(Protocol):
     def records(
         self, company: CompanyConfig, source: Any, cache_dir: Path
     ) -> Iterator[CanonicalRecord]: ...
+
+
+class FolderAdapter:
+    """Mixin for a source that is a local folder (`PathSource`): nothing to download, keyed by
+    its path, and a problem when the folder is missing."""
+
+    name: str
+
+    def key(self, source: PathSource) -> str:
+        return f"{self.name}:{source.path.as_posix()}"
+
+    def fetch(self, company: CompanyConfig, source: PathSource, cache_dir: Path) -> None:
+        """Nothing to download: the files are already local."""
+
+    def check(
+        self, company: CompanyConfig, source: PathSource, cache_dir: Path
+    ) -> SourceProblem | None:
+        if company.resolve(source.path).is_dir():
+            return None
+        return SourceProblem(f"Folder {source.path.as_posix()} does not exist")
+
+    def folder(self, company: CompanyConfig, source: PathSource) -> Path:
+        """The source's folder, resolved; SourceUnavailable when it does not exist."""
+        folder = company.resolve(source.path)
+        if not folder.is_dir():
+            raise SourceUnavailable(f"folder {folder} does not exist")
+        return folder
+
+
+def first_heading(text: str) -> str | None:
+    """Text of the first `# ` markdown heading (may be ""), or None when there is none."""
+    for line in text.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return None

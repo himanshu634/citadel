@@ -14,7 +14,7 @@ MATCH both ends, so a link to something that is not in the graph is dropped (and
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
@@ -115,13 +115,25 @@ def _base(r: CanonicalRecord) -> dict[str, Any]:
 # --- runner -----------------------------------------------------------------------------------
 
 
-def _run(slug: str, query: str, rows: list[dict[str, Any]], report: LoadReport) -> None:
+def _n(result: list[dict[str, Any]]) -> int:
+    """The `n` a write query returns (rows written), 0 when it returns nothing."""
+    return result[0]["n"] if result else 0
+
+
+def _batches(
+    slug: str, query: str, rows: list[dict[str, Any]], params: dict[str, Any]
+) -> Iterator[tuple[int, int]]:
+    """Run `query` on `rows` in batches of BATCH_SIZE (as $rows, beside `params`); yield
+    (rows sent, rows written) per batch. No rows: no query."""
     for i in range(0, len(rows), BATCH_SIZE):
-        chunk = rows[i : i + BATCH_SIZE]
-        result = db.run(slug, query, {"rows": chunk, "company": slug})
-        n = result[0]["n"] if result else 0
+        batch = rows[i : i + BATCH_SIZE]
+        yield len(batch), _n(db.run(slug, query, {**params, "rows": batch}))
+
+
+def _run(slug: str, query: str, rows: list[dict[str, Any]], report: LoadReport) -> None:
+    for sent, n in _batches(slug, query, rows, {"company": slug}):
         report.written[query] += n
-        report.dropped[query] += len(chunk) - n
+        report.dropped[query] += sent - n
 
 
 def _dedupe(records: Iterable[CanonicalRecord]) -> dict[type, list[CanonicalRecord]]:
@@ -441,27 +453,23 @@ def backfill_chunks(slug: str) -> int:
 
 def _load_ownership(slug: str, owns: list[Ownership], rep: LoadReport) -> None:
     """One OWNS edge per (owner, system); several patterns for the same pair are joined."""
-    patterns: dict[tuple[str, str, str], list[str]] = defaultdict(list)
-    sources: dict[tuple[str, str, str], str] = {}
+    # kind -> (owner uid, system uid) -> (patterns, source); the last record's source wins
+    edges: dict[str, dict[tuple[str, str], tuple[list[str], str]]] = {"team": {}, "person": {}}
     for o in owns:
         owner = person_uid(o.owner) if o.owner_kind == "person" else team_uid(o.owner)
+        pairs = edges[o.owner_kind]
         for name in o.systems:
-            key = (o.owner_kind, owner, system_uid(name))
-            patterns[key].append(o.pattern)
-            sources[key] = o.source
-    for kind in ("team", "person"):
+            pair = (owner, system_uid(name))
+            pats = pairs[pair][0] if pair in pairs else []
+            pats.append(o.pattern)
+            pairs[pair] = (pats, o.source)
+    for kind, pairs in edges.items():
         _run(
             slug,
             f"load/owns_{kind}",
             [
-                {
-                    "owner_uid": owner,
-                    "system_uid": sys,
-                    "pattern": ", ".join(pats),
-                    "source": sources[(k, owner, sys)],
-                }
-                for (k, owner, sys), pats in patterns.items()
-                if k == kind
+                {"owner_uid": owner, "system_uid": sys, "pattern": ", ".join(pats), "source": src}
+                for (owner, sys), (pats, src) in pairs.items()
             ],
             rep,
         )
@@ -478,19 +486,12 @@ def chunks_to_embed(slug: str, model: str, limit: int) -> list[dict[str, Any]]:
 
 def set_embeddings(slug: str, rows: list[dict[str, Any]], model: str) -> int:
     """Store vectors: rows of {uid, vector, text_hash}. Returns the chunks written."""
-    written = 0
-    for i in range(0, len(rows), BATCH_SIZE):
-        result = db.run(
-            slug, "load/chunk_embedding", {"rows": rows[i : i + BATCH_SIZE], "model": model}
-        )
-        written += result[0]["n"] if result else 0
-    return written
+    return sum(n for _, n in _batches(slug, "load/chunk_embedding", rows, {"model": model}))
 
 
 def clear_embedded(slug: str) -> int:
     """Mark every chunk as pending for the embed stage. Returns the chunks marked."""
-    result = db.run(slug, "load/clear_embedded")
-    return result[0]["n"] if result else 0
+    return _n(db.run(slug, "load/clear_embedded"))
 
 
 # --- sync state -------------------------------------------------------------------------------
@@ -502,7 +503,7 @@ def get_cursor(slug: str, key: str, window_since: str) -> datetime | None:
     rows = db.run(slug, "load/sync_state_get", {"uid": f"sync:{key}"}, read_only=True)
     if not rows or not rows[0]["cursor"] or rows[0]["window_since"] != window_since:
         return None
-    return datetime.fromisoformat(rows[0]["cursor"].replace("Z", "+00:00"))
+    return datetime.fromisoformat(rows[0]["cursor"])
 
 
 def set_sync_state(

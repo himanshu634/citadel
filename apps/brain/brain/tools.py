@@ -392,10 +392,17 @@ class Stat(_Model):
 # --- parameter preparation --------------------------------------------------------------------
 
 
+def since_ts(days: int | None, now: int | None = None) -> int:
+    """Epoch seconds `days` days before `now` (default: the clock); 0 (all time) without days."""
+    if not days:
+        return 0
+    return (int(time.time()) if now is None else now) - days * DAY
+
+
 def _since(p: dict[str, Any]) -> dict[str, Any]:
     days = p.pop("since_days", None)
     now = int(time.time())
-    return {**p, "now": now, "since_ts": now - days * DAY if days else 0}
+    return {**p, "now": now, "since_ts": since_ts(days, now)}
 
 
 def fulltext_query(text: str) -> str:
@@ -407,9 +414,12 @@ def fulltext_query(text: str) -> str:
     return "|".join(words)
 
 
-def _text(p: dict[str, Any]) -> dict[str, Any]:
+def _text(p: dict[str, Any]) -> dict[str, Any] | None:
+    """None when the text has no usable words: nothing to search."""
     query = fulltext_query(p["text"])
-    return {"query": query, "words": query.split("|") if query else [], "limit": p["limit"]}
+    if not query:
+        return None
+    return {"query": query, "words": query.split("|"), "limit": p["limit"]}
 
 
 SEMANTIC_OFF = (
@@ -418,20 +428,25 @@ SEMANTIC_OFF = (
 SEMANTIC_MAX_K = 200
 
 
-def _semantic(p: dict[str, Any]) -> dict[str, Any]:
-    """Embed the question. Blank text gives no vector (and no search) without touching the model.
+def _semantic(p: dict[str, Any]) -> dict[str, Any] | None:
+    """Embed the question. Blank text gives None (no search) without touching the model.
     The kinds filter runs after the nearest-neighbour step, so with kinds set the query fetches
     the most chunks it may, or comments could crowd out every document. No kinds (or an empty
     list) means every kind."""
+    if not p["text"].strip():
+        return None
     kinds = p["kinds"] or None
     k = SEMANTIC_MAX_K if kinds else min(p["limit"] * 4, SEMANTIC_MAX_K)
-    out = {"vector": None, "k": k, "limit": p["limit"], "kinds": kinds}
-    if not p["text"].strip():
-        return out
     embedder = get_embedder()
     if embedder is None:
         raise EmbeddingUnavailable(SEMANTIC_OFF)
-    return {**out, "vector": embedder.query(p["text"]), "model": embedder.model}
+    return {
+        "vector": embedder.query(p["text"]),
+        "k": k,
+        "limit": p["limit"],
+        "kinds": kinds,
+        "model": embedder.model,
+    }
 
 
 def _no_semantic_hits(slug: str, model: str) -> None:
@@ -466,7 +481,10 @@ class Tool:
     description: str  # one sentence, written for an LLM choosing a tool
     params: type[_Model]
     row: type[_Model]
-    prepare: Callable[[dict[str, Any]], dict[str, Any]] = lambda p: p
+    # query params from the validated params; None means nothing to search (no rows)
+    prepare: Callable[[dict[str, Any]], dict[str, Any] | None] = lambda p: p
+    # run when the query returns no rows, with the query params (e.g. to raise why)
+    on_empty: Callable[[str, dict[str, Any]], None] | None = None
 
     @property
     def query(self) -> str:
@@ -531,6 +549,7 @@ TOOLS: dict[str, Tool] = {
             SemanticParams,
             SemanticHit,
             _semantic,
+            on_empty=lambda slug, p: _no_semantic_hits(slug, p["model"]),
         ),
         Tool(
             "person_profile",
@@ -604,13 +623,11 @@ def call(slug: str, name: str, **params: Any) -> list[_Model]:
     if tool is None:
         raise KeyError(f"unknown tool {name!r}; known: {', '.join(sorted(TOOLS))}")
     query_params = tool.prepare(tool.params.model_validate(params).model_dump())
-    if query_params.get("query") == "":  # full-text search with no usable words
-        return []
-    if "vector" in query_params and query_params["vector"] is None:  # semantic, blank question
+    if query_params is None:  # nothing to search (no usable words, a blank question)
         return []
     rows = db.run(slug, tool.query, query_params, read_only=True)
-    if not rows and "vector" in query_params:
-        _no_semantic_hits(slug, query_params["model"])
+    if not rows and tool.on_empty:
+        tool.on_empty(slug, query_params)
     return [tool.row.model_validate(_plain(r)) for r in rows]
 
 

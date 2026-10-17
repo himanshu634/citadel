@@ -91,7 +91,7 @@ def run(
         log(f"  issues: team set changed to {', '.join(sorted(keys))}; fetching the whole window")
         shutil.rmtree(issues)
     write_json(cache / "meta.json", {**meta, "issue_teams": sorted(keys)})  # after the clear
-    window_start = datetime.combine(company.window.since, datetime.min.time(), tzinfo=UTC)
+    window_start = company.window.start
     fetch_paged(
         client,
         "issues",

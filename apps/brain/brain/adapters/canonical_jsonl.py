@@ -16,7 +16,7 @@ from typing import Literal
 from pydantic import ValidationError
 
 from brain import canonical as c
-from brain.adapters.base import SourceProblem, SourceUnavailable
+from brain.adapters.base import FolderAdapter
 from brain.config import CompanyConfig, PathSource
 
 # file name -> model. Files are optional; order is irrelevant (the loader orders writes).
@@ -38,29 +38,14 @@ class CanonicalJsonlSource(PathSource):
     type: Literal["canonical_jsonl"]
 
 
-class CanonicalJsonlAdapter:
+class CanonicalJsonlAdapter(FolderAdapter):
     name = "canonical_jsonl"
     source_model = CanonicalJsonlSource
-
-    def key(self, source: CanonicalJsonlSource) -> str:
-        return f"{self.name}:{source.path.as_posix()}"
-
-    def fetch(self, company: CompanyConfig, source: CanonicalJsonlSource, cache_dir: Path) -> None:
-        """Nothing to download: the files are already local."""
-
-    def check(
-        self, company: CompanyConfig, source: CanonicalJsonlSource, cache_dir: Path
-    ) -> SourceProblem | None:
-        if company.resolve(source.path).is_dir():
-            return None
-        return SourceProblem(f"Folder {source.path.as_posix()} does not exist")
 
     def records(
         self, company: CompanyConfig, source: CanonicalJsonlSource, cache_dir: Path
     ) -> Iterator[c.CanonicalRecord]:
-        folder = company.resolve(source.path)
-        if not folder.is_dir():
-            raise SourceUnavailable(f"folder {folder} does not exist")
+        folder = self.folder(company, source)
         for filename, model in FILES.items():
             path = folder / filename
             if path.exists():

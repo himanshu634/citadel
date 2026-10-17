@@ -31,9 +31,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import re
-import tempfile
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -44,6 +41,9 @@ from typing import Literal, Protocol
 from brain import config, db, pipeline, schema
 from brain.events import BuildEvent, BuildStopped, OnEvent, Stage
 from pydantic import BaseModel, model_validator
+
+from backend.fanout import Subscriber, Subscription, deliver
+from backend.files import atomic_write
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +89,11 @@ class BuildSnapshot(BaseModel):
             # such files predate the embed stage too, so they never ran it
             self.stages = [s for s in _plan(self.kind, None) if s != "embed"]
         return self
+
+
+def is_active(snap: BuildSnapshot | None) -> bool:
+    """A build that is queued or running."""
+    return snap is not None and snap.state in ACTIVE
 
 
 class BuildSummary(BaseModel):
@@ -159,13 +164,6 @@ class _Job:
     trail: Trail | None = None  # every (stage, source) in order; None when unknown
     step: Step | None = None  # the step `_execute` is in
     stop: threading.Event = field(default_factory=threading.Event)
-
-
-@dataclass(eq=False)
-class _Subscriber:
-    slug: str | None  # None = every company
-    loop: asyncio.AbstractEventLoop
-    queue: asyncio.Queue[BuildEvent]
 
 
 Trail = tuple[tuple[Stage, str | None], ...]
@@ -282,7 +280,7 @@ class JobRunner:
         # One lock for the job table, every snapshot change, its file and the subscriber set.
         self._lock = threading.RLock()
         self._jobs: dict[str, _Job] = {}  # latest job per slug started by this process
-        self._subscribers: set[_Subscriber] = set()
+        self._subscribers: set[Subscriber[BuildEvent]] = set()
 
     # --- public API ----------------------------------------------------------------------------
 
@@ -315,8 +313,7 @@ class JobRunner:
         )
         job = _Job(snap, full, keys, plan, trail)
         with self._lock:
-            current = self._jobs.get(slug)
-            if current is not None and current.snapshot.state in ACTIVE:
+            if self._active(slug) is not None:
                 raise JobRunning(slug)
             has_slot = self._slots.acquire(blocking=False)
             try:
@@ -344,8 +341,8 @@ class JobRunner:
         event or step. False when the slug has no queued or running job."""
         self._path(slug)
         with self._lock:
-            job = self._jobs.get(slug)
-            if job is None or job.snapshot.state not in ACTIVE:
+            job = self._active(slug)
+            if job is None:
                 return False
             job.stop.set()
             if job.snapshot.state == "queued":
@@ -356,8 +353,7 @@ class JobRunner:
         """The slug has a queued or running build or rebuild in this process."""
         self._path(slug)
         with self._lock:
-            job = self._jobs.get(slug)
-            return job is not None and job.snapshot.state in ACTIVE
+            return self._active(slug) is not None
 
     def current(self, slug: str) -> BuildSnapshot | None:
         """The slug's job from this process, else its last snapshot on disk, else None."""
@@ -379,8 +375,7 @@ class JobRunner:
         Raises JobRunning while it has a queued or running job. False when there was none."""
         path = self._path(slug)
         with self._lock:
-            job = self._jobs.get(slug)
-            if job is not None and job.snapshot.state in ACTIVE:
+            if self._active(slug) is not None:
                 raise JobRunning(slug)
             known = self._jobs.pop(slug, None) is not None
             try:
@@ -393,7 +388,7 @@ class JobRunner:
         snap = self.current(slug)
         return BuildSummary.of(snap) if snap is not None else None
 
-    def subscribe(self, slug: str | None) -> Subscription:
+    def subscribe(self, slug: str | None) -> Subscription[BuildEvent]:
         """Events of one company (or all, for None) from now on; nothing historical.
 
         Call it from the event loop that will iterate it. The queue is registered here, not on
@@ -402,10 +397,10 @@ class JobRunner:
         """
         if slug is not None:
             self._path(slug)
-        sub = _Subscriber(slug, asyncio.get_running_loop(), asyncio.Queue())
+        sub: Subscriber[BuildEvent] = Subscriber(slug, asyncio.get_running_loop(), asyncio.Queue())
         with self._lock:
             self._subscribers.add(sub)
-        return Subscription(self, sub)
+        return Subscription(lambda: self._unsubscribe(sub), sub.queue)
 
     def recover(self) -> None:
         """On startup: a snapshot still `queued`/`running` belonged to a process that is gone."""
@@ -414,25 +409,19 @@ class JobRunner:
             return
         for path in sorted(jobs_dir.glob("*.json")):
             slug = path.stem
-            if not re.fullmatch(config.SLUG_RE, slug):
+            if not config.valid_slug(slug):
                 continue
             with self._lock:
                 if slug in self._jobs:
                     continue
                 snap = _read(path)
-                if snap is None or snap.state not in ACTIVE:
+                if not is_active(snap):
                     continue
-                event = _closing_event(snap, "stopped", tuple(snap.stages))
-                if event is not None:
-                    event.step = snap.step
-                    snap.events.append(event)
-                snap.state = "stopped"
-                snap.ended_at = _now()
-                self._persist(snap)
+                self._close(snap, "stopped", _closing_event(snap, "stopped", tuple(snap.stages)))
 
     @property
     def jobs_dir(self) -> Path:
-        return self._jobs_dir or config.REPO_ROOT / "data" / "jobs"
+        return self._jobs_dir or config.jobs_dir()
 
     # --- worker --------------------------------------------------------------------------------
 
@@ -524,6 +513,11 @@ class JobRunner:
 
     # --- snapshot and delivery (callers may or may not hold the lock; it is reentrant) --------
 
+    def _active(self, slug: str) -> _Job | None:
+        """The slug's queued or running job in this process. Call it holding the lock."""
+        job = self._jobs.get(slug)
+        return job if job is not None and is_active(job.snapshot) else None
+
     def _set_running(self, job: _Job) -> None:
         job.snapshot.state = "running"
         if job.trail is not None:
@@ -542,14 +536,7 @@ class JobRunner:
     ) -> None:
         with self._lock:
             snap = job.snapshot
-            # State first, so a subscriber reading `current()` on the last event sees it.
-            snap.state = state
-            snap.ended_at = _now()
-            snap.error = error
-            if event is not None:
-                event.step = snap.step
-                snap.events.append(event)
-            self._persist(snap)
+            self._close(snap, state, event, error)
             if event is not None:
                 self._publish(event)
             elif snap.events:
@@ -557,16 +544,25 @@ class JobRunner:
                 # changed. Subscribers read the state on each event, so send that one again.
                 self._publish(snap.events[-1])
 
+    def _close(
+        self, snap: BuildSnapshot, state: State, event: BuildEvent | None, error: str | None = None
+    ) -> None:
+        """End the snapshot in `state` with its closing event (if any) and write it."""
+        # State first, so a subscriber reading `current()` on the last event sees it.
+        snap.state = state
+        snap.ended_at = _now()
+        snap.error = error
+        if event is not None:
+            event.step = snap.step
+            snap.events.append(event)
+        self._persist(snap)
+
     def _publish(self, event: BuildEvent) -> None:
         for sub in list(self._subscribers):
-            if sub.slug is not None and sub.slug != event.slug:
-                continue
-            try:
-                sub.loop.call_soon_threadsafe(sub.queue.put_nowait, event)
-            except RuntimeError:  # its event loop is closed: nobody is listening any more
+            if sub.slug in (None, event.slug) and not deliver(sub, event):
                 self._subscribers.discard(sub)
 
-    def _unsubscribe(self, sub: _Subscriber) -> None:
+    def _unsubscribe(self, sub: Subscriber[BuildEvent]) -> None:
         with self._lock:
             self._subscribers.discard(sub)
 
@@ -575,41 +571,13 @@ class JobRunner:
         build itself must not fail because its progress file could not be written."""
         path = self._path(snap.slug)
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".", suffix=".tmp")
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                    fh.write(snap.model_dump_json())
-                os.chmod(tmp_name, 0o644)  # mkstemp creates 0600
-                os.replace(tmp_name, path)
-            finally:
-                Path(tmp_name).unlink(missing_ok=True)
+            atomic_write(path, snap.model_dump_json(), mode=0o644)
         except OSError:
             log.exception("could not write build snapshot %s", path)
 
     def _path(self, slug: str) -> Path:
-        if not re.fullmatch(config.SLUG_RE, slug):  # also keeps "../x" out of the folder
-            raise ValueError(f"invalid company slug: {slug!r}")
-        return self.jobs_dir / f"{slug}.json"
-
-
-class Subscription:
-    """What `subscribe` returns: an endless async iterator of events. Not an async generator,
-    because a generator that never started skips its `finally` on `aclose()`, which would
-    leave the subscriber registered for good."""
-
-    def __init__(self, runner: JobRunner, sub: _Subscriber):
-        self._runner = runner
-        self._sub = sub
-
-    def __aiter__(self) -> Subscription:
-        return self
-
-    async def __anext__(self) -> BuildEvent:
-        return await self._sub.queue.get()
-
-    async def aclose(self) -> None:
-        self._runner._unsubscribe(self._sub)
+        # check_slug also keeps "../x" out of the folder
+        return self.jobs_dir / f"{config.check_slug(slug)}.json"
 
 
 def _read(path: Path) -> BuildSnapshot | None:

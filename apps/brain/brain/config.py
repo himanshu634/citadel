@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date
+from datetime import UTC, date, datetime, time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -120,6 +120,11 @@ class _Strict(BaseModel):
 class Window(_Strict):
     since: date
 
+    @property
+    def start(self) -> datetime:
+        """`since` as a UTC datetime at midnight: where the window opens."""
+        return datetime.combine(self.since, time.min, tzinfo=UTC)
+
 
 class SourceConfig(BaseModel):
     """Base for one entry under `sources:`. Each adapter defines its own subclass (with a
@@ -205,15 +210,33 @@ class CompanyConfig(_Strict):
         return path if path.is_absolute() else REPO_ROOT / path
 
 
+def valid_slug(slug: str) -> bool:
+    return re.fullmatch(SLUG_RE, slug) is not None
+
+
+def check_slug(slug: str) -> str:
+    """`slug` itself, or ValueError when it does not match SLUG_RE."""
+    if not valid_slug(slug):
+        raise ValueError(f"invalid company slug: {slug!r}")
+    return slug
+
+
 def graph_name(slug: str) -> str:
     """One FalkorDB graph per company: brain_<slug>. Never mix companies in one graph."""
-    if not re.fullmatch(SLUG_RE, slug):
-        raise ValueError(f"invalid company slug: {slug!r}")
-    return f"brain_{slug}"
+    return f"brain_{check_slug(slug)}"
 
 
 def companies_dir() -> Path:
     return REPO_ROOT / "companies"
+
+
+def company_path(slug: str) -> Path:
+    return companies_dir() / f"{slug}.yaml"
+
+
+def jobs_dir() -> Path:
+    """Where the backend keeps each company's last build (data/jobs/<slug>.json)."""
+    return REPO_ROOT / "data" / "jobs"
 
 
 def raw_dir(slug: str, adapter: str) -> Path:
@@ -222,7 +245,7 @@ def raw_dir(slug: str, adapter: str) -> Path:
 
 
 def load_company(slug: str) -> CompanyConfig:
-    path = companies_dir() / f"{slug}.yaml"
+    path = company_path(slug)
     if not path.exists():
         raise FileNotFoundError(f"no company config at {path}; run `make init SLUG={slug}` first")
     data = yaml.safe_load(path.read_text())

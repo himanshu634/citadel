@@ -17,22 +17,17 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 
 import anyio
-from brain import pipeline
 from brain.events import BuildEvent
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 from sse_starlette import EventSourceResponse
 
 from backend import registry
 from backend.api import companies
-from backend.api.companies import Runner, StartLock
-from backend.api.deps import company_slug
+from backend.api.deps import Runner, Slug, StartLock, sse
 from backend.api.models import BuildIn, CompanyOut
-from backend.jobs import ACTIVE, BuildSnapshot, JobRunner, JobRunning
+from backend.jobs import ACTIVE, BuildSnapshot, JobRunner, JobRunning, is_active
 
 router = APIRouter(tags=["builds"])
-
-PING_SECONDS = 15
-Slug = Annotated[str, Depends(company_slug)]
 
 
 def _current(runner: JobRunner, slug: str) -> BuildSnapshot:
@@ -43,8 +38,7 @@ def _current(runner: JobRunner, slug: str) -> BuildSnapshot:
 
 
 def _known_keys(slug: str, keys: list[str]) -> set[str]:
-    companies.read_config(slug)  # 422 with the file's problem when it does not validate
-    known = set(pipeline.planned_sources(slug)[1])
+    known = companies.source_keys(slug)
     if not keys or not set(keys) <= known:
         unknown = sorted(set(keys) - known) or ["(none named)"]
         raise HTTPException(status_code=422, detail=f"{slug} has no source {', '.join(unknown)}")
@@ -85,14 +79,14 @@ def _ends_build(event: BuildEvent) -> bool:
 
 async def progress_events(runner: JobRunner, slug: str) -> AsyncIterator[dict]:
     """The snapshot, then each event of the build until it ends."""
-    snap = runner.current(slug)
-    if snap is None or snap.state not in ACTIVE:  # nothing more will happen: no subscription
+    snap = await anyio.to_thread.run_sync(runner.current, slug)
+    if not is_active(snap):  # nothing more will happen: no subscription
         if snap is not None:
             yield {"event": "snapshot", "data": snap.model_dump_json()}
         return
     events = runner.subscribe(slug)  # before reading the snapshot, so no event falls between
     try:
-        snap = runner.current(slug)
+        snap = await anyio.to_thread.run_sync(runner.current, slug)
         yield {"event": "snapshot", "data": snap.model_dump_json()}
         if snap.state not in ACTIVE:
             return
@@ -110,7 +104,7 @@ async def progress_events(runner: JobRunner, slug: str) -> AsyncIterator[dict]:
 @router.get("/companies/{slug}/builds/current/events")
 def build_events(slug: Slug, runner: Runner) -> EventSourceResponse:
     _current(runner, slug)  # 404 before the stream starts
-    return EventSourceResponse(progress_events(runner, slug), ping=PING_SECONDS)
+    return sse(progress_events(runner, slug))
 
 
 def _company(runner: JobRunner, slug: str) -> CompanyOut:
@@ -131,4 +125,4 @@ async def status_events(runner: JobRunner) -> AsyncIterator[dict]:
 
 @router.get("/events")
 async def all_events(runner: Runner) -> EventSourceResponse:
-    return EventSourceResponse(status_events(runner), ping=PING_SECONDS)
+    return sse(status_events(runner))

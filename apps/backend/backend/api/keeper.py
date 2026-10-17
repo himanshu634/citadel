@@ -26,16 +26,14 @@ from brain.config import get_settings
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sse_starlette import EventSourceResponse
 
-from backend.api.deps import company_slug
+from backend.api.deps import Slug, sse
 from backend.api.models import ApprovalIn, KeeperEvent
 from backend.keeper_runs import BUILDING, ENDS, BrainBuilding, KeeperRuns, ReviewNotStarted
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["keeper"])
 
-PING_SECONDS = 15
 PREFIX = "/companies/{slug}/keeper"
-Slug = Annotated[str, Depends(company_slug)]
 Limit = Annotated[int, Query(ge=1, le=500)]
 
 
@@ -165,10 +163,7 @@ def start_review(slug: Slug, runs: Keeper) -> Review:
 @router.post(f"{PREFIX}/review/stop", status_code=202)
 def stop_review(slug: Slug, runs: Keeper) -> Review:
     """Ask the running review to stop at its next job; the review says when it has."""
-    if not runs.stop(slug):
-        raise HTTPException(status_code=404, detail=f"No review of {slug} is running")
-    current = runs.current(slug)
-    if current is None:
+    if not runs.stop(slug) or (current := runs.current(slug)) is None:
         raise HTTPException(status_code=404, detail=f"No review of {slug} is running")
     return current
 
@@ -193,4 +188,4 @@ async def review_events(runs: KeeperRuns, slug: str) -> AsyncIterator[dict]:
 def events(slug: Slug, runs: Keeper) -> EventSourceResponse:
     if runs.current(slug) is None and not runs.running(slug):  # 404 before the stream starts
         raise HTTPException(status_code=404, detail=f"No review of {slug} yet")
-    return EventSourceResponse(review_events(runs, slug), ping=PING_SECONDS)
+    return sse(review_events(runs, slug))

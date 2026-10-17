@@ -14,9 +14,6 @@ must not hide the others. So the registry
 from __future__ import annotations
 
 import io
-import os
-import re
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +23,8 @@ from brain.config import CompanyConfig
 from pydantic import BaseModel, ValidationError
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
+
+from backend.files import atomic_write
 
 # Sections whose keys are edited one by one on update; `sources` is replaced as a whole.
 _NESTED = ("window", "systems", "people")
@@ -42,13 +41,11 @@ class InvalidCompany(BaseModel):
 
 
 def _path(slug: str) -> Path:
-    if not re.fullmatch(config.SLUG_RE, slug):  # also keeps "../x" out of the folder
-        raise ValueError(f"invalid company slug: {slug!r}")
-    return config.companies_dir() / f"{slug}.yaml"
+    return config.company_path(config.check_slug(slug))  # also keeps "../x" out of the folder
 
 
 def exists(slug: str) -> bool:
-    return bool(re.fullmatch(config.SLUG_RE, slug)) and _path(slug).is_file()
+    return config.valid_slug(slug) and _path(slug).is_file()
 
 
 def read(slug: str) -> CompanyConfig:
@@ -142,26 +139,9 @@ def render_yaml(cfg: CompanyConfig) -> str:
     return _to_text(_dump(cfg))
 
 
-def _atomic_write(path: Path, text: str, *, exclusive: bool = False) -> None:
-    """Write `text` to `path` via a temp file in the same folder. `exclusive` refuses to
-    replace an existing file (FileExistsError), without a check-then-write race."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".", suffix=".tmp")
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        if exclusive:
-            os.link(tmp, path)  # fails with FileExistsError if `path` exists
-        else:
-            os.replace(tmp, path)
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
 def write_new(cfg: CompanyConfig) -> Path:
     path = _path(cfg.slug)
-    _atomic_write(path, render_yaml(cfg), exclusive=True)
+    atomic_write(path, render_yaml(cfg), exclusive=True)
     return path
 
 
@@ -182,16 +162,16 @@ def update(slug: str, cfg: CompanyConfig) -> None:
     new = _dump(cfg)
 
     for key, value in new.items():
-        if current is not None and getattr(current, key) == getattr(cfg, key):
+        old_section = getattr(current, key) if current is not None else None
+        new_section = getattr(cfg, key)
+        if current is not None and old_section == new_section:
             continue
         if key in _NESTED and isinstance(doc.get(key), CommentedMap):
             for sub, sub_value in value.items():
-                if current is None or getattr(getattr(current, key), sub) != getattr(
-                    getattr(cfg, key), sub
-                ):
+                if current is None or getattr(old_section, sub) != getattr(new_section, sub):
                     doc[key][sub] = sub_value
         else:
             doc[key] = value
     if not cfg.mcp_servers:
         doc.pop("mcp_servers", None)  # _dump leaves out an empty list, so remove it here
-    _atomic_write(path, _to_text(doc))
+    atomic_write(path, _to_text(doc))

@@ -16,9 +16,10 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from brain.adapters.base import SourceUnavailable, first_heading
 from brain.adapters.github import codeowners
 from brain.adapters.github.fetch import check_permission
-from brain.adapters.runs import completed_pages, read_json
+from brain.adapters.runs import completed_nodes, nodes, read_json
 from brain.canonical import (
     CanonicalRecord,
     Change,
@@ -73,16 +74,26 @@ class Repo:
 def _latest_by_number(folder: Path) -> dict[int, dict[str, Any]]:
     """Read completed pages; for the same number keep the most recently updated version."""
     items: dict[int, dict[str, Any]] = {}
-    for page in completed_pages(folder):
-        for node in json.loads(page.read_text()):
-            old = items.get(node["number"])
-            if old is None or node["updatedAt"] >= old["updatedAt"]:
-                items[node["number"]] = node
+    for _, node in completed_nodes(folder):
+        old = items.get(node["number"])
+        if old is None or node["updatedAt"] >= old["updatedAt"]:
+            items[node["number"]] = node
     return items
 
 
-def _nodes(conn: dict[str, Any] | None) -> list[dict[str, Any]]:
-    return (conn or {}).get("nodes") or []
+def _comments(repo: Repo, work_uid: str, conn: dict[str, Any] | None) -> Iterator[Comment]:
+    """A PR's or issue's comments; those by deleted accounts are skipped."""
+    for c in nodes(conn):
+        if login := actor_login(c["author"]):
+            yield Comment(
+                uid=f"github:{repo.name}:comment:{c['id']}",
+                source=SOURCE,
+                url=c["url"],
+                work_item_uid=work_uid,
+                author_login=login,
+                created_at=c["createdAt"],
+                body=(c["body"] or "")[:MAX_BODY],
+            )
 
 
 class PathIndex:
@@ -109,8 +120,6 @@ class PathIndex:
 
 
 def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRecord]:
-    from brain.adapters.base import SourceUnavailable  # local: avoid an import cycle
-
     meta = read_json(cache / "meta.json")
     if meta is None:
         raise SourceUnavailable(f"no GitHub cache at {cache}; run `make fetch` first")
@@ -125,15 +134,11 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
     prs = _latest_by_number(cache / "pull_requests") if want_prs else {}
     issues = _latest_by_number(cache / "issues") if "issues" in include else {}
     number_uid = {n: repo.issue(n) for n in issues} | {n: repo.pr(n) for n in prs}
+    url_ref_re = re.compile(rf"github\.com/{re.escape(repo.name)}/(?:pull|issues)/(\d+)")
 
     def mentions(from_uid: str, from_label: str, text: str, skip: set[str]) -> Iterator[Link]:
         targets = {int(m) for m in HASH_REF_RE.findall(text or "")}
-        targets |= {
-            int(m)
-            for m in re.findall(
-                rf"github\.com/{re.escape(repo.name)}/(?:pull|issues)/(\d+)", text or ""
-            )
-        }
+        targets |= {int(m) for m in url_ref_re.findall(text or "")}
         for n in sorted(targets):
             uid = number_uid.get(n)
             if uid and uid != from_uid and uid not in skip:
@@ -175,11 +180,11 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
                 closed_at=pr["closedAt"],
                 merged_at=pr["mergedAt"],
                 author_login=actor_login(pr["author"]),
-                labels=[lb["name"] for lb in _nodes(pr["labels"])],
+                labels=[lb["name"] for lb in nodes(pr["labels"])],
                 container=repo.name,
             )
             closes = set()
-            for ref in _nodes(pr["closingIssuesReferences"]):
+            for ref in nodes(pr["closingIssuesReferences"]):
                 if ref["repository"]["nameWithOwner"] == repo.name and ref["number"] in issues:
                     closes.add(repo.issue(ref["number"]))
                     yield Link(
@@ -191,23 +196,13 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
                         source=SOURCE,
                     )
             yield from mentions(uid, "WorkItem", pr["body"], skip=closes)
-            for c in _nodes(pr["comments"]):
-                if login := actor_login(c["author"]):
-                    yield Comment(
-                        uid=f"github:{repo.name}:comment:{c['id']}",
-                        source=SOURCE,
-                        url=c["url"],
-                        work_item_uid=uid,
-                        author_login=login,
-                        created_at=c["createdAt"],
-                        body=(c["body"] or "")[:MAX_BODY],
-                    )
-            for node in _nodes(pr["commits"]):
+            yield from _comments(repo, uid, pr["comments"])
+            for node in nodes(pr["commits"]):
                 commit_pr.setdefault(node["commit"]["oid"], n)
             if pr["mergeCommit"]:
                 commit_pr[pr["mergeCommit"]["oid"]] = n
         if "reviews" in include:
-            for r in _nodes(pr["reviews"]):
+            for r in nodes(pr["reviews"]):
                 login = actor_login(r["author"])
                 if login and r["submittedAt"] and r["state"] != "PENDING":
                     yield Review(
@@ -236,30 +231,19 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
             updated_at=it["updatedAt"],
             closed_at=it["closedAt"],
             author_login=actor_login(it["author"]),
-            labels=[lb["name"] for lb in _nodes(it["labels"])],
+            labels=[lb["name"] for lb in nodes(it["labels"])],
             container=repo.name,
         )
         yield from mentions(uid, "WorkItem", it["body"], skip=set())
-        for c in _nodes(it["comments"]):
-            if login := actor_login(c["author"]):
-                yield Comment(
-                    uid=f"github:{repo.name}:comment:{c['id']}",
-                    source=SOURCE,
-                    url=c["url"],
-                    work_item_uid=uid,
-                    author_login=login,
-                    created_at=c["createdAt"],
-                    body=(c["body"] or "")[:MAX_BODY],
-                )
+        yield from _comments(repo, uid, it["comments"])
 
     # --- commits ----------------------------------------------------------------------------
     commits_file = cache / "commits.jsonl"
     if "commits" in include and commits_file.exists():
         logins: dict[str, str | None] = {}
-        for page in completed_pages(cache / "history"):
-            for node in json.loads(page.read_text()):
-                user = (node["author"] or {}).get("user") or {}
-                logins[node["oid"]] = user.get("login")
+        for _, node in completed_nodes(cache / "history"):
+            user = (node["author"] or {}).get("user") or {}
+            logins[node["oid"]] = user.get("login")
         aliases = company.people.aliases
         for line in commits_file.read_text().splitlines():
             row = json.loads(line)
@@ -342,7 +326,5 @@ def _ownerships(
 
 
 def _doc_title(path: str, text: str) -> str:
-    for line in text.splitlines():
-        if line.startswith("# "):
-            return line[2:].strip()
-    return path
+    heading = first_heading(text)
+    return heading if heading is not None else path

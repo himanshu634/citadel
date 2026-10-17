@@ -18,8 +18,10 @@ from fastapi import APIRouter, HTTPException
 
 from backend import onboard, registry
 from backend.api import checks
-from backend.api.companies import Runner, StartLock, _detail, _field_errors, slug_taken
+from backend.api.companies import _detail, _field_errors, slug_taken
+from backend.api.deps import Runner, StartLock
 from backend.api.models import CompanyRef, OnboardIn, OnboardOut, RepoLookup
+from backend.jobs import JobRunner
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +47,11 @@ def _found(owner: str, name: str) -> tuple[str, bool, str] | None:
     )
 
 
+def _free_slug(runner: JobRunner, repo: str) -> str:
+    """The best slug for `repo` that no company has or had."""
+    return onboard.first_free(onboard.candidates(repo), lambda s: slug_taken(runner, s) is not None)
+
+
 @router.get("/github/{owner}/{name}")
 def lookup(
     owner: Annotated[str, checks.OWNER], name: Annotated[str, checks.NAME], runner: Runner
@@ -55,7 +62,8 @@ def lookup(
     repo, private, owner_name = found
     if private:
         return RepoLookup(repo=repo, exists=True, private=True, owner_name=owner_name)
-    slug = onboard.first_free(onboard.candidates(repo), lambda s: slug_taken(runner, s) is not None)
+    slug = _free_slug(runner, repo)
+    known = onboard.valid_companies()
     return RepoLookup(
         repo=repo,
         exists=True,
@@ -64,8 +72,8 @@ def lookup(
         name=onboard.company_name(repo, owner_name, slug),
         slug=slug,
         since=onboard.since(onboard.today()).isoformat(),
-        company=_ref(onboard.company_reading(repo)),
-        owner_company=_ref(onboard.company_of_owner(repo.split("/")[0])),
+        company=_ref(onboard.company_reading(repo, known)),
+        owner_company=_ref(onboard.company_of_owner(repo.split("/")[0], known)),
     )
 
 
@@ -84,9 +92,7 @@ def create(body: OnboardIn, runner: Runner, lock: StartLock):
         if (reader := onboard.company_reading(repo)) is not None:
             detail = {"code": "repo_taken", "slug": reader.slug, "name": reader.name}
             raise HTTPException(status_code=409, detail=detail)
-        slug = body.slug or onboard.first_free(
-            onboard.candidates(repo), lambda s: slug_taken(runner, s) is not None
-        )
+        slug = body.slug or _free_slug(runner, repo)
         draft = onboard.draft(
             repo,
             body.name or onboard.company_name(repo, owner_name, slug),

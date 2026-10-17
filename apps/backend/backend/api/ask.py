@@ -45,9 +45,8 @@ from agents.work.store import WorkStore
 from brain import db
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sse_starlette import EventSourceResponse
 
-from backend.api.deps import company_slug
+from backend.api.deps import Slug, sse
 from backend.api.models import (
     AskAnswer,
     AskError,
@@ -63,10 +62,7 @@ from backend.api.models import (
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["ask"])
 
-PING_SECONDS = 15
 CLAIM_WAIT_SECONDS = 60.0  # how long a follow-up waits for its thread's stopped run to end
-Slug = Annotated[str, Depends(company_slug)]
-
 _MODELS: dict[str, type[BaseModel]] = {
     "start": AskStart,
     "llm": AskLlm,
@@ -133,6 +129,9 @@ def get_asker(request: Request) -> Asker:
     return request.app.state.asker
 
 
+AskerDep = Annotated[Asker, Depends(get_asker)]
+
+
 @router.get("/models", response_model=ModelsOut)
 def models() -> ModelsOut:
     """The Claude models a question may run on, cheapest first, and the default."""
@@ -145,7 +144,7 @@ def models() -> ModelsOut:
 
 
 @router.post("/companies/{slug}/ask")
-def ask(slug: Slug, body: AskIn, asker: Annotated[Asker, Depends(get_asker)]):
+def ask(slug: Slug, body: AskIn, asker: AskerDep):
     if not asker.graph_exists(slug):
         raise HTTPException(status_code=409, detail=f"{slug} has no graph yet. Build it, then ask.")
     thread_id = body.thread_id or uuid.uuid4().hex[:12]
@@ -154,9 +153,7 @@ def ask(slug: Slug, body: AskIn, asker: Annotated[Asker, Depends(get_asker)]):
             status_code=409,
             detail="This chat is still answering. Wait for it, or start a new chat.",
         )
-    return EventSourceResponse(
-        _events(asker, slug, body.question, thread_id, body.model), ping=PING_SECONDS
-    )
+    return sse(_events(asker, slug, body.question, thread_id, body.model))
 
 
 async def _events(

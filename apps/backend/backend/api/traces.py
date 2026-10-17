@@ -15,22 +15,21 @@ from typing import Annotated
 
 from agents.keeper import gaps
 from agents.traces import Trace, TraceSummary, summarize, window
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Path, Query
 
-from backend.api.ask import Asker, get_asker
-from backend.api.deps import company_slug
+from backend.api.ask import Asker, AskerDep
+from backend.api.deps import Slug
 from backend.api.models import FeedbackIn, FeedbackOut
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/companies/{slug}/traces", tags=["traces"])
-Slug = Annotated[str, Depends(company_slug)]
 TraceId = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
 
 
 @router.get("/summary")
 def get_summary(
     slug: Slug,
-    asker: Annotated[Asker, Depends(get_asker)],
+    asker: AskerDep,
     days: Annotated[int, Query(ge=1, le=365)] = 7,
 ) -> TraceSummary:
     since, until = window(days)
@@ -50,7 +49,7 @@ def post_feedback(
     slug: Slug,
     trace_id: TraceId,
     body: FeedbackIn,
-    asker: Annotated[Asker, Depends(get_asker)],
+    asker: AskerDep,
     background: BackgroundTasks,
 ) -> FeedbackOut:
     try:

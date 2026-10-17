@@ -64,9 +64,12 @@ def next_cursor(
 
 
 def _selected(cfg: CompanyConfig, only: str | None):
+    """(source, adapter, key) for each source of type `only` (every source when None). The key
+    is the adapter's key for the source, or its type when no adapter is registered."""
     for source in cfg.sources:
         if only is None or source.type == only:
-            yield source, adapters.REGISTRY.get(source.type)
+            adapter = adapters.REGISTRY.get(source.type)
+            yield source, adapter, adapter.key(source) if adapter is not None else source.type
 
 
 @dataclass
@@ -84,15 +87,15 @@ def configured_sources(slug: str) -> list[ConfiguredSource]:
     (the adapter's optional `check`: a folder, an env var; no network)."""
     cfg = load_company(slug)
     out = []
-    for source, adapter in _selected(cfg, None):
+    for source, adapter, key in _selected(cfg, None):
         if adapter is None:
             problem = adapters.SourceProblem(f"No adapter for source type {source.type}")
-            out.append(ConfiguredSource(source.type, source, False, problem))
+            out.append(ConfiguredSource(key, source, False, problem))
             continue
         check = getattr(adapter, "check", None)
         problem = check(cfg, source, raw_dir(slug, source.type)) if check else None
         downloads = bool(getattr(adapter, "downloads", False))
-        out.append(ConfiguredSource(adapter.key(source), source, downloads, problem))
+        out.append(ConfiguredSource(key, source, downloads, problem))
     return out
 
 
@@ -102,8 +105,7 @@ def planned_sources(slug: str, keys: set[str] | None = None) -> tuple[list[str],
     loops below, so a build job can count its steps before it runs them."""
     fetched: list[str] = []
     ingested: list[str] = []
-    for source, adapter in _selected(load_company(slug), None):
-        key = adapter.key(source) if adapter is not None else source.type
+    for _source, adapter, key in _selected(load_company(slug), None):
         if keys is None or (adapter is not None and key in keys):
             fetched.append(key)
         ingested.append(key)
@@ -123,13 +125,12 @@ def fetch(
     emit = on_event or noop
     cfg = load_company(slug)
     done = []
-    for source, adapter in _selected(cfg, only):
+    for source, adapter, key in _selected(cfg, only):
         if adapter is None:
             if keys is None:
-                emit(BuildEvent(slug, "fetch", "skipped", source.type, message=_NO_ADAPTER))
-                done.append(f"{source.type}: skipped, {_NO_ADAPTER}")
+                emit(BuildEvent(slug, "fetch", "skipped", key, message=_NO_ADAPTER))
+                done.append(f"{key}: skipped, {_NO_ADAPTER}")
             continue
-        key = adapter.key(source)
         if keys is not None and key not in keys:
             continue
         emit(BuildEvent(slug, "fetch", "running", key))
@@ -155,12 +156,11 @@ def ingest(
     cfg = load_company(slug)
     window_since = cfg.window.since.isoformat()
     report = IngestReport()
-    for source, adapter in _selected(cfg, only):
+    for source, adapter, key in _selected(cfg, only):
         if adapter is None:
-            report.sources.append(SourceResult(key=source.type, skipped_reason=_NO_ADAPTER))
-            emit(BuildEvent(slug, "records", "skipped", source.type, message=_NO_ADAPTER))
+            report.sources.append(SourceResult(key=key, skipped_reason=_NO_ADAPTER))
+            emit(BuildEvent(slug, "records", "skipped", key, message=_NO_ADAPTER))
             continue
-        key = adapter.key(source)
         result = SourceResult(key=key)
         report.sources.append(result)
         emit(BuildEvent(slug, "records", "running", key))

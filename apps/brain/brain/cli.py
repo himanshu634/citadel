@@ -31,7 +31,7 @@ app = typer.Typer(help="Company Brain: a company's engineering activity as one F
 def init(slug: str, name: str = typer.Option(None, help="Display name (default: slug).")) -> None:
     """Write a commented template config at companies/<slug>.yaml."""
     graph_name(slug)
-    path = config.companies_dir() / f"{slug}.yaml"
+    path = config.company_path(slug)
     if path.exists():
         typer.secho(f"{path} already exists; not overwriting.", fg="yellow")
         raise typer.Exit(1)
