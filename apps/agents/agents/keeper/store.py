@@ -1,9 +1,8 @@
 """The Keeper's ledger store: named reads and writes on keeper_<slug>.
 
 Why: the Keeper's records must survive a rebuild of brain_<slug>, so they live in their own
-graph. Agent jobs reach them the way they reach the work layer, through the `WorkStore`
-protocol (`agents/work/store.py`), so `runner.run_job` can run Keeper, pm and qa jobs against
-this store:
+graph. Agent jobs reach them through the `WorkStore` protocol (`agents/work/store.py`), so
+`runner.run_job` can run Keeper, pm and qa jobs against this store:
 
     store.write("ledger/open_gap", "citadel_brain", {"uid": gap_uid(), "kind": ..., "now": now})
     store.read("ledger/gaps", {"statuses": ["open"], "limit": 10})
@@ -21,7 +20,7 @@ Two implementations with the same behaviour:
 
 Both check `acl` against keeper_<slug> (a read only when `db_user` is given), raise `KeyError`
 for a name they do not know, fill the optional params (FalkorDB rejects a missing one), and turn
-the runner's `work/write_episode` / `memory/write_episode` into a LogEntry with action "episode".
+the runner's `ledger/write_episode` into a LogEntry with action "episode".
 """
 
 from __future__ import annotations
@@ -77,7 +76,7 @@ READS: tuple[str, ...] = (
     "ledger/followups",
 )
 
-EPISODES: tuple[str, ...] = ("work/write_episode", "memory/write_episode")  # from runner.run_job
+EPISODES: tuple[str, ...] = ("ledger/write_episode",)  # from runner.run_job
 
 WRITES: tuple[str, ...] = (
     "ledger/open_gap",

@@ -260,7 +260,7 @@ apps/brain/       Python 3.12 (uv): the engine. CLI: brain
   tests/            pytest; graph tests use a real FalkorDB and throwaway graphs
 apps/agents/      Python: agents that use the brain through named tools. CLI: agents
   agents/           loop, graph, ask, toolset, traces, keeper/ (gaps, noticing, review, rules,
-                    ledger store), roles/, policies/, prompts/, work/, sim/, acl, llm,
+                    ledger store), roles/, policies/, prompts/, work/, acl, llm,
                     evals/ (cases in evals/cases/), testing (fake clients)
   tests/            pytest, scripted fake clients
 apps/backend/     Python: HTTP for the UI. CLI: backend

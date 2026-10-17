@@ -85,9 +85,6 @@ tools: ## List the named query tools and their parameters
 agents: ## List the agent roles, their jobs and read tools
 	$(AGENTS) agents
 
-sim: ## Run agents on $(SLUG): make sim SLUG=synthetic SCENARIO=race OFFLINE=1 (TICKS=30)
-	$(AGENTS) sim run $(SLUG) --scenario $(or $(SCENARIO),sprint) --ticks $(or $(TICKS),30) $(if $(filter 1 yes,$(OFFLINE)),--offline)
-
 # Evals default to the synthetic company; SLUG=falkordb runs the live repo's cases.
 EVAL_SLUG = $(if $(filter file,$(origin SLUG)),synthetic,$(SLUG))
 

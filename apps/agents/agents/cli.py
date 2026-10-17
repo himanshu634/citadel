@@ -1,7 +1,7 @@
 """The `agents` command line.
 
 Why: the commands that run Claude or the agent roles against a company graph (ask, chat, the
-Ask traces, the role list and the simulations) live with the agents, apart from the `brain`
+Ask traces and the role list) live with the agents, apart from the `brain`
 CLI that builds and queries the graph. Commands stay thin, like the `brain` ones, and share its
 argument checks (slug, company config, FalkorDB reachable).
 """
@@ -9,12 +9,12 @@ argument checks (slug, company config, FalkorDB reachable).
 from __future__ import annotations
 
 import typer
-from brain.cli_util import company, connected, fail, graph_name, short
+from brain.cli_util import company, connected, fail, graph_name
 
 from agents import checkpoint
 from agents.graphs import agent_graph_name
 
-app = typer.Typer(help="Company Brain agents: ask the graph, run the agent roles and simulations.")
+app = typer.Typer(help="Company Brain agents: ask the graph and list the agent roles.")
 
 
 @app.command()
@@ -229,66 +229,20 @@ def _print_answer(answer) -> None:
     )
 
 
-# --- roles and simulations --------------------------------------------------------------------
+# --- roles ------------------------------------------------------------------------------------
 
 
 @app.command("agents")
 def agents_cmd() -> None:
     """List the agent roles: database user, jobs (and their submit tools) and read tools."""
     from agents.roles import ROLES
-    from agents.runner import missing_tools
 
     for role in ROLES.values():
         typer.secho(f"{role.name}  ({role.db_user})", bold=True)
         typer.echo(f"    {role.summary}")
         for job in role.jobs:
             typer.echo(f"    job {job.name} -> {job.submit.name}")
-        missing = set(missing_tools(role))
-        names = [t + (" (phase 2)" if t in missing else "") for t in role.read_tools]
-        typer.echo(f"    reads: {', '.join(names)}")
-
-
-sim_app = typer.Typer(help="Run the agents on a company: a simulated sprint, race or loop.")
-app.add_typer(sim_app, name="sim")
-
-
-@sim_app.command("run")
-def sim_run(
-    slug: str,
-    scenario: str = typer.Option("sprint", "--scenario", help="sprint, race or regression."),
-    ticks: int = typer.Option(30, "--ticks", help="Stop after this many ticks."),
-    offline: bool = typer.Option(
-        False, "--offline", help="Every role plays its deterministic policy: no API key needed."
-    ),
-) -> None:
-    """Run a scenario. The agents read brain_<slug> through the graph tools; the work layer
-    (tasks, actions, decisions) is kept in memory until the FalkorDB store lands."""
-    from agents.sim import scenarios
-
-    company(slug)
-    connected()
-    build = scenarios.SCENARIOS.get(scenario)
-    if build is None:
-        fail(f"unknown scenario {scenario!r}; known: {', '.join(scenarios.SCENARIOS)}")
-    sim = build(slug, clients=scenarios.offline if offline else scenarios.online)
-
-    def show(t) -> None:
-        for a in t.actions:
-            line = f"t{t.tick:<3} {a['agent']:<18} {a['kind']:<22} {a['task'] or '':<14}"
-            typer.echo(f"{line} {short('summary', a['summary'], 70)}")
-
-    sim.run(ticks, on_tick=show)
-    s = sim.store
-    statuses: dict[str, int] = {}
-    for t in s.tasks.values():
-        statuses[t.status] = statuses.get(t.status, 0) + 1
-    lessons = s.read("memory/lessons", {})
-    findings = s.read("memory/findings", db_user="citadel_risk")
-    typer.secho(
-        f"{len(sim.ticks)} ticks: tasks {statuses}, {len(s.releases)} releases, "
-        f"{len(s.decisions)} decisions, {len(lessons)} lessons, {len(findings)} findings",
-        bold=True,
-    )
+        typer.echo(f"    reads: {', '.join(role.read_tools)}")
 
 
 if __name__ == "__main__":
