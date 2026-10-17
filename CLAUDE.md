@@ -261,9 +261,12 @@ demo's agents are `brain`, `keeper`, `pm` and `qa`. Pieces:
   (`JobRunner.building`) nothing reviews or decides: a rebuild's brain_<slug> exists but is
   empty until ingest ends, so Review now / approve / reject are 409 (`decide.BUILDING`), reviews
   see the brain as missing, and a rebuild stops the running review before its reset
-  (`JobRunner.before_reset`). The CLI's `agents keeper review/approve/reject` refuse when
-  `data/jobs/<slug>.json` shows a build running. Known gap: `recover` cannot tell a review
-  another process runs, so a server (re)start marks a running CLI review `stopped`. No Keeper page: reviews show on the
+  (`JobRunner.before_reset`), marking it `rebuilt`: that run's brain reads as missing until it
+  ends, so a job whose tool loop spanned the rebuild writes nothing. The CLI's `agents keeper
+  review/approve/reject` refuse when `data/jobs/<slug>.json` shows a build running. A running
+  Review carries `heartbeat_at` (start, every step write/end, each job's start); `recover` and
+  `review_start` treat it as stale only after `REVIEW_STALE_SECONDS` (120) without a beat, so a
+  CLI review survives a server (re)start. No Keeper page: reviews show on the
   Systems page's activity trail (`GET .../activity`), its controls in that page's rail.
 - Frontend: Review now in the Systems page's bar; in its rail the claims waiting for a lead
   (`ClaimApproval`: typed name, optional why) and the log (`KeeperLog`), read again when a Keeper

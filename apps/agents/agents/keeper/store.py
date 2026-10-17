@@ -12,8 +12,13 @@ Two implementations with the same behaviour:
 - `KeeperStore` runs `apps/brain/queries/ledger/<name>.cypher` on keeper_<slug>. Dedupe and
   guards (one live gap per question, one consult per role per gap, one follow-up per claim,
   guarded gap and claim status moves, one running review, a step finished once) are in the
-  Cypher. A review's steps (`ledger/write_step`, `finish_step`, `review_steps`) are the activity
-  trail's; a step's `input` is stored as JSON text and read back as a dict.
+  Cypher. A running review counts only while its heartbeat (`heartbeat_at`, set at its start,
+  by every step write and end and by `ledger/review_heartbeat`) is younger than
+  `model.REVIEW_STALE_SECONDS` at the write's `now`: `review_start` stops a stale one (stop
+  "stale") and starts, `review_stop_running` stops only stale ones. The store fills their
+  `stale_before` from `now` unless given. A review's steps (`ledger/write_step`, `finish_step`,
+  `review_steps`) are the activity trail's; a step's `input` is stored as JSON text and read
+  back as a dict.
 - `MemoryKeeperStore` is the offline and test double: the same names, guards and row shapes in
   Python, under one lock (FalkorDB serialises the writes on a graph the same way).
 
@@ -53,6 +58,7 @@ from agents.keeper.model import (
     followup_uid,
     iso,
     log_uid,
+    stale_before,
 )
 
 Row = dict[str, Any]
@@ -84,6 +90,7 @@ WRITES: tuple[str, ...] = (
     "ledger/review_start",
     "ledger/review_finish",
     "ledger/review_stop_running",
+    "ledger/review_heartbeat",
     "ledger/review_picked",
     "ledger/write_step",
     "ledger/finish_step",
@@ -127,7 +134,16 @@ OPTIONAL: dict[str, dict[str, Any]] = {
 }
 
 # Params that hold a timestamp. Each is stored as ISO text (`model.iso`).
-TIMESTAMPS: tuple[str, ...] = ("now", "at", "created_at", "updated_at", "valid_from", "valid_to")
+TIMESTAMPS: tuple[str, ...] = (
+    "now",
+    "at",
+    "created_at",
+    "updated_at",
+    "valid_from",
+    "valid_to",
+    "stale_before",
+)
+STALE_FROM_NOW: tuple[str, ...] = ("ledger/review_start", "ledger/review_stop_running")
 
 # Reads that return whole records: one column holding the node's properties, read back through
 # its model so both stores give the same keys (FalkorDB does not store null properties).
@@ -229,6 +245,8 @@ class _LedgerStore:
         for key in TIMESTAMPS:
             if p.get(key) is not None:
                 p[key] = iso(p[key])
+        if name in STALE_FROM_NOW and p.get("stale_before") is None:
+            p["stale_before"] = stale_before(p["now"])
         return p
 
     def _episode(self, p: Mapping[str, Any]) -> list[Row]:
@@ -426,15 +444,23 @@ class MemoryKeeperStore(_LedgerStore):
 
     # --- reviews ------------------------------------------------------------------------------
 
+    @staticmethod
+    def _stale(r: Review, before: str) -> bool:
+        return (r.heartbeat_at or r.started_at) < before
+
     def _w_review_start(self, p: Mapping[str, Any]) -> list[Row]:
-        if any(r.state == "running" for r in self.reviews):
+        running = [r for r in self.reviews if r.state == "running"]
+        if not all(self._stale(r, p["stale_before"]) for r in running):
             return []
+        for r in running:
+            r.state, r.stop, r.ended_at = "stopped", "stale", p["now"]
         r = Review(
             uid=p["uid"],
             slug=p["slug"],
             trigger=p["trigger"],
             budget=p["budget"],
             started_at=p["now"],
+            heartbeat_at=p["now"],
         )
         self.reviews.append(r)
         return [{"uid": r.uid}]
@@ -452,10 +478,21 @@ class MemoryKeeperStore(_LedgerStore):
     def _w_review_stop_running(self, p: Mapping[str, Any]) -> list[Row]:
         out = []
         for r in self.reviews:
-            if r.state == "running":
+            if r.state == "running" and self._stale(r, p["stale_before"]):
                 r.state, r.stop, r.ended_at = "stopped", "restart", p["now"]
                 out.append({"uid": r.uid})
         return out
+
+    def _w_review_heartbeat(self, p: Mapping[str, Any]) -> list[Row]:
+        for r in self.reviews:
+            if r.uid == p["uid"] and r.state == "running":
+                r.heartbeat_at = p["now"]
+                return [{"uid": r.uid}]
+        return []
+
+    def _beat(self, review: str, at: str) -> None:
+        """A step write or end on a running review is a heartbeat (as the Cypher does)."""
+        self._w_review_heartbeat({"uid": review, "now": at})
 
     def _r_recent_reviews(self, p: Mapping[str, Any]) -> list[Row]:
         shown = [r for r in reversed(self.reviews) if r.state != "skipped"]
@@ -480,6 +517,7 @@ class MemoryKeeperStore(_LedgerStore):
             "started_at": p["at"],
             "ended_at": None if p["status"] == "running" else p["at"],
         }
+        self._beat(p["review"], p["at"])
         return [{"review": p["review"], "n": p["n"]}]
 
     def _w_finish_step(self, p: Mapping[str, Any]) -> list[Row]:
@@ -488,6 +526,7 @@ class MemoryKeeperStore(_LedgerStore):
             return []
         s.update(status=p["status"], count=p["count"], error=p["error"],
                  touched=list(p["touched"]), ended_at=p["at"])  # fmt: skip
+        self._beat(s["review"], p["at"])
         return [{"review": s["review"], "n": s["n"], "status": s["status"]}]
 
     def _r_review_steps(self, p: Mapping[str, Any]) -> list[Row]:

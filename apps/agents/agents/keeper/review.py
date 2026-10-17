@@ -20,7 +20,8 @@ production, `policies.offline_client` offline.
 The run ends early, between jobs:
 - `should_stop()` -> `stopped`, stop "requested". A job already running finishes and writes
   (its model calls are paid for); a rebuild's empty brain is refused through `graph_exists`,
-  which the backend's brain reports False while the company builds.
+  which the backend's brain reports False while the company builds and, once a rebuild
+  touched the run, until the run ends (a job whose tool loop spanned the rebuild writes nothing).
 - brain_<slug> missing (`graph_exists` False, `BrainUnavailable`) or a FalkorDB `ResponseError`
   -> `stopped`, stop "brain_unavailable". `run_job` catches a job's errors, so the jobs' writes
   are wrapped to pass these two through.
@@ -32,6 +33,11 @@ it starts and finished (`ledger/finish_step`) `done` or `failed`, with its row c
 uids it touched (`agents.walk.subgraph`); each job then adds one `submit` step, `failed` when it
 wrote nothing. The pick records the picked gaps and the first one's text on the Review
 (`ledger/review_picked`). Step writes are best effort: a ledger hiccup never changes a job.
+
+Heartbeat: every step write and end, and each job's start (`ledger/review_heartbeat`, best
+effort), refresh the Review's `heartbeat_at`, so another process (the API's start or restart
+recovery, while this run is the CLI's) takes it for stale only after `REVIEW_STALE_SECONDS`
+without one.
 
 Whatever the end, the gaps this run moved to in_review and left undecided (still in_review, no
 claim waiting for a lead) go back to `open` without using an attempt, so the next review can
@@ -353,6 +359,7 @@ class _Run:
             raise _Stop(REQUESTED)
         if not self.brain.graph_exists(self.slug):
             raise BrainUnavailable(self.slug)
+        self._write_step("ledger/review_heartbeat", {"uid": self.uid, "now": self.now()})
         step = f"{role}.{name}"
         self.event(step, gap=gap, claim=claim, message=f"{role} {name} on {subject.uid}")
         result = run_job(
@@ -456,6 +463,7 @@ class _Run:
         self._write_step("ledger/finish_step", row)
 
     def _write_step(self, name: str, row: dict[str, Any]) -> None:
+        """A step or heartbeat write, best effort."""
         try:
             self.store.write(name, DB_USER, row)
         except Exception:  # best effort: the trail must never change a job's outcome

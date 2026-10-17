@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass, field
 
 import pytest
+from agents.keeper.gaps import utc_now
 from agents.keeper.model import gap_uid
 from agents.policies import offline_client
 from agents.testing import FakeBrainFacts, fake_brain
@@ -182,12 +183,24 @@ def test_events_without_any_review_is_404(kclient, company):
 
 
 def test_startup_stops_a_review_cut_off_by_a_restart(runner, keeper, ledger, company):
-    old = {"uid": "review:old", "trigger": "build", "budget": 3, "now": "2026-10-17T08:00:00Z"}
+    old = {"uid": "review:old", "trigger": "build", "budget": 3, "now": "2020-01-01T08:00:00Z"}
     ledger.write("ledger/review_start", KEEPER, old)
     with TestClient(create_app(runner, keeper=keeper)):
         pass
     [r] = ledger.reviews
     assert (r.state, r.stop) == ("stopped", "restart")
+
+
+def test_startup_leaves_a_review_another_process_runs(runner, keeper, ledger, company):
+    """A review the CLI runs keeps beating: a server (re)start does not stop it, and a start
+    returns it instead of overlapping it."""
+    live = {"uid": "review:cli", "trigger": "manual", "budget": 3, "now": utc_now()}
+    ledger.write("ledger/review_start", KEEPER, live)
+    with TestClient(create_app(runner, keeper=keeper)) as c:
+        r = c.post(f"{BASE}/review")
+        assert r.json()["uid"] == "review:cli", r.text
+    [r] = ledger.reviews
+    assert (r.uid, r.state) == ("review:cli", "running")
 
 
 def test_build_done_starts_a_review(client, company, ledger, runner, gate):
@@ -286,6 +299,36 @@ def test_a_build_that_begins_during_a_job_refuses_its_writes(ledger, brain, comp
     assert {c.status for c in ledger.consults.values()} == {"open"}  # no answer written
     assert ledger.claims == {}
     assert (ledger.gaps[gap].status, ledger.gaps[gap].attempts) == ("open", 0)
+
+
+def test_a_rebuild_that_ends_during_a_job_still_refuses_its_writes(ledger, brain, company):
+    """A whole rebuild (stop, reset, ingest) runs while a consult job is in its tool loop, and
+    building is over again when the job applies: the run was touched by a rebuild, so its tool
+    reads may be empty or partial, and it writes nothing."""
+    gap = seed_gap(ledger)
+    building = threading.Event()
+    rebuilt = threading.Event()
+
+    def graph_run(slug, name, **params):
+        if not rebuilt.is_set():
+            rebuilt.set()
+            building.set()
+            runs.stop_for_rebuild(slug)  # the rebuild's before_reset (it cannot wait on us)
+            building.clear()  # ... reset, ingest: the rebuild is done before the job applies
+        return fake_brain(slug, name, **params)
+
+    runs = KeeperRuns(store_for=lambda slug: ledger, client_for=offline_client,
+                      has_key=lambda: True, brain=brain, graph_run=graph_run,
+                      building=lambda slug: building.is_set(), rebuild_wait=0)  # fmt: skip
+    runs.start(SLUG, "manual", 5)
+    assert runs.wait(SLUG, 5)
+    assert rebuilt.is_set()
+    [r] = ledger.reviews
+    assert (r.state, r.stop) == ("stopped", "brain_unavailable")
+    assert {c.status for c in ledger.consults.values()} == {"open"}  # no answer written
+    assert ledger.claims == {}
+    assert (ledger.gaps[gap].status, ledger.gaps[gap].attempts) == ("open", 0)
+    assert runs.brain.graph_exists(SLUG)  # approvals after the rebuild still see it
 
 
 def test_a_rebuild_stops_the_running_review_before_it_empties_the_brain(
