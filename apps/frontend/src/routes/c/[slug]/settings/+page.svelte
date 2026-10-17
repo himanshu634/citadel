@@ -234,7 +234,7 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 			rejected = { key: JSON.stringify(payload), errors: problem.errors };
 			const first = firstSectionWithErrors(problem.errors);
 			if (first >= 0) tab = SECTIONS[first];
-			saveError = 'The server found a problem with these settings. Fix the fields marked in red.';
+			saveError = `The server found a problem with these settings. Fix the fields marked in ${STEP_NAMES[tab]}.`;
 		} else {
 			saveError = problem.message;
 		}

@@ -1,10 +1,11 @@
 <!--
 @component
-The fields of a company file, for one wizard step (`section` company, sources or rules) or all
-three at once (`all`, for Settings). It edits `draft` in place and never calls the API: the page
-validates and passes the result back as `errors`. An error shows under the field whose path its
-`loc` starts with (`['sources', 0, 'repo']` is the repo input of source card 0); the ones no field
-shows are listed at the foot of their section, so nothing blocks the user without a reason.
+The fields of a company file, for one section (`section` company, sources or rules: a wizard step
+or a Settings tab) or all three at once (`all`). It edits `draft` in place and never calls the
+API: the page validates and passes the result back as `errors`. An error shows under the field
+whose path its `loc` starts with (`['sources', 0, 'repo']` is the repo input of source card 0);
+the ones no field shows are listed at the foot of their section, so nothing blocks the user
+without a reason.
 
 The graph name follows the company name until someone edits it (derived from the two values, so it
 survives leaving and coming back to the step). `existing` is a company that exists (Settings): the
@@ -112,7 +113,8 @@ another company.
 
 	// --- Errors no field shows, per section -------------------------------------------------------
 	const rendered = $derived<Record<Section, Loc[]>>({
-		company: [['slug'], ['name'], ['window', 'since']],
+		// No graph name field for an existing company: a slug error goes to the list at the foot.
+		company: existing ? [['name'], ['window', 'since']] : [['slug'], ['name'], ['window', 'since']],
 		sources: draft.sources.map((_, i) => ['sources', i]),
 		rules: [
 			...(draft.systems?.rules ?? []).flatMap((_, i): Loc[] => [
