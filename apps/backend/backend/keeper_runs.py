@@ -7,7 +7,13 @@ on "Review now" (`keeper_budget`) and after an approval (budget 0, so pm's follo
 
 - `start` returns the company's running review when there is one (this process's, or, through
   the ledger's own guard, another process's), else starts one and returns it once the ledger
-  has recorded it.
+  has recorded it. A "build" start that finds this process's review running is kept pending
+  and starts (with its budget) when that review ends, so a finished build is always reviewed.
+- While the company builds (`building`, the app's `JobRunner.building`) nothing starts:
+  `start` and `start_soon` raise `BrainBuilding`, and the brain the reviews see reads as
+  missing (`graph_exists` False), so a running review stops `brain_unavailable` instead of
+  judging claims against the rebuild's empty brain_<slug>. A rebuild calls `stop_for_rebuild`
+  before it drops the graph: stop, then wait up to `rebuild_wait` seconds for the end.
 - Without an API key (`has_key`) every run is `skip_review`: re-projection and noticing only,
   recorded `skipped`. No LLM job runs, also not a budget-0 follow-up.
 - A stop sets a flag the review checks between jobs.
@@ -55,6 +61,8 @@ log = logging.getLogger(__name__)
 Trigger = Literal["build", "manual", "approval"]
 ENDS: tuple[str, ...] = ("done", "stopped", "failed", "skipped")  # the kinds that end a run
 START_WAIT_SECONDS = 10.0  # how long `start` waits for the ledger to record the review
+REBUILD_WAIT_SECONDS = 10.0  # how long a rebuild waits for the review it stopped to end
+BUILDING = decide.BUILDING  # the sentence a refusal while the company builds says
 
 
 # --- the defaults (module functions, so tests can swap them) ----------------------------------
@@ -86,6 +94,32 @@ class ReviewNotStarted(Exception):
     """The ledger did not record the review in time (FalkorDB slow or refusing)."""
 
 
+class BrainBuilding(Exception):
+    """The company is building: no review starts (its brain may be empty for now)."""
+
+    def __init__(self, slug: str):
+        super().__init__(BUILDING)
+        self.slug = slug
+
+
+class _BuildingAware:
+    """The review's brain facts, with brain_<slug> missing while the company builds: the review
+    and decide steps already stop (`BrainUnavailable`) on a missing brain before any write an
+    empty one would make wrong. Asked after the real check, so a check that was waiting when a
+    rebuild began still says "missing"."""
+
+    def __init__(self, brain: BrainFacts, building: Callable[[str], bool]):
+        self._brain = brain
+        self._building = building
+
+    def graph_exists(self, slug: str) -> bool:
+        exists = self._brain.graph_exists(slug)
+        return exists and not self._building(slug)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._brain, name)
+
+
 @dataclass(eq=False)
 class _Run:
     slug: str
@@ -114,8 +148,13 @@ class KeeperRuns:
         brain: BrainFacts | None = None,
         graph_run: Runner | None = None,
         start_wait: float = START_WAIT_SECONDS,
+        building: Callable[[str], bool] | None = None,
+        rebuild_wait: float = REBUILD_WAIT_SECONDS,
     ):
         self.store_for = store_for or keeper_store
+        # Whether the slug is building (the app sets the job runner's); read on every call.
+        self.building: Callable[[str], bool] = building or (lambda slug: False)
+        self.rebuild_wait = rebuild_wait
         self.client_for = client_for or claude_for
         self.has_key = has_key or has_api_key
         self._brain = brain
@@ -125,11 +164,14 @@ class KeeperRuns:
         self.start_wait = start_wait
         self._lock = threading.RLock()  # the run table, each run's events and the subscribers
         self._runs: dict[str, _Run] = {}  # the latest run per slug started by this process
+        self._pending: dict[str, int] = {}  # slug -> budget of a build review to run next
         self._subscribers: set[_Subscriber] = set()
 
     @property
     def brain(self) -> BrainFacts:
-        return self._brain if self._brain is not None else self._default_brain()
+        """The brain facts reviews and approvals use: missing while the slug builds."""
+        base = self._brain if self._brain is not None else self._default_brain()
+        return _BuildingAware(base, lambda slug: self.building(slug))  # type: ignore[return-value]
 
     @property
     def graph_run(self) -> Runner | None:
@@ -139,9 +181,9 @@ class KeeperRuns:
 
     def start(self, slug: str, trigger: Trigger, budget: int) -> Review:
         """The slug's running review, else a new one (see the module doc), once the ledger has
-        recorded it. Raises ReviewNotStarted when, after `start_wait` seconds, the run has not
-        ended and the ledger's latest review is not a running one (an older review is never
-        returned as the new one)."""
+        recorded it. Raises BrainBuilding while the slug builds, and ReviewNotStarted when,
+        after `start_wait` seconds, the run has not ended and the ledger's latest review is not
+        a running one (an older review is never returned as the new one)."""
         run = self._launch(slug, trigger, budget)
         run.started.wait(self.start_wait)
         if run.ended and run.result is not None:
@@ -153,14 +195,21 @@ class KeeperRuns:
 
     def start_soon(self, slug: str, trigger: Trigger, budget: int) -> None:
         """`start` without waiting for the ledger (after an approval, whose response must not
-        wait). Raises only when the worker thread cannot start; the run logs its own errors."""
+        wait). Raises BrainBuilding while the slug builds, or when the worker thread cannot
+        start; the run logs its own errors."""
         self._launch(slug, trigger, budget)
 
     def _launch(self, slug: str, trigger: Trigger, budget: int) -> _Run:
-        """The slug's live run in this process, else a new one in a worker thread."""
+        """The slug's live run in this process (a "build" start is kept pending until it ends),
+        else a new one in a worker thread. The building check is under the lock, so a rebuild
+        that begins after it finds this run when it stops the slug's review."""
         with self._lock:
+            if self.building(slug):
+                raise BrainBuilding(slug)
             run = self._runs.get(slug)
             if run is not None and not run.ended:
+                if trigger == "build":
+                    self._pending[slug] = budget
                 return run
             run = _Run(slug)
             self._runs[slug] = run
@@ -184,6 +233,15 @@ class KeeperRuns:
                 return False
             run.stop.set()
             return True
+
+    def stop_for_rebuild(self, slug: str) -> None:
+        """A rebuild is about to drop brain_<slug>: stop the slug's review and wait up to
+        `rebuild_wait` seconds for it to end. A job still thinking then has its writes refused
+        (the brain reads as missing while the slug builds), so the reset may go ahead."""
+        with self._lock:
+            self._pending.pop(slug, None)  # the rebuild's own hook reviews after it
+        if self.stop(slug) and not self.wait(slug, self.rebuild_wait):
+            log.warning("the Keeper review of %s did not stop before its rebuild", slug)
 
     def running(self, slug: str) -> bool:
         with self._lock:
@@ -285,6 +343,21 @@ class KeeperRuns:
                         self._subscribers.discard(sub)
                 run.done.set()
             run.started.set()
+        self._start_pending(run.slug)
+
+    def _start_pending(self, slug: str) -> None:
+        """The build review a finished build asked for while this one ran. Dropped while the
+        slug builds again: that build's own hook reviews after it."""
+        with self._lock:
+            budget = self._pending.pop(slug, None)
+        if budget is None:
+            return
+        try:
+            self._launch(slug, "build", budget)
+        except BrainBuilding:
+            pass
+        except Exception:
+            log.exception("could not start the pending build review of %s", slug)
 
     def _emit(self, run: _Run, event: ReviewEvent) -> None:
         with self._lock:

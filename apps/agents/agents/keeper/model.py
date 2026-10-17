@@ -145,6 +145,7 @@ class Claim(BaseModel):
     gap: str | None = None
     created_at: str
     updated_at: str
+    follow_up_tries: int = 0  # pm follow-up jobs that ended with no task (one try, then skipped)
 
 
 class FollowUp(BaseModel):

@@ -332,6 +332,37 @@ def _keeper_ready(slug: str):
     return _keeper_store(slug)
 
 
+def _jobs_dir():
+    """Where the backend's job runner keeps each company's last build (backend/jobs.py)."""
+    from brain import config
+
+    return config.REPO_ROOT / "data" / "jobs"
+
+
+def _build_running(slug: str) -> bool:
+    """data/jobs/<slug>.json says a build of the company is queued or running. A missing or
+    unreadable file is no build. Read here, not through the backend (agents never import it)."""
+    import json
+
+    try:
+        snap = json.loads((_jobs_dir() / f"{slug}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(snap, dict) and snap.get("state") in ("queued", "running")
+
+
+def _not_building(slug: str) -> None:
+    """Exit 1 while the company builds: a rebuild's brain_<slug> exists but is empty, so a review
+    or a decision would mark claims stale or reject them for missing evidence."""
+    from agents.keeper.decide import BUILDING
+
+    if _build_running(slug):
+        fail(
+            f"{BUILDING} (data/jobs/{slug}.json says a build of {slug} is running; if no server "
+            "is building it, starting the API marks that build stopped.)"
+        )
+
+
 @keeper_app.command("notice")
 def keeper_notice(slug: str) -> None:
     """Open gaps for what the brain shows on its own (unowned systems, ...) and print them."""
@@ -362,19 +393,31 @@ def keeper_review(
     slug: str,
     budget: int = typer.Option(None, "--budget", min=0, help="Gaps to decide (default: settings)."),
     offline: bool = typer.Option(
-        False, "--offline", help="The jobs play their deterministic policies: no API key needed."
+        False,
+        "--offline",
+        help="The jobs play their deterministic policies: no API key needed. Synthetic "
+        "companies only (data_permission: synthetic).",
     ),
 ) -> None:
     """Run one review: re-project the accepted claims, notice new gaps, then consult and decide
     up to --budget gaps. Events print as lines. Without an API key (and without --offline) only
     the re-projection and noticing run, and the review is recorded as skipped. Exits 1 when the
-    review fails or another one is already running."""
+    review fails, another one is already running, the company is building (data/jobs/), or
+    --offline is asked for a company that is not synthetic."""
     from brain import config
 
     from agents.keeper import decide
     from agents.keeper.review import ReviewEvent, review, skip_review
 
     store = _keeper_ready(slug)
+    permission = company(slug).data_permission
+    if offline and permission != "synthetic":
+        fail(
+            f"--offline plays scripted policies that accept their own claims into brain_{slug}: "
+            f"it is only for a synthetic company (companies/{slug}.yaml has data_permission: "
+            f"{permission}). Run without --offline, with an API key."
+        )
+    _not_building(slug)
     budget = config.get_settings().keeper_budget if budget is None else budget
 
     def show(e: ReviewEvent) -> None:
@@ -475,6 +518,7 @@ def _decide_claim(slug: str, claim: str, by: str, why: str | None, approve: bool
     from agents.keeper import decide
 
     store = _keeper_ready(slug)
+    _not_building(slug)
     try:
         if approve:
             result = decide.approve(store, slug, claim, by, why)
@@ -494,7 +538,8 @@ def keeper_approve(
     by: str = typer.Option(..., "--by", help="Your name, kept with the decision."),
     why: str = typer.Option(None, "--why", help="Why."),
 ) -> None:
-    """Approve a pending claim. The sources are checked again first."""
+    """Approve a pending claim. The sources are checked again first. Refused while the company
+    builds."""
     _decide_claim(slug, claim, by, why, approve=True)
 
 
@@ -505,7 +550,7 @@ def keeper_reject(
     by: str = typer.Option(..., "--by", help="Your name, kept with the decision."),
     why: str = typer.Option(None, "--why", help="Why."),
 ) -> None:
-    """Reject a pending claim; its gap goes back to open."""
+    """Reject a pending claim; its gap goes back to open. Refused while the company builds."""
     _decide_claim(slug, claim, by, why, approve=False)
 
 

@@ -14,8 +14,10 @@ Why: the model only proposes. Whether a claim becomes knowledge is fixed here, i
 
 `accept` projects the claim into the brain, then supersedes the accepted claim of the same kind
 and subject; when projection finds its subject or evidence gone it is `stale` instead (its gap
-reopens, the earlier claim stays). `approve` re-checks the sources first, since they may have
-changed while the claim waited. A missing brain_<slug> (a rebuild) raises `BrainUnavailable`
+reopens with one more attempt, `needs_person` at `MAX_ATTEMPTS`, as after a rejection; the
+earlier claim stays). Re-projection after a build (`project.py`) marks stale without an
+attempt. `approve` re-checks the sources first, since they may have changed while the claim
+waited. A missing brain_<slug> (a rebuild) raises `BrainUnavailable`
 before any write an empty brain would make wrong.
 
 Every claim status move is guarded on its current status, so of two racing approvals (or approve
@@ -47,6 +49,9 @@ if TYPE_CHECKING:
     from agents.work.submits import SubmitKeeperDecision
 
 DB_USER = "citadel_keeper"  # the Keeper's database user (roles/keeper.py ROLE.db_user)
+# Why a review or a lead's decision is refused while the company builds: a rebuild drops
+# brain_<slug> and makes it again, empty, so every claim would look stale or ungrounded.
+BUILDING = "The brain is being rebuilt; try again when the build finishes."
 MAX_ATTEMPTS = 2  # rejected claims before a gap needs a person
 EARLIER_LIMIT = 10_000  # accepted claims read for the critical rule's replaces_claim
 
@@ -186,7 +191,8 @@ def accept(
 ) -> Claim:
     """Accept a pending claim: project it, then supersede the accepted one it replaces and
     resolve its gap. Logs `action` (actor `by`), or `claim_stale` when projection finds it
-    missing; a stale claim supersedes nothing, so the earlier claim stays.
+    missing; a stale claim supersedes nothing, so the earlier claim stays, and its gap reopens
+    with one more attempt (`_reopen(rejected=True)`).
 
     The guarded move to `accepted` comes first, so a caller that loses a race raises
     `ClaimNotPending` before writing anything. If the projection fails (brain_<slug> vanished:
@@ -213,8 +219,9 @@ def accept(
         _set_claim(store, now, claim.uid, "stale", frm=["accepted"], why=why_stale)
         if stored.gap:
             gap = _gap(store, stored.gap)
-            if gap is not None:
-                _reopen(store, now, gap, why_stale, rejected=False, frm=["in_review", "resolved"])
+            if gap is not None:  # an attempt, as a rejection: else each review pays for the
+                _reopen(store, now, gap, why_stale, rejected=True,  # same three jobs again
+                        frm=["in_review", "resolved"])  # fmt: skip
         log(store, now, by, "claim_stale", gap=stored.gap, claim=claim.uid, why=why_stale,
              evidence=stored.evidence)  # fmt: skip
         return _claim(store, claim.uid)

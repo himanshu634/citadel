@@ -15,7 +15,9 @@ from agents.keeper.model import gap_uid
 from agents.policies import offline_client
 from agents.testing import FakeBrainFacts, fake_brain
 from backend.api import create_app
-from backend.keeper_runs import KeeperRuns, ReviewNotStarted
+from backend.jobs import JobRunner
+from backend.keeper_runs import BUILDING, BrainBuilding, KeeperRuns, ReviewNotStarted
+from backend.testing import FakeSteps
 from fastapi.testclient import TestClient
 
 from .conftest import write
@@ -196,6 +198,97 @@ def test_build_done_starts_a_review(client, company, ledger, runner, gate):
     assert wait_done(runner, company).state == "done"
     review = wait_review(ledger)
     assert (review.trigger, review.budget, review.state) == ("build", 3, "skipped")
+
+
+def wait_for(check, timeout: float = 5) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if check():
+            return
+        time.sleep(0.01)
+    raise AssertionError("condition never held")
+
+
+def test_a_build_that_ends_during_a_review_gets_its_review_after(keeper, ledger, brain, company):
+    """The post-build hook finds a review running: its review runs when that one ends."""
+    seed_gap(ledger)
+    brain.gate.clear()  # the manual review waits at its first look at the brain
+    first = keeper.start(SLUG, "manual", 5)
+    assert keeper.start(SLUG, "build", 3).uid == first.uid  # the hook gets the running one
+    brain.gate.set()
+    assert wait_review(ledger, 1).trigger == "manual"
+    after = wait_review(ledger, 2)
+    assert (after.trigger, after.budget, after.state) == ("build", 3, "done")
+    assert keeper.wait(SLUG, 5)
+    time.sleep(0.05)
+    assert len(ledger.reviews) == 2  # one pending build review, run once
+
+
+def test_a_pending_build_review_is_dropped_when_another_build_runs(keeper, ledger, brain, company):
+    """A new build is running when the review ends: that build's own hook reviews after it."""
+    building = threading.Event()
+    keeper.building = lambda slug: building.is_set()
+    brain.gate.clear()
+    keeper.start(SLUG, "manual", 0)
+    keeper.start(SLUG, "build", 3)
+    building.set()
+    brain.gate.set()
+    assert wait_review(ledger, 1).trigger == "manual"
+    assert keeper.wait(SLUG, 5)
+    time.sleep(0.05)
+    assert len(ledger.reviews) == 1
+
+
+def test_while_the_brain_builds_reviews_and_decisions_are_refused(
+    kclient, keeper, runner, gate, company, ledger, brain
+):
+    """A rebuild drops brain_<slug> and its schema step makes it again, empty: the graph exists
+    but has no node. Nothing may review or decide on it until the build is done."""
+    brain.labels = {}  # the rebuild's fresh brain_<slug>: present, no node in it
+    gap = seed_gap(ledger, status="in_review")
+    pending = seed_claim(ledger, gap)
+    accepted = seed_claim(ledger, status="accepted")
+    runner.start(SLUG, "rebuild")  # waits in prepare at the gate
+    for path in ("review", f"claims/{pending}/approve", f"claims/{pending}/reject"):
+        r = kclient.post(f"{BASE}/{path}", json={"by": "Dana"})
+        assert (r.status_code, r.json()["detail"]) == (409, BUILDING), path
+    with pytest.raises(BrainBuilding):
+        keeper.start(SLUG, "manual", 5)
+    with pytest.raises(BrainBuilding):
+        keeper.start_soon(SLUG, "approval", 0)
+    assert ledger.reviews == [] and ledger.log == []
+    statuses = [ledger.claims[c].status for c in (pending, accepted)]
+    assert statuses == ["pending_approval", "accepted"]
+    assert (ledger.gaps[gap].status, ledger.gaps[gap].attempts) == ("in_review", 0)
+    brain.labels = FakeBrainFacts().labels  # the build brings the nodes back
+    gate.set()
+    assert wait_done(runner, SLUG).state == "done"
+    assert wait_review(ledger).trigger == "build"  # the post-build review still runs
+
+
+def test_a_rebuild_stops_the_running_review_before_it_empties_the_brain(
+    keeper, ledger, brain, company, tmp_path
+):
+    seen: list[bool] = []
+
+    class Steps(FakeSteps):
+        def reset(self, slug):
+            seen.append(keeper.running(slug))
+            super().reset(slug)
+
+    runner = JobRunner(steps=Steps(), jobs_dir=tmp_path / "rebuild-jobs")
+    create_app(runner, keeper=keeper)
+    seed_gap(ledger)
+    brain.gate.clear()  # the review waits at its first look at the brain
+    first = keeper.start(SLUG, "manual", 5)
+    runner.start(SLUG, "rebuild")
+    wait_for(lambda: keeper._runs[SLUG].stop.is_set())  # the rebuild asked it to stop
+    brain.gate.set()
+    assert wait_done(runner, SLUG).state == "done"
+    assert seen == [False]  # it had ended before the reset
+    stopped = ledger.reviews[0]
+    assert (stopped.uid, stopped.state) == (first.uid, "stopped")
+    assert wait_review(ledger, 2).trigger == "build"
 
 
 # --- claims -----------------------------------------------------------------------------------

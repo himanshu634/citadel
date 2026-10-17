@@ -410,6 +410,48 @@ def test_follow_up_without_a_decision_runs_once():
     assert r.state == "done"
     assert runs == ["pm.follow_up"]
     assert store.read("ledger/followups", {"limit": 5}) == []
+    [claim] = store.claims.values()
+    assert claim.follow_up_tries == 1
+    [e] = [e for e in store.log if e.action == "follow_up_skipped"]
+    assert (e.actor, e.claim) == ("pm", claim.uid)
+
+    # The next reviews (every approval starts one) do not pay for the same job again.
+    for _ in range(2):
+        again = review(store, SLUG, budget=0, trigger="approval", client_for=client_for,
+                       graph_run=nothing, brain=brain, now=clock)  # fmt: skip
+        assert again.state == "done"
+    assert runs == ["pm.follow_up"]
+    assert store.claims[claim.uid].follow_up_tries == 1
+
+
+def test_a_stopped_review_does_not_use_up_the_follow_up_try():
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
+    claim = seed_claim(store)
+    r, _ = run_review(store, brain, budget=0, should_stop=lambda: True)
+    assert (r.state, r.stop) == ("stopped", "requested")
+    assert store.claims[claim].follow_up_tries == 0
+    r, _ = run_review(store, brain, budget=0)
+    [f] = store.read("ledger/followups", {"limit": 5})
+    assert f["claim"] == claim
+
+
+def test_a_stop_asked_during_a_job_writes_nothing():
+    """A rebuild asks the review to stop while a job is in its tool loop: the job's write is
+    refused (the brain is being emptied), and the review ends stopped."""
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
+    gap = seed_gap(store, GROUNDED)
+    stop = []
+
+    def stopping(slug, name, **params):
+        stop.append(True)  # asked mid-job, after the stop check before it
+        return fake_brain(slug, name, **params)
+
+    r, _ = run_review(store, brain, graph_run=stopping, should_stop=lambda: bool(stop))
+    assert (r.state, r.stop) == ("stopped", "requested")
+    assert {c.status for c in store.consults.values()} == {"open"}  # the answer was not written
+    assert "consult_answered" not in actions(store)
+    assert store.claims == {}
+    assert gap_status(store, gap) == "open" and store.gaps[gap].attempts == 0
 
 
 # --- noticing ---------------------------------------------------------------------------------

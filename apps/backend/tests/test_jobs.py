@@ -257,6 +257,55 @@ def test_a_failing_on_done_leaves_the_build_done(tmp_path):
     assert r.current("a").state == "done"
 
 
+def test_building_while_a_build_is_queued_or_running(tmp_path, gate):
+    """`building` (the Keeper refuses to review or decide while it is true) covers a queued job
+    too: a queued rebuild still empties the brain later."""
+    r = JobRunner(max_parallel=1, steps=FakeSteps(gate=gate), jobs_dir=tmp_path)
+    assert not r.building("a")
+    r.start("a", kind="rebuild")
+    r.start("b")  # waits for the one slot
+    assert r.current("b").state == "queued"
+    assert r.building("a") and r.building("b") and not r.building("c")
+    gate.set()
+    assert wait_done(r, "a").state == "done" and wait_done(r, "b").state == "done"
+    assert not r.building("a") and not r.building("b")
+
+
+def test_on_done_runs_once_the_build_is_over(tmp_path):
+    """The post-build Keeper review must not be refused as "building"."""
+    seen: list[bool] = []
+    r = JobRunner(steps=FakeSteps(), jobs_dir=tmp_path)
+    r.on_done = lambda slug: seen.append(r.building(slug))
+    r.start("a")
+    assert wait_done(r, "a").state == "done"
+    assert wait_calls(seen, 1) == [False]  # type: ignore[arg-type]
+
+
+def test_rebuild_calls_before_reset_just_before_the_reset(tmp_path):
+    steps = FakeSteps()
+
+    def before_reset(slug: str) -> None:
+        steps.calls.append(f"before_reset({slug})")
+
+    r = JobRunner(steps=steps, jobs_dir=tmp_path, before_reset=before_reset)
+    r.start("a", kind="rebuild")
+    assert wait_done(r, "a").state == "done"
+    assert steps.calls[:2] == ["before_reset(a)", "reset"]
+    r.start("a")  # a plain build empties nothing: no call
+    assert wait_done(r, "a").state == "done"
+    assert steps.calls.count("before_reset(a)") == 1
+
+
+def test_a_failing_before_reset_still_rebuilds(tmp_path):
+    def boom(slug: str) -> None:
+        raise RuntimeError("no keeper")
+
+    steps = FakeSteps()
+    r = JobRunner(steps=steps, jobs_dir=tmp_path, before_reset=boom)
+    r.start("a", kind="rebuild")
+    assert wait_done(r, "a").state == "done" and "reset" in steps.calls
+
+
 def test_failure_before_a_step_emits_lands_on_its_first_stage(tmp_path):
     r = JobRunner(steps=FakeSteps(fail_on="ingest", fail_after=0), jobs_dir=tmp_path)
     r.start("a")

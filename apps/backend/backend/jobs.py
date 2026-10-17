@@ -18,7 +18,10 @@ a live stream keeps the count without reading the snapshot again.
 
 `on_done(slug)` (the app starts a Keeper review with it) runs in its own daemon thread after a
 build ends `done`, never after a failed or stopped one; its errors are logged, and the build stays
-done.
+done. `before_reset(slug)` (the app stops the company's Keeper review with it) runs in the worker
+just before a rebuild drops the graph; its errors are logged and the rebuild goes on.
+`building(slug)` says whether the company has a queued or running job: the Keeper refuses to
+review or decide on a brain that is being rebuilt (it exists, but empty, once prepare ran).
 """
 
 from __future__ import annotations
@@ -245,9 +248,11 @@ class JobRunner:
         steps: Steps | None = None,
         jobs_dir: Path | None = None,
         on_done: Callable[[str], None] | None = None,
+        before_reset: Callable[[str], None] | None = None,
     ):
         self.steps: Steps = steps or PipelineSteps()
         self.on_done = on_done  # called with the slug after a build ends `done` (module doc)
+        self.before_reset = before_reset  # called with the slug before a rebuild's reset
         self._jobs_dir = jobs_dir
         self._slots = threading.Semaphore(max_parallel)
         # One lock for the job table, every snapshot change, its file and the subscriber set.
@@ -322,6 +327,13 @@ class JobRunner:
             if job.snapshot.state == "queued":
                 self._finish(job, "stopped", _closing_event(job.snapshot, "stopped", job.plan))
             return True
+
+    def building(self, slug: str) -> bool:
+        """The slug has a queued or running build or rebuild in this process."""
+        self._path(slug)
+        with self._lock:
+            job = self._jobs.get(slug)
+            return job is not None and job.snapshot.state in ACTIVE
 
     def current(self, slug: str) -> BuildSnapshot | None:
         """The slug's job from this process, else its last snapshot on disk, else None."""
@@ -431,6 +443,7 @@ class JobRunner:
                 check_stop()
                 job.step = "reset"
                 self._emit(job, BuildEvent(slug, "reset", "running"))
+                self._before_reset(slug)
                 self.steps.reset(slug)
                 self._emit(job, BuildEvent(slug, "reset", "done"))
             check_stop()
@@ -455,6 +468,16 @@ class JobRunner:
             with self._lock:
                 event = _closing_event(snap, "failed", job.plan, job.step, error)
                 self._finish(job, "failed", event, error)
+
+    def _before_reset(self, slug: str) -> None:
+        """Run `before_reset(slug)` here, in the worker. Never raises: the rebuild goes on."""
+        hook = self.before_reset
+        if hook is None:
+            return
+        try:
+            hook(slug)
+        except Exception:
+            log.exception("before_reset of the rebuild of %s failed", slug)
 
     def _after_done(self, slug: str) -> None:
         """Run `on_done(slug)` in a daemon thread. Never raises: the build is already done."""

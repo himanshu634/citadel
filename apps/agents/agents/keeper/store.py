@@ -92,6 +92,7 @@ WRITES: tuple[str, ...] = (
     "ledger/write_claim",
     "ledger/set_claim_status",
     "ledger/open_followup",
+    "ledger/follow_up_tried",
     *EPISODES,
 )
 
@@ -611,12 +612,20 @@ class MemoryKeeperStore(_LedgerStore):
             )
         return [{"uid": uid, "created": created}]
 
+    def _w_follow_up_tried(self, p: Mapping[str, Any]) -> list[Row]:
+        c = self.claims.get(p["claim"])
+        if c is None or c.follow_up_tries:
+            return []
+        c.follow_up_tries = 1
+        return [{"uid": c.uid, "follow_up_tries": c.follow_up_tries}]
+
     def _r_queue_follow_up(self, p: Mapping[str, Any]) -> list[Row]:
         done = {f.claim for f in self.followups.values()}
         rows = [
             c
             for c in self.claims.values()
             if c.uid not in done
+            and not c.follow_up_tries
             and (
                 (c.status == "accepted" and c.kind in ("owner", "expert", "decision"))
                 or c.status == "conflicts_with_source"

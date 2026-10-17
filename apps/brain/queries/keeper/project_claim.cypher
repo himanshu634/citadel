@@ -1,6 +1,8 @@
-// purpose: Project accepted Keeper claims into the brain, so Ask, get_entity, path_between and the
-//          Graph page see them as part of the graph. MERGE on uid: projecting again changes
-//          nothing, and after a rebuild it restores the claims. Ingest never writes Claim.
+// purpose: Project accepted Keeper claims into the brain, so Ask (keeper_notes), get_entity and
+//          the Graph page see them as part of the graph. path_between does not: ABOUT and
+//          EVIDENCE are not in its relTypes, so no path goes through a claim. MERGE on uid:
+//          projecting again changes nothing, and after a rebuild it restores the claims. Ingest
+//          never writes Claim.
 // params:  $claims ([{uid, kind, subject, statement, value, valid_from, author, approved_by,
 //          about: [uid], evidence: [uid]}]). keeper.project passes only claims whose subject
 //          exists, with about (which always holds the subject) and evidence cut to uids that

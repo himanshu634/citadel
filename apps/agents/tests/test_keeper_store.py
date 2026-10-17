@@ -498,6 +498,22 @@ def test_queue_follow_up(store):
     assert store.read("ledger/followups", {"status": "done", "limit": 10}) == []
 
 
+def test_a_follow_up_tried_once_leaves_the_queue(store):
+    """A pm follow-up job that ended with no decision is not paid for again on every review."""
+    owner = write_claim(store, "owner", "accepted", now=T1)
+    conflict = write_claim(store, "fact", "conflicts_with_source", now=T2)
+    tried = {"claim": owner.uid, "now": T2}
+    assert store.write("ledger/follow_up_tried", KEEPER, tried) == [
+        {"uid": owner.uid, "follow_up_tries": 1}]  # fmt: skip
+    assert [r["uid"] for r in store.read("ledger/queue_follow_up", {})] == [conflict.uid]
+    assert store.write("ledger/follow_up_tried", KEEPER, {**tried, "now": T3}) == []  # once
+    [got] = store.read("ledger/get_claim", {"uid": owner.uid})
+    assert (got["follow_up_tries"], got["updated_at"]) == (1, T1)  # the claim did not change
+    [other] = store.read("ledger/get_claim", {"uid": conflict.uid})
+    assert other["follow_up_tries"] == 0
+    assert store.write("ledger/follow_up_tried", KEEPER, {"claim": "claim:nope", "now": T2}) == []
+
+
 def test_epoch_now_is_stored_as_iso(store):
     """Job writes go through roles.base.write, which passes Ctx.now: an epoch int."""
     epoch, at = 1_792_224_000, "2026-10-17T08:00:00Z"

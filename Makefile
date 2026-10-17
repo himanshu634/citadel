@@ -115,7 +115,7 @@ keeper-gaps: ## The Keeper's gaps for $(SLUG): make keeper-gaps SLUG=synthetic S
 keeper-log: ## The Keeper's log for $(SLUG), newest first (LIMIT=20)
 	$(AGENTS) keeper log $(SLUG) $(if $(LIMIT),--limit $(LIMIT))
 
-reset: ## Delete graphs brain_/agent_$(SLUG), its build history and Ask traces; needs CONFIRM=1
+reset: ## Delete graphs brain_/agent_/keeper_$(SLUG), its build history and Ask traces; needs CONFIRM=1
 	$(BACKEND) reset $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)
 
 linear-seed: ## Fill the Linear workspace of $(SLUG) with the synthetic tickets (CONFIRM=1)

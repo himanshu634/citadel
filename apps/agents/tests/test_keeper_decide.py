@@ -263,8 +263,22 @@ def test_stale_on_projection_missing():
     assert rows == [{"uid": c["uid"], "status": "stale"}]
     assert c["status"] == "stale" and brain.projected == [] and brain.project_calls == 1
     after = gap(store, g.uid)
-    assert (after.status, after.attempts) == ("open", 0)
+    assert (after.status, after.attempts) == ("open", 1)  # an attempt: each one costs LLM jobs
     assert actions(store) == ["claim_stale"]
+
+
+def test_stale_at_accept_twice_needs_a_person():
+    """Every review would pick the reopened gap again (consult, consult, decide) and go stale
+    again: the second stale accept stops that, as a second rejection does."""
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
+    g = seed_gap(store)
+    sub = claim_sub(g, kind="fact", subject_uid="system:Gone", about=["system:Gone"], value=None)
+    apply_decision(store, CTX, g, sub, brain)
+    in_review(store, g.uid)
+    apply_decision(store, CTX, gap(store, g.uid), sub, brain)
+    after = gap(store, g.uid)
+    assert (after.status, after.attempts) == ("needs_person", 2)
+    assert actions(store) == ["claim_stale", "claim_stale"]
 
 
 # --- needs_person and dismiss ----------------------------------------------------------------

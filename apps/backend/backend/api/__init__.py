@@ -2,9 +2,11 @@
 
 Why: the frontend never reads FalkorDB or the YAML files directly. Routes sit under /api and
 are scoped by company slug; CORS opens only the Vite dev server. The app owns one job runner and
-one set of Keeper review runs: a build that finishes `done` starts a Keeper review (budget
-`keeper_build_budget`). At startup it marks builds and Keeper reviews that a previous server
-process left unfinished as stopped.
+one set of Keeper review runs, wired together: a build that finishes `done` starts a Keeper
+review (budget `keeper_build_budget`; kept pending when a review is running), the Keeper refuses
+to review or decide while the company builds (`runner.building`), and a rebuild stops the
+company's review before it drops the graph. At startup it marks builds and Keeper reviews that
+a previous server process left unfinished as stopped.
 """
 
 from __future__ import annotations
@@ -58,8 +60,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(
     runner: JobRunner | None = None, asker: Asker | None = None, keeper: KeeperRuns | None = None
 ) -> FastAPI:
-    """The app. A `runner` handed in without an `on_done` gets one here: after each build that
-    ends `done`, `keeper` (default: a new KeeperRuns) starts a review of that company."""
+    """The app. A `runner` handed in without an `on_done` / `before_reset` gets them here: after
+    each build that ends `done`, `keeper` (default: a new KeeperRuns) starts a review of that
+    company; before a rebuild drops a graph, it stops that company's review. `keeper` reads
+    `runner.building`."""
     app = FastAPI(title="Company Brain", lifespan=lifespan)
     runs = keeper or KeeperRuns()
 
@@ -69,6 +73,9 @@ def create_app(
     runner = runner or JobRunner(on_done=review_after_build)
     if runner.on_done is None:
         runner.on_done = review_after_build
+    if runner.before_reset is None:
+        runner.before_reset = runs.stop_for_rebuild
+    runs.building = runner.building
     app.state.runner = runner
     app.state.keeper = runs
     app.state.start_lock = threading.Lock()

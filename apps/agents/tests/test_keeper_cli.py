@@ -3,6 +3,8 @@ is FakeBrainFacts, the graph tools are the fake brain. Nothing here calls Falkor
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from agents import cli
 from agents.keeper import decide
@@ -26,7 +28,14 @@ runner = CliRunner()
 
 
 @pytest.fixture
-def env(monkeypatch):
+def jobs(tmp_path, monkeypatch):
+    """data/jobs/ (the backend's build snapshots), empty unless a test writes one."""
+    monkeypatch.setattr(cli, "_jobs_dir", lambda: tmp_path)
+    return tmp_path
+
+
+@pytest.fixture
+def env(monkeypatch, jobs):
     store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
     monkeypatch.setattr(cli, "_keeper_store", lambda slug: store)
     monkeypatch.setattr(cli, "_keeper_graph_run", lambda: fake_brain)
@@ -175,3 +184,49 @@ def test_approve_not_pending_exit_1(env):
 def test_approve_needs_by(env):
     store, _ = env
     assert keeper("approve", SLUG, seed_claim(store)).exit_code != 0
+
+
+# --- refusals ---------------------------------------------------------------------------------
+
+
+def build_snapshot(jobs, state: str, slug: str = SLUG) -> None:
+    """data/jobs/<slug>.json as backend/jobs.py writes it."""
+    snap = {"slug": slug, "kind": "rebuild", "state": state, "started_at": "2026-10-17T09:00:00Z"}
+    (jobs / f"{slug}.json").write_text(json.dumps(snap))
+
+
+@pytest.mark.parametrize("state", ["queued", "running"])
+@pytest.mark.parametrize("command", ["review", "approve", "reject"])
+def test_refused_while_the_company_builds(env, jobs, state, command):
+    """A rebuild's fresh brain_<slug> exists but is empty: reviewing or deciding on it would
+    mark every claim stale or reject it for missing evidence."""
+    store, brain = env
+    brain.labels = {}
+    gap = seed_gap(store)
+    uid = seed_claim(store, gap=gap)
+    build_snapshot(jobs, state)
+    args = ["--offline"] if command == "review" else [uid, "--by", "ana"]
+    result = keeper(command, SLUG, *args)
+    assert result.exit_code == 1
+    assert "being rebuilt" in result.output and "try again when the build finishes" in result.output
+    assert store.reviews == [] and store.log == []
+    assert store.claims[uid].status == "pending_approval"
+
+
+def test_a_finished_or_unreadable_build_does_not_block(env, jobs):
+    store, _ = env
+    build_snapshot(jobs, "done")
+    assert keeper("review", SLUG, "--offline", "--budget", "0").exit_code == 0
+    (jobs / f"{SLUG}.json").write_text("{not json")
+    assert keeper("review", SLUG, "--offline", "--budget", "0").exit_code == 0
+    assert len(store.reviews) == 2
+
+
+def test_offline_review_only_for_a_synthetic_company(env):
+    """The scripted policies accept their claims as a real review would: never into the brain
+    of a real company."""
+    store, _ = env
+    result = keeper("review", "falkordb", "--offline")
+    assert result.exit_code == 1
+    assert "--offline" in result.output and "synthetic" in result.output
+    assert store.reviews == []

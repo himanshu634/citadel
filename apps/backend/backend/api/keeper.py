@@ -4,6 +4,8 @@ review runs started, followed (Server-Sent Events) and stopped.
 Why: the Keeper page reads the ledger (keeper_<slug>) only through these routes. Reviews run in
 `KeeperRuns` (app.state.keeper, so tests hand in an offline one). An approval starts a budget-0
 review, so pm's follow-up for the accepted claim shows without waiting for the next build.
+While the company builds, Review now, approve and reject are 409 with `BUILDING` as the detail:
+a rebuild's brain_<slug> is empty until ingest ends.
 
 /review/events sends the latest review as a `snapshot` first, then one `review` message per
 ReviewEvent of the run in this process (the ones so far, then the live ones); it ends with the
@@ -26,7 +28,7 @@ from sse_starlette import EventSourceResponse
 
 from backend.api.deps import company_slug
 from backend.api.models import ApprovalIn, KeeperEvent
-from backend.keeper_runs import ENDS, KeeperRuns, ReviewNotStarted
+from backend.keeper_runs import BUILDING, ENDS, BrainBuilding, KeeperRuns, ReviewNotStarted
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["keeper"])
@@ -91,6 +93,11 @@ def followups(
 # --- a lead's decision ------------------------------------------------------------------------
 
 
+def _not_building(runs: KeeperRuns, slug: str) -> None:
+    if runs.building(slug):
+        raise HTTPException(status_code=409, detail=BUILDING)
+
+
 def _known_claim(runs: KeeperRuns, slug: str, uid: str) -> None:
     if not runs.store_for(slug).read("ledger/get_claim", {"uid": uid}):
         raise HTTPException(status_code=404, detail=f"No claim {uid}")
@@ -105,7 +112,8 @@ def _not_pending(uid: str) -> HTTPException:
 @router.post(f"{PREFIX}/claims/{{uid}}/approve")
 def approve(slug: Slug, uid: str, body: ApprovalIn, runs: Keeper) -> Claim:
     """Accept a pending claim (or `conflicts_with_source` when the sources now say otherwise),
-    then start a budget-0 review so pm's follow-up appears."""
+    then start a budget-0 review so pm's follow-up appears. 409 while the company builds."""
+    _not_building(runs, slug)
     _known_claim(runs, slug, uid)
     store = runs.store_for(slug)
     try:
@@ -120,6 +128,8 @@ def approve(slug: Slug, uid: str, body: ApprovalIn, runs: Keeper) -> Claim:
         ) from exc
     try:
         runs.start_soon(slug, "approval", 0)  # the response does not wait for it
+    except BrainBuilding:  # a build began since: its own review writes the follow-up
+        pass
     except Exception:  # the approval stands; the next review writes the follow-up
         log.exception("could not start the review after approving %s", uid)
     return claim
@@ -127,7 +137,9 @@ def approve(slug: Slug, uid: str, body: ApprovalIn, runs: Keeper) -> Claim:
 
 @router.post(f"{PREFIX}/claims/{{uid}}/reject")
 def reject(slug: Slug, uid: str, body: ApprovalIn, runs: Keeper) -> Claim:
-    """Reject a pending claim: its gap goes back to open with one more attempt."""
+    """Reject a pending claim: its gap goes back to open with one more attempt. 409 while the
+    company builds (the gap would be picked again by a review of the empty brain)."""
+    _not_building(runs, slug)
     _known_claim(runs, slug, uid)
     try:
         return decide.reject(runs.store_for(slug), slug, uid, body.by, body.why or None)
@@ -140,9 +152,12 @@ def reject(slug: Slug, uid: str, body: ApprovalIn, runs: Keeper) -> Claim:
 
 @router.post(f"{PREFIX}/review", status_code=202)
 def start_review(slug: Slug, runs: Keeper) -> Review:
-    """Review now (budget `keeper_budget`); the running review when there is one."""
+    """Review now (budget `keeper_budget`); the running review when there is one; 409 while the
+    company builds."""
     try:
         return runs.start(slug, "manual", get_settings().keeper_budget)
+    except BrainBuilding as exc:
+        raise HTTPException(status_code=409, detail=BUILDING) from exc
     except ReviewNotStarted as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

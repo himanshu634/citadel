@@ -9,7 +9,8 @@ now, or after an approval (docs/superpowers/specs/2026-10-16-keeper-design.md, "
     4. consult    post a pm and a qa consult per picked gap (attempt = gap.attempts), then run
                   those roles' consult jobs on them
     5. decide     the keeper's decide job on each picked gap whose consults are answered
-    6. follow up  pm's follow_up job, once per claim in its queue (not budgeted)
+    6. follow up  pm's follow_up job, once per claim in its queue (not budgeted); a run that
+                  opens no task is recorded, and the claim is not tried again
     7. finish     `ledger/review_finish("done")`
 
 `budget=0` runs only 1, 2, 6 and 7 (the backend's run after an approval, so the follow-up shows).
@@ -17,7 +18,8 @@ Every job goes through `runner.run_job` with `client_for(role, job)`: `llm.clien
 production, `policies.offline_client` offline.
 
 The run ends early, between jobs:
-- `should_stop()` -> `stopped`, stop "requested".
+- `should_stop()` -> `stopped`, stop "requested". Asked while a job runs, that job's writes are
+  refused too (a rebuild stops the review before it empties brain_<slug>).
 - brain_<slug> missing (`graph_exists` False, `BrainUnavailable`) or a FalkorDB `ResponseError`
   -> `stopped`, stop "brain_unavailable". `run_job` catches a job's errors, so the jobs' writes
   are wrapped to pass these two through.
@@ -231,7 +233,7 @@ class _Run:
 
     def __post_init__(self) -> None:
         self.picked: dict[str, int] = {}  # gap uid -> its attempts when picked, in pick order
-        self.brain_error: Exception | None = None  # raised inside a job's write
+        self.brain_error: Exception | None = None  # raised inside a job's write, re-raised after
 
     def steps(self, budget: int) -> None:
         self.release_orphans()
@@ -295,9 +297,21 @@ class _Run:
                 self.run("keeper", "decide", subject, gap=subject.uid)
 
     def follow_up(self) -> None:
+        """pm's follow-up job once per claim in its queue. A run that opens no task is recorded
+        (`ledger/follow_up_tried`, logged `follow_up_skipped`), which takes the claim out of the
+        queue: otherwise every later review, even each budget-0 one after an approval, would
+        pay for the same job again."""
         job = ROLES["pm"].job("follow_up")
         for subject in job.queue(self.store, self.ctx("pm")):  # read once: each claim at most once
-            self.run("pm", "follow_up", subject, gap=subject.data.get("gap"), claim=subject.uid)
+            gap = subject.data.get("gap")
+            result = self.run("pm", "follow_up", subject, gap=gap, claim=subject.uid)
+            if result.rows:
+                continue
+            now = self.now()
+            tried = {"claim": subject.uid, "now": now}
+            if self.store.write("ledger/follow_up_tried", DB_USER, tried):
+                why = f"no follow-up opened ({result.stop or 'no_write'}); not tried again"
+                log(self.store, now, "pm", "follow_up_skipped", gap=gap, claim=subject.uid, why=why)
 
     def release_orphans(self) -> None:
         """Gaps an earlier review left in review with no claim waiting for a lead (a killed
@@ -331,7 +345,9 @@ class _Run:
 
     def run(
         self, role: str, name: str, subject: Subject, *, gap: str | None, claim: str | None = None
-    ) -> None:
+    ) -> RunResult:
+        """One job. Raises `_Stop` / `BrainUnavailable` instead of returning when the run must
+        end (before the job, or when its write was refused for that reason)."""
         if self.should_stop():
             raise _Stop(REQUESTED)
         if not self.brain.graph_exists(self.slug):
@@ -354,6 +370,7 @@ class _Run:
         wrote = ", ".join(str(r.get("status") or r.get("uid")) for r in result.rows)
         outcome = f"claim {written.get('status')}" if written else (result.stop or wrote)
         self.event(step, gap=gap, claim=written.get("uid") or claim, message=outcome)
+        return result
 
     def job(self, role: str, name: str) -> Job:
         """The role's job, its writes refused when brain_<slug> is gone, passing the review's
@@ -364,6 +381,9 @@ class _Run:
         brain = self.brain
 
         def apply(store: WorkStore, ctx: Ctx, s: Subject, sub: Any) -> list[dict[str, Any]]:
+            if self.should_stop():  # asked while the job thought (a rebuild is emptying the
+                self.brain_error = _Stop(REQUESTED)  # brain): what it read may be gone already
+                raise self.brain_error
             try:
                 # The loop turns graph-tool errors into tool results, so a brain that vanished
                 # mid-run looks like "nothing found": write nothing from such a run.
