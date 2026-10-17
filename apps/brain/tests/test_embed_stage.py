@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from brain import db, loader
+from brain import db, embeddings, loader
 from brain.canonical import Comment, WorkItem
 from brain.embeddings import EmbeddingUnavailable, embed_pending
 from brain.events import BuildStopped
@@ -100,7 +100,14 @@ def test_no_provider_skips_with_a_reason(fresh_synthetic, embeddings_off):
     assert events[-1].count is None  # nothing embedded: no "0 embedded" beside the reason
 
 
-def test_events_report_running_then_a_count_per_batch_then_done(fresh_synthetic):
+@pytest.fixture
+def ticking_clock(monkeypatch):
+    """A clock that moves a full progress interval on every read: every batch reports."""
+    ticks = iter(range(10_000))
+    monkeypatch.setattr(embeddings, "_clock", lambda: next(ticks) * embeddings.PROGRESS_EVERY)
+
+
+def test_events_report_running_then_a_count_per_batch_then_done(fresh_synthetic, ticking_clock):
     events = []
     report = embed_pending(fresh_synthetic, FakeEmbedder(), batch=4, on_event=events.append)
     assert all((e.stage, e.source) == ("embed", None) for e in events)
@@ -114,18 +121,35 @@ def test_events_report_running_then_a_count_per_batch_then_done(fresh_synthetic)
     assert report.embedded > 0
 
 
-def test_a_stop_between_batches_stops_the_stage(fresh_synthetic):
+def test_a_stop_between_batches_stops_the_stage(fresh_synthetic, ticking_clock):
     """A build job raises BuildStopped from on_event; the stage must not swallow it."""
     events = []
 
-    def stop_after_first_batch(event):
+    def stop_after_second_batch(event):
         events.append(event)
-        if event.count is not None:
+        if event.count == 8:
             raise BuildStopped
 
     with pytest.raises(BuildStopped):
-        embed_pending(fresh_synthetic, FakeEmbedder(), batch=4, on_event=stop_after_first_batch)
-    assert [(e.status, e.count) for e in events] == [("running", None), ("running", 4)]
+        embed_pending(fresh_synthetic, FakeEmbedder(), batch=4, on_event=stop_after_second_batch)
+    assert [(e.status, e.count) for e in events] == [
+        ("running", None),
+        ("running", 4),
+        ("running", 8),
+    ]
+
+
+def test_progress_is_at_most_one_event_a_second(fresh_synthetic, monkeypatch):
+    """Each event rewrites the build's snapshot, so a fast stage reports the first batch only."""
+    monkeypatch.setattr(embeddings, "_clock", lambda: 0.0)  # every batch in the same instant
+    events = []
+    report = embed_pending(fresh_synthetic, FakeEmbedder(), batch=4, on_event=events.append)
+    assert report.embedded > 4  # several batches ran
+    assert [(e.status, e.count) for e in events] == [
+        ("running", None),
+        ("running", 4),
+        ("done", report.embedded),
+    ]
 
 
 def test_everything_reembeds_each_chunk_once(fresh_synthetic):

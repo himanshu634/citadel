@@ -10,13 +10,15 @@ Tests swap in a fake with `set_embedder` (`brain.testing.FakeEmbedder`).
 The embed stage (`embed_pending`) runs after ingest. A chunk is embedded again only when its
 text, or the model, changed since: each vector is stored with the text hash and model it was
 made from. A model that cannot run skips the stage with a reason; it never fails the build.
-After each written batch it emits a `running` event with the count so far, so the build page
-shows progress and a build job's stop (raised from `on_event`) can act between batches.
+After a written batch it emits a `running` event with the count so far (the first batch, then
+at most one a second: each event rewrites the build's snapshot), so the build page shows
+progress and a build job's stop (raised from `on_event`) can act between batches.
 """
 
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -123,6 +125,10 @@ EMBEDDINGS_OFF = (
 )
 
 
+PROGRESS_EVERY = 1.0  # seconds between two progress events of the embed stage
+_clock = time.monotonic  # tests replace it to control which batches report
+
+
 @dataclass
 class EmbedReport:
     embedded: int = 0  # chunks given a new vector
@@ -151,6 +157,7 @@ def embed_pending(
     if everything:
         loader.clear_embedded(slug)
     done: set[str] = set()
+    reported: float | None = None  # when the last progress event went out
     while rows := loader.chunks_to_embed(slug, e.model, batch):
         uids = [r["uid"] for r in rows]
         if again := sorted(done.intersection(uids)):
@@ -182,7 +189,10 @@ def embed_pending(
             break  # nothing was stored, so the same batch would come back
         done.update(uids)
         # Progress, and the point where a build job's stop (raised by on_event) takes effect.
-        emit(BuildEvent(slug, "embed", "running", count=report.embedded))
+        now = _clock()
+        if reported is None or now - reported >= PROGRESS_EVERY:
+            reported = now
+            emit(BuildEvent(slug, "embed", "running", count=report.embedded))
     emit(BuildEvent(slug, "embed", "done", count=report.embedded))
     return report
 

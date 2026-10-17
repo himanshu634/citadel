@@ -238,6 +238,23 @@ def test_stop_during_embed_stops_on_embed(tmp_path, gate):
     assert not any(e.stage == "embed" and e.status == "done" for e in snap.events)
 
 
+def test_stop_on_the_last_embed_event_finishes_the_build(tmp_path, gate):
+    # the gate holds ingest before `embed done`, its last event (8 events for one source)
+    r = JobRunner(steps=FakeSteps(gate=gate, gate_in="ingest", gate_at=7), jobs_dir=tmp_path)
+    r.start("a")
+    deadline = time.monotonic() + 5
+    while sum(e.stage == "embed" for e in r.current("a").events) < 2:  # start and one batch
+        assert time.monotonic() < deadline, r.current("a")
+        time.sleep(0.01)
+    assert r.stop("a") is True
+    gate.set()
+    snap = wait_done(r, "a")
+    # the work was complete: done with its totals, not stopped on a stage that reported done
+    assert snap.state == "done"
+    assert pairs(snap, 2) == [("embed", "done", None), ("done", "done", None)]
+    assert snap.events[-1].totals == {"written": {"load/person": 3}, "dropped": {}}
+
+
 def test_stop_queued_job_never_runs(runner, gate):
     runner.start("a")
     runner.start("b")
@@ -469,7 +486,8 @@ def test_snapshot_carries_its_planned_stages(runner_recording, tmp_path):
 def test_snapshot_file_without_stages_gets_the_full_plan(tmp_path):
     (tmp_path / "a.json").write_text(json.dumps(RUNNING_SNAPSHOT))
     snap = JobRunner(jobs_dir=tmp_path, steps=FakeSteps()).current("a")
-    assert snap.stages == ["prepare", "fetch", "records", "normalize", "load", "embed"]
+    # such files predate the embed stage, so their plan has none (no Embed row waiting forever)
+    assert snap.stages == ["prepare", "fetch", "records", "normalize", "load"]
 
 
 def test_restart_uses_the_planned_stages(tmp_path):

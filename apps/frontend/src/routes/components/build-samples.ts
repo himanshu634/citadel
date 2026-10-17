@@ -105,7 +105,8 @@ export const embedSkipped = snapshot('done', [
 		'skipped',
 		null,
 		undefined,
-		'Embeddings are off (EMBEDDING_PROVIDER=none), so semantic search finds nothing. Set EMBEDDING_PROVIDER=fastembed and run make embed.'
+		'Embeddings are off (EMBEDDING_PROVIDER=none), so semantic search finds nothing. ' +
+			'Set EMBEDDING_PROVIDER=fastembed and run make embed.'
 	),
 	ev('done', 'done')
 ]);

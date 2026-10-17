@@ -8,7 +8,8 @@ last build of a company survives a server restart; `recover()` marks a build tha
 a restart as `stopped`. Async subscribers (the SSE routes) get every event as it happens.
 
 A stop sets a per-job flag; the runner's `on_event` wrapper raises `BuildStopped` at the next
-event, and the runner checks the flag between steps. The pipeline itself knows nothing of jobs.
+event (except the one that finishes the last stage: the work is complete, so the job ends
+`done`), and the runner checks the flag between steps. The pipeline itself knows nothing of jobs.
 
 "Step n of N" is counted here, not in the UI: the ingest stages repeat per source, so a stage's
 place in `stages` goes backwards on the second source. Before it runs, a job lists every
@@ -76,7 +77,8 @@ class BuildSnapshot(BaseModel):
     def _full_plan_for_old_files(self) -> BuildSnapshot:
         """Snapshots written before `stages` existed: assume every source was fetched."""
         if not self.stages:
-            self.stages = list(_plan(self.kind, None))
+            # such files predate the embed stage too, so they never ran it
+            self.stages = [s for s in _plan(self.kind, None) if s != "embed"]
         return self
 
 
@@ -196,6 +198,12 @@ def _last_ingested(trail: Trail | None) -> str | None:
     """The source the trail ingests last, or None when there is none or no trail."""
     keys = [key for stage, key in trail or () if stage == "records"]
     return keys[-1] if keys else None
+
+
+def _completes(plan: tuple[Stage, ...], event: BuildEvent) -> bool:
+    """Whether `event` finishes the plan's last stage (embed, once for the company): after it
+    only the closing `done` is left, so a stop has nothing left to stop."""
+    return event.stage == plan[-1] == "embed" and event.status in ("done", "skipped")
 
 
 def _after(
@@ -429,7 +437,8 @@ class JobRunner:
 
         def on_event(event: BuildEvent) -> None:
             self._emit(job, event)
-            check_stop()
+            if not _completes(job.plan, event):
+                check_stop()
 
         try:
             if snap.kind == "rebuild":
