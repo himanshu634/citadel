@@ -182,6 +182,11 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
   Recorder, by default only threads with a trace line. Tests use `MemoryChatStore`;
   `apps/agents/tests/test_history_graph.py` runs the Cypher (needs `make up`).
 
+- Agent activity (`agents/activity.py`): the Systems page's runs, one `ActivityRun` per run with
+  `ActivityStep`s (actor, tool, input, the brain uids each step touched). Today every Ask turn
+  in the chat history is a run (`runs_from_thread`); Keeper reviews are meant to fill the same
+  shape. `GET .../activity` (`backend/api/activity.py`) lists the latest, newest first.
+
 ### Evals (`apps/agents/agents/evals`)
 
 `make eval` asks the real agent each question in `evals/cases/<slug>.yaml` (run as `python -m agents.evals`) against brain_<slug>
@@ -226,7 +231,7 @@ nothing; role read tools not yet backed by a query are pinned in `test_tools_sti
 ## Backend (`apps/backend/backend`)
 
 HTTP for the frontend, `backend.api:app` (FastAPI, `make api`): its only way in. Routes sit under
-`/api/companies/{slug}/...` (overview, builds, tools, ask, graph); the slug is resolved only by
+`/api/companies/{slug}/...` (overview, builds, tools, ask, graph, threads, activity); the slug is resolved only by
 `deps.company_slug`, which 404s unless `companies/<slug>.yaml` exists. Behind it:
 - `registry.py`: `companies/*.yaml` is the registry; a bad file is reported, not fatal; edits
   round-trip so hand-written comments survive; writes are atomic.

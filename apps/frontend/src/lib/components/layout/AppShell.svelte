@@ -23,8 +23,8 @@ everything inside.
 	import Topbar from './Topbar.svelte';
 
 	let { children }: { children: Snippet } = $props();
-	// Graph and Ask fill the window under the top bar: no content width cap, no padding (design-system.md).
-	const bleed = $derived(/\/(graph|ask)$/.test(page.url.pathname));
+	// Graph, Ask and Systems fill the window under the top bar: no content width cap, no padding (design-system.md).
+	const bleed = $derived(/\/(graph|ask|systems)$/.test(page.url.pathname));
 	const companies = getCompanies();
 	let navOpen = $state(false);
 	const close = () => (navOpen = false);

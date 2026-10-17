@@ -24,6 +24,7 @@ export { default as AnswerRating } from './components/brain/AnswerRating.svelte'
 export { default as ActivityBars } from './components/brain/ActivityBars.svelte';
 export { default as AddCompanyDialog } from './components/brain/AddCompanyDialog.svelte';
 export { default as BuildProgress } from './components/brain/BuildProgress.svelte';
+export { default as AgentRun } from './components/brain/AgentRun.svelte';
 export { default as ChatList } from './components/brain/ChatList.svelte';
 export { default as CitedAnswer } from './components/brain/CitedAnswer.svelte';
 export { default as CompanyForm } from './components/brain/CompanyForm.svelte';
