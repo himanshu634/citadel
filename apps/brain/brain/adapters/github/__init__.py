@@ -17,6 +17,8 @@ from typing import Literal
 
 from pydantic import field_validator
 
+from brain.adapters.base import SourceProblem
+from brain.adapters.github import client as _client
 from brain.adapters.github import fetch as _fetch
 from brain.adapters.github import transform as _transform
 from brain.canonical import CanonicalRecord
@@ -48,6 +50,7 @@ class GithubSource(SourceConfig):
 class GithubAdapter:
     name = "github"
     source_model = GithubSource
+    downloads = True
 
     def key(self, source: GithubSource) -> str:
         return f"{self.name}:{source.repo}"
@@ -57,6 +60,19 @@ class GithubAdapter:
 
     def fetch(self, company: CompanyConfig, source: GithubSource, cache_dir: Path) -> None:
         _fetch.run(company, source, self.cache_for(source, cache_dir))
+
+    def check(
+        self, company: CompanyConfig, source: GithubSource, cache_dir: Path
+    ) -> SourceProblem | None:
+        """Every build downloads first, and that needs a token. `gh auth token` is only asked
+        when GITHUB_TOKEN is not set."""
+        try:
+            _client.token()
+        except _client.GithubError:
+            return SourceProblem(
+                "No GitHub token: set GITHUB_TOKEN in .env or run gh auth login", blocks=True
+            )
+        return None
 
     def records(
         self, company: CompanyConfig, source: GithubSource, cache_dir: Path

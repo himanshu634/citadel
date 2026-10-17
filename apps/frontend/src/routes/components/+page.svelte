@@ -32,6 +32,7 @@
 		NodeInspector,
 		Select,
 		SourceCard,
+		SourceRow,
 		Splitter,
 		Stat,
 		StepRows,
@@ -55,6 +56,7 @@
 	import { doingNow, trailOf } from '$lib/activity';
 	import * as walks from './walk-samples';
 	import * as chatSamples from './chat-samples';
+	import * as sourceSamples from './source-samples';
 	import { carryOver, highlightFor } from '$lib/walk';
 	import { WALK_LIMITS, clampSize } from '$lib/splitter';
 	import {
@@ -724,6 +726,43 @@
 		</div>
 	</Card>
 
+	<Card title="Source row">
+		<p class="note">
+			One source on the Sources page (direction A, the source ledger), a <code>tbody</code> inside
+			the page's table: synced and open (GitHub), two folders sharing one count (the first one's
+			window changed, and it takes a record's own <code>slack_export</code> label), skipped (folder
+			missing), blocked (no key, so every sync fails), never synced with a long name, and one
+			syncing while another is busy.
+		</p>
+		<div class="ledger-sample">
+			<table>
+				<thead>
+					<tr>
+						<th scope="col">Source</th>
+						<th scope="col">Status</th>
+						<th scope="col">Last sync</th>
+						<th scope="col">Read up to</th>
+						<th scope="col">In the graph</th>
+						<th scope="col"><span class="sr-only">Actions</span></th>
+					</tr>
+				</thead>
+				{#each sourceSamples.sampleSources as source, i (source.key)}
+					<SourceRow
+						{source}
+						credit={sourceSamples.sampleLedger.credits.get(source.key)!}
+						since="2026-04-15"
+						open={i < 2}
+						settingsHref="#source-row"
+						onsync={noop}
+						syncing={i === 0}
+						busy={i === 5}
+						locations={sourceSamples.sampleLocations}
+					/>
+				{/each}
+			</table>
+		</div>
+	</Card>
+
 	<Card title="Company form">
 		<p class="note">
 			The fields of a company file. One step at a time in the add-company wizard (company,
@@ -1302,6 +1341,25 @@
 		margin-top: var(--space-2);
 		color: var(--color-text-muted);
 		font-size: var(--text-xs);
+	}
+	.ledger-sample {
+		overflow-x: auto;
+		margin-top: var(--space-4);
+		background: var(--color-surface);
+		border: var(--border-hair) solid var(--color-line);
+		border-radius: var(--radius-md);
+	}
+	.ledger-sample table {
+		width: 100%;
+		min-width: 56rem;
+		border-collapse: collapse;
+	}
+	.ledger-sample thead th {
+		padding: var(--space-2) var(--space-4);
+		text-align: left;
+		font-size: var(--text-xs);
+		font-weight: var(--weight-semibold);
+		color: var(--color-text-muted);
 	}
 	.sources {
 		display: grid;

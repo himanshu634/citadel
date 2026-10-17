@@ -39,6 +39,7 @@ export { default as StepRows } from './components/brain/StepRows.svelte';
 export { default as WalkLedger } from './components/brain/WalkLedger.svelte';
 export { default as WalkSteps } from './components/brain/WalkSteps.svelte';
 export { default as SourceCard } from './components/brain/SourceCard.svelte';
+export { default as SourceRow } from './components/brain/SourceRow.svelte';
 export { default as TerritoryMap } from './components/brain/TerritoryMap.svelte';
 export { default as TurnTimeline } from './components/brain/TurnTimeline.svelte';
 export { default as WorkItemRow } from './components/brain/WorkItemRow.svelte';

@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 
 import anyio
+from brain import pipeline
 from brain.events import BuildEvent
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sse_starlette import EventSourceResponse
@@ -41,14 +42,25 @@ def _current(runner: JobRunner, slug: str) -> BuildSnapshot:
     return snap
 
 
+def _known_keys(slug: str, keys: list[str]) -> set[str]:
+    companies.read_config(slug)  # 422 with the file's problem when it does not validate
+    known = set(pipeline.planned_sources(slug)[1])
+    if not keys or not set(keys) <= known:
+        unknown = sorted(set(keys) - known) or ["(none named)"]
+        raise HTTPException(status_code=422, detail=f"{slug} has no source {', '.join(unknown)}")
+    return set(keys)
+
+
 @router.post("/companies/{slug}/builds", status_code=202)
 def start_build(
     slug: Slug, runner: Runner, lock: StartLock, body: Annotated[BuildIn | None, Body()] = None
 ) -> BuildSnapshot:
-    """Queued when two builds already run elsewhere; 409 when this company has one."""
+    """Queued when two builds already run elsewhere; 409 when this company has one. `sources`
+    limits the download to those keys (422 for a key the company does not have)."""
+    refetch = _known_keys(slug, body.sources) if body and body.sources is not None else None
     with lock:
         try:
-            return runner.start(slug, "build", full=body.full if body else False)
+            return runner.start(slug, "build", full=body.full if body else False, refetch=refetch)
         except JobRunning as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
