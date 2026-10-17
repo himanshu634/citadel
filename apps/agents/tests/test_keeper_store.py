@@ -191,6 +191,8 @@ def test_a_running_review_is_stale_only_when_its_heartbeat_is_old(store):
     assert store.write("ledger/review_stop_running", KEEPER, {"now": at(2.5)}) == []
     done = {"review": live, "n": 1, "status": "done", "count": 1, "at": at(3)}
     store.write("ledger/finish_step", KEEPER, done)
+    [current] = store.read("ledger/review_current", {})
+    assert current["heartbeat_at"] == at(3)  # a step's end beats too
     assert store.write("ledger/review_heartbeat", KEEPER, {"uid": live, "now": at(4)}) == [
         {"uid": live}]  # fmt: skip
     assert store.write("ledger/review_start", KEEPER, {"uid": other, **start, "now": at(5.5)}) == []
