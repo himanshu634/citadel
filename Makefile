@@ -13,7 +13,7 @@ AGENTS := uv run agents
 BACKEND := uv run backend
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs ps browser init schema fetch ingest embed sync stats query tools ask chat eval eval-drafts traces reset linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
+.PHONY: help setup up down logs ps browser init schema fetch ingest embed sync stats query tools ask chat eval eval-report eval-drafts traces reset linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
@@ -92,6 +92,9 @@ eval: ## Agent evals (calls the API; SLUG defaults to synthetic): CASE=id|tag RE
 	uv run python -m agents.evals --slug $(EVAL_SLUG) $(foreach c,$(CASE),--case $(c)) \
 		$(if $(REPEAT),--repeat $(REPEAT)) $(if $(MODEL),--model $(MODEL)) \
 		$(if $(EFFORT),--effort $(EFFORT)) $(if $(BASELINE),--baseline $(abspath $(BASELINE)))
+
+eval-report: ## Markdown pass-rate tables from eval result files: FILES="base.jsonl other.jsonl ..." (per company, baseline first)
+	uv run python -m agents.evals.report $(FILES)
 
 chats-backfill: ## Chat history for $(SLUG)'s threads asked before it existed (from checkpoints + traces); ALL=1 adds untraced ones
 	$(AGENTS) chats-backfill $(SLUG) $(if $(ALL),--all)

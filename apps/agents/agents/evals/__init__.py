@@ -9,4 +9,5 @@ It calls the API, so it lives outside `make test`: `make eval SLUG=synthetic`.
     cases.py   case file schema, and gold uids resolved from the graph at run time
     graders.py pure checks: (expectation, answer, steps) -> list of Check
     run.py     runs cases (repeats, threads for follow-ups), summary, baseline compare
+    report.py  Markdown tables from result files (docs/evals.md is generated with it)
 """
