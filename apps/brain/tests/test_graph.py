@@ -305,3 +305,12 @@ def test_a_long_document_still_shows_its_links():
         assert entity.neighbour_count == 1  # counts what it lists
     finally:
         db.delete_graph(slug)
+
+
+def test_a_chunk_uid_opens_its_passage_and_its_source(synthetic_graph):
+    """The prompt sends the agent from a semantic_search hit's chunk_uid to get_entity."""
+    chunk = tools.get_entity(synthetic_graph, uid="chunk:synthetic:comment:3")
+    assert chunk is not None and chunk.label == "Chunk" and chunk.kind == "comment"
+    assert "Rounding is off by a cent" in chunk.body
+    links = {(n.rel, n.direction, n.uid) for n in chunk.neighbours}
+    assert ("FROM", "out", "synthetic:pr:3") in links
