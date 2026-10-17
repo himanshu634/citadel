@@ -56,7 +56,8 @@ def ledger(monkeypatch):
 @pytest.fixture(autouse=True)
 def keeper_offline(monkeypatch, ledger):
     """The app's default Keeper runs (after a build, at startup) use the in-memory ledger, the
-    fake brain and no API key: never a real keeper_<slug>, FalkorDB or Claude."""
+    fake brain and no API key: never a real keeper_<slug>, FalkorDB or Claude. KeeperRuns takes
+    these when the app is made, so a run that outlasts the test keeps them."""
     monkeypatch.setattr("backend.keeper_runs.keeper_store", lambda slug: ledger)
     monkeypatch.setattr("backend.keeper_runs.has_api_key", lambda: False)
     monkeypatch.setattr("backend.keeper_runs.claude_for", offline_client)

@@ -18,7 +18,10 @@ on "Review now" (`keeper_budget`) and after an approval (budget 0, so pm's follo
   so it never creates keeper_<slug>.
 
 Every seam (`store_for`, `client_for`, `has_key`, `brain`, `graph_run`) defaults to a module
-function looked up at call time, so tests can swap them; the API tests run fully offline.
+function, taken when the KeeperRuns is made (not at call time, as `api.ask.Asker` does): a run
+lives in its own thread and may outlast the test that patched those functions, and must never
+fall back to a real keeper_<slug> or Claude then. The API tests patch them before they make
+the app, so every run they start stays offline.
 """
 
 from __future__ import annotations
@@ -108,11 +111,13 @@ class KeeperRuns:
         graph_run: Runner | None = None,
         start_wait: float = START_WAIT_SECONDS,
     ):
-        self.store_for = store_for or (lambda slug: keeper_store(slug))
-        self.client_for = client_for or (lambda role, job: claude_for(role, job))
-        self.has_key = has_key or (lambda: has_api_key())
+        self.store_for = store_for or keeper_store
+        self.client_for = client_for or claude_for
+        self.has_key = has_key or has_api_key
         self._brain = brain
         self._graph_run = graph_run
+        self._default_brain = default_brain
+        self._default_graph_run = default_graph_run
         self.start_wait = start_wait
         self._lock = threading.RLock()  # the run table, each run's events and the subscribers
         self._runs: dict[str, _Run] = {}  # the latest run per slug started by this process
@@ -120,11 +125,11 @@ class KeeperRuns:
 
     @property
     def brain(self) -> BrainFacts:
-        return self._brain if self._brain is not None else default_brain()
+        return self._brain if self._brain is not None else self._default_brain()
 
     @property
     def graph_run(self) -> Runner | None:
-        return self._graph_run if self._graph_run is not None else default_graph_run()
+        return self._graph_run if self._graph_run is not None else self._default_graph_run()
 
     # --- public API ----------------------------------------------------------------------------
 

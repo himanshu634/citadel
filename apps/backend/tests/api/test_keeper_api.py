@@ -283,3 +283,19 @@ def test_unknown_company_404(kclient, company):
         assert r.status_code == 404, (method, path)
     r = kclient.post("/api/companies/nope/keeper/claims/claim:x/approve", json={"by": "Dana"})
     assert r.status_code == 404
+
+
+def test_default_seams_are_fixed_when_the_app_is_made(runner, ledger, company, monkeypatch):
+    """A review thread can outlive a test's patches (a build released at teardown): the app's
+    Keeper keeps the seams it was made with, so it never reaches a real keeper_<slug> or Claude."""
+    app = create_app(runner)
+
+    def real_store(slug):
+        raise AssertionError("the store was looked up after the app was made")
+
+    monkeypatch.setattr("backend.keeper_runs.keeper_store", real_store)
+    monkeypatch.setattr("backend.keeper_runs.has_api_key", lambda: True)
+    app.state.keeper.start(SLUG, "manual", 0)
+    assert app.state.keeper.wait(SLUG, 5)
+    [review] = ledger.reviews
+    assert review.state == "skipped"
