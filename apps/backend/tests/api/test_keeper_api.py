@@ -183,24 +183,25 @@ def test_events_without_any_review_is_404(kclient, company):
 
 
 def test_startup_stops_a_review_cut_off_by_a_restart(runner, keeper, ledger, company):
-    old = {"uid": "review:old", "trigger": "build", "budget": 3, "now": "2020-01-01T08:00:00Z"}
-    ledger.write("ledger/review_start", KEEPER, old)
+    """Only this process runs reviews, so one left `running` is gone however recent it is."""
+    fresh = {"uid": "review:cut", "trigger": "build", "budget": 3, "now": utc_now()}
+    ledger.write("ledger/review_start", KEEPER, fresh)
     with TestClient(create_app(runner, keeper=keeper)):
-        pass
-    [r] = ledger.reviews
-    assert (r.state, r.stop) == ("stopped", "restart")
+        [r] = ledger.reviews
+        assert (r.state, r.stop) == ("stopped", "restart")
 
 
-def test_startup_leaves_a_review_another_process_runs(runner, keeper, ledger, company):
-    """A review the CLI runs keeps beating: a server (re)start does not stop it, and a start
-    returns it instead of overlapping it."""
-    live = {"uid": "review:cli", "trigger": "manual", "budget": 3, "now": utc_now()}
-    ledger.write("ledger/review_start", KEEPER, live)
-    with TestClient(create_app(runner, keeper=keeper)) as c:
+def test_a_start_stops_a_review_recover_missed(kclient, company, ledger, brain):
+    """A review left `running` after startup (recover could not reach FalkorDB) does not block
+    Review now: the start stops it first, as a restart's."""
+    with kclient as c:
+        left = {"uid": "review:left", "trigger": "build", "budget": 3, "now": utc_now()}
+        ledger.write("ledger/review_start", KEEPER, left)
         r = c.post(f"{BASE}/review")
-        assert r.json()["uid"] == "review:cli", r.text
-    [r] = ledger.reviews
-    assert (r.uid, r.state) == ("review:cli", "running")
+        assert r.status_code == 202 and r.json()["uid"] != "review:left", r.text
+    left_row = ledger.reviews[0]
+    assert (left_row.state, left_row.stop) == ("stopped", "restart")
+    assert wait_review(ledger, 2).state == "done"
 
 
 def test_build_done_starts_a_review(client, company, ledger, runner, gate):

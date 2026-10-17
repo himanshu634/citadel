@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -25,11 +25,6 @@ ClaimKind = Literal["owner", "expert", "decision", "fact", "link"]
 ClaimStatus = Literal[
     "pending_approval", "accepted", "rejected", "superseded", "stale", "conflicts_with_source"
 ]
-
-# A running review whose last heartbeat is this old has lost its process: a start or a restart
-# may stop it. Every step write, step end and job boundary beats, so only one Claude response
-# that thinks this long with no tool call in between could make a live review look stale.
-REVIEW_STALE_SECONDS = 120
 
 # Gaps the Keeper notices itself are about one subject, not a question's text, so they dedupe on
 # (kind, subject). Mirrored in apps/brain/queries/ledger/open_gap.cypher.
@@ -77,8 +72,7 @@ class Review(BaseModel):
     budget: int
     started_at: str
     ended_at: str | None = None
-    stop: str | None = None  # why it ended early, e.g. "restart", "stale", "brain_unavailable"
-    heartbeat_at: str | None = None  # its last sign of life (start, step, job boundary)
+    stop: str | None = None  # why it ended early, e.g. "restart", "brain_unavailable"
     gaps: list[str] = Field(default_factory=list)  # the gaps it picked, in pick order
     gap_text: str | None = None  # the first picked gap's text (a gap's text never changes)
 
@@ -171,12 +165,6 @@ def iso(now: str | float) -> str:
     if isinstance(now, str):
         return now
     return datetime.fromtimestamp(now, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def stale_before(now: str | float, seconds: int = REVIEW_STALE_SECONDS) -> str:
-    """The ledger time a running review's heartbeat must be older than to count as stale."""
-    at = datetime.strptime(iso(now), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
-    return iso((at - timedelta(seconds=seconds)).timestamp())
 
 
 def _hex(n: int) -> str:

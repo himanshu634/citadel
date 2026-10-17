@@ -5,10 +5,15 @@ Why: a review (`agents.keeper.review`) runs LLM jobs for minutes, so a request o
 follows or stops it. The app runs one after each finished build (budget `keeper_build_budget`),
 on "Review now" (`keeper_budget`) and after an approval (budget 0, so pm's follow-up shows).
 
-- `start` returns the company's running review when there is one (this process's, or, through
-  the ledger's own guard, another process's), else starts one and returns it once the ledger
-  has recorded it. A "build" start that finds this process's review running is kept pending
-  and starts (with its budget) when that review ends, so a finished build is always reviewed.
+- One API process per FalkorDB runs every review (no CLI runs one; `make api`'s `--reload`
+  ends the old worker before it starts the new one; review threads are daemons). So a review
+  the ledger shows `running` that this process is not running has lost its run for good.
+- `start` returns the company's running review in this process when there is one, else starts
+  one and returns it once the ledger has recorded it. Before a run starts, any review still
+  `running` in the ledger is stopped (`ledger/review_stop_running`, stop "restart"): a restart
+  cut it off and `recover` could not stop it (FalkorDB was down at startup). A "build" start
+  that finds this process's review running is kept pending and starts (with its budget) when
+  that review ends, so a finished build is always reviewed.
 - While the company builds (`building`, the app's `JobRunner.building`) nothing starts:
   `start` and `start_soon` raise `BrainBuilding`, and the brain the reviews see reads as
   missing (`graph_exists` False), so a running review stops `brain_unavailable` instead of
@@ -25,11 +30,9 @@ on "Review now" (`keeper_budget`) and after an approval (budget 0, so pm's follo
   server lost.
 - `subscribe` replays the events of the company's latest run in this process, then follows it
   live, then ends; so a page that opens the stream after a quick run still sees all of it.
-- `recover` (at startup) marks a review a previous server process left `running` as stopped
-  (`ledger/review_stop_running`), only once its heartbeat is `REVIEW_STALE_SECONDS` old: a
-  review another process runs keeps beating, so neither a (re)start nor a new start
-  (`ledger/review_start` stops only a stale one) overlaps it. It only writes
-  for a company whose latest review is running, so it never creates keeper_<slug>.
+- `recover` (at startup) marks every review a previous server process left `running` as
+  stopped (`ledger/review_stop_running`), so Review now works at once after a restart. It only
+  writes for a company whose latest review is running, so it never creates keeper_<slug>.
 
 Every seam (`store_for`, `client_for`, `has_key`, `brain`, `graph_run`) defaults to a module
 function, taken when the KeeperRuns is made (not at call time, as `api.ask.Asker` does): a run
@@ -198,7 +201,7 @@ class KeeperRuns:
         run = self._launch(slug, trigger, budget)
         run.started.wait(self.start_wait)
         if run.ended and run.result is not None:
-            return run.result  # as it ended; or another process's running review
+            return run.result  # as it ended
         current = self.current(slug)
         if current is None or not (run.ended or current.state == "running"):
             raise ReviewNotStarted(f"The review of {slug} did not start in time.")
@@ -296,9 +299,9 @@ class KeeperRuns:
         return Subscription(lambda: self._unsubscribe(sub), sub.queue)
 
     def recover(self) -> None:
-        """On startup: a review still `running` in a company's ledger whose heartbeat is stale
-        belonged to a process that is gone (a fresh one is another process's live review).
-        Best effort per company; a company with no ledger is skipped."""
+        """On startup: a review still `running` in a company's ledger belonged to a process that
+        is gone (see the module doc). Best effort per company; a company with no ledger is
+        skipped."""
         for company in registry.list_companies():
             slug = company.slug
             if self.running(slug):
@@ -321,6 +324,8 @@ class KeeperRuns:
 
         try:
             store = self.store_for(run.slug)
+            # This process runs no other review of the slug: one the ledger shows running is gone.
+            store.write("ledger/review_stop_running", DB_USER, {"now": utc_now()})
             common: dict[str, Any] = {
                 "budget": budget,
                 "trigger": trigger,

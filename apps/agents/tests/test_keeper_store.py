@@ -169,48 +169,30 @@ def test_one_running_review(store):
     assert (current["state"], current["ended_at"], current["stop"]) == ("stopped", T3, "restart")
 
 
-def at(minutes: float) -> str:
-    """2026-10-17 10:00 UTC plus `minutes`, as ledger text."""
-    secs = round(minutes * 60)
-    return f"2026-10-17T10:{secs // 60:02d}:{secs % 60:02d}Z"
-
-
-def test_a_running_review_is_stale_only_when_its_heartbeat_is_old(store):
-    """A review another process runs (the CLI's) keeps beating: a start or a restart's stop
-    leaves it alone until its last beat (start, step, step end, job boundary) is
-    REVIEW_STALE_SECONDS old; then a start stops it (stop "stale") and starts the new one."""
+def test_a_running_review_blocks_a_start_until_it_is_stopped(store):
+    """Only the API runs reviews (`backend.keeper_runs`), so the ledger keeps no sign of life: a
+    running review blocks a start however old it is, steps leave the review as it was, and
+    `review_stop_running` stops every running review, however fresh."""
     live, other = review_uid(), review_uid()
     start = {"trigger": "manual", "budget": 5}
-    assert store.write("ledger/review_start", KEEPER, {"uid": live, **start, "now": at(0)})
-    [current] = store.read("ledger/review_current", {})
-    assert current["heartbeat_at"] == at(0)
-
-    step = {"review": live, "n": 1, "actor": "pm", "tool": "work_history", "at": at(1)}
+    assert store.write("ledger/review_start", KEEPER, {"uid": live, **start, "now": T1})
+    step = {"review": live, "n": 1, "actor": "pm", "tool": "work_history", "at": T1}
     store.write("ledger/write_step", KEEPER, step)
-    assert store.write("ledger/review_start", KEEPER, {"uid": other, **start, "now": at(2.5)}) == []
-    assert store.write("ledger/review_stop_running", KEEPER, {"now": at(2.5)}) == []
-    done = {"review": live, "n": 1, "status": "done", "count": 1, "at": at(3)}
+    done = {"review": live, "n": 1, "status": "done", "count": 1, "at": T1}
     store.write("ledger/finish_step", KEEPER, done)
     [current] = store.read("ledger/review_current", {})
-    assert current["heartbeat_at"] == at(3)  # a step's end beats too
-    assert store.write("ledger/review_heartbeat", KEEPER, {"uid": live, "now": at(4)}) == [
-        {"uid": live}]  # fmt: skip
-    assert store.write("ledger/review_start", KEEPER, {"uid": other, **start, "now": at(5.5)}) == []
-    [current] = store.read("ledger/review_current", {})
-    assert (current["uid"], current["state"], current["heartbeat_at"]) == (live, "running", at(4))
+    assert "heartbeat_at" not in current
+    later = {"uid": other, **start, "now": "2027-10-17T10:00:00Z"}  # a year on
+    assert store.write("ledger/review_start", KEEPER, later) == []
 
-    assert store.write("ledger/review_start", KEEPER, {"uid": other, **start, "now": at(6.5)}) == [
+    assert store.write("ledger/review_stop_running", KEEPER, {"now": T1}) == [{"uid": live}]
+    [current] = store.read("ledger/review_current", {})
+    assert (current["uid"], current["state"], current["stop"], current["ended_at"]) == (
+        live, "stopped", "restart", T1)  # fmt: skip
+    assert store.write("ledger/review_start", KEEPER, {"uid": other, **start, "now": T2}) == [
         {"uid": other}]  # fmt: skip
-    old, new = store.read("ledger/recent_reviews", {"limit": 5})[::-1]
-    assert (old["uid"], old["state"], old["stop"], old["ended_at"]) == (
-        live, "stopped", "stale", at(6.5))  # fmt: skip
-    assert (new["uid"], new["state"]) == (other, "running")
-    assert store.write("ledger/review_heartbeat", KEEPER, {"uid": live, "now": at(7)}) == []
-
-    assert store.write("ledger/review_stop_running", KEEPER, {"now": at(7)}) == []  # fresh
-    assert store.write("ledger/review_stop_running", KEEPER, {"now": at(9)}) == [{"uid": other}]
-    [current] = store.read("ledger/review_current", {})
-    assert (current["state"], current["stop"]) == ("stopped", "restart")
+    assert store.write("ledger/review_stop_running", KEEPER, {"now": T2}) == [{"uid": other}]
+    assert store.write("ledger/review_stop_running", KEEPER, {"now": T3}) == []  # none left
 
 
 def test_review_current_empty(store):

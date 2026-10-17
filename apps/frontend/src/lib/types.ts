@@ -777,10 +777,8 @@ export interface Review {
 	budget: number;
 	started_at: string;
 	ended_at: string | null;
-	/** Why it ended early, e.g. no_api_key, restart, stale, brain_unavailable. */
+	/** Why it ended early, e.g. no_api_key, restart, brain_unavailable. */
 	stop: string | null;
-	/** Its last sign of life (start, step, job boundary); null on reviews from before it. */
-	heartbeat_at?: string | null;
 	/** The gaps it picked, in pick order. */
 	gaps: string[];
 	gap_text: string | null;

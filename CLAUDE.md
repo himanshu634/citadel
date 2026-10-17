@@ -299,10 +299,12 @@ demo's agents are `brain`, `keeper`, `pm` and `qa`. Pieces:
   empty until ingest ends, so Review now / approve / reject are 409 (`decide.BUILDING`), reviews
   see the brain as missing, and a rebuild stops the running review before its reset
   (`JobRunner.before_reset`), marking it `rebuilt`: that run's brain reads as missing until it
-  ends, so a job whose tool loop spanned the rebuild writes nothing. A running Review carries
-  `heartbeat_at` (start, every step write/end, each job's start); `recover` and `review_start`
-  treat it as stale only after `REVIEW_STALE_SECONDS` (120) without a beat. There is no Keeper
-  CLI: the app and the API are its only surfaces. No Keeper page: reviews show on the
+  ends, so a job whose tool loop spanned the rebuild writes nothing. Only the API runs reviews,
+  one process per FalkorDB (`--reload` ends the old worker before the new one starts), so a
+  review the ledger shows `running` that this process is not running is gone: `recover` stops
+  every one at startup and a start stops any left over first (`ledger/review_stop_running`,
+  stop `restart`); there is no heartbeat. There is no Keeper CLI: the app and the API are its
+  only surfaces. No Keeper page: reviews show on the
   Systems page's activity trail (`GET .../activity`), its controls in that page's rail.
 - Frontend: Review now in the Systems page's bar; in its rail the claims waiting for a lead
   (`ClaimApproval`: typed name, optional why) and the log (`KeeperLog`), read again when a Keeper
