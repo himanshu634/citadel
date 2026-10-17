@@ -240,15 +240,24 @@ export function textRuns(text: string, ctx: RefContext): TextRun[] {
 	return out;
 }
 
-/** Runs for text that names nodes by label (a step's sentence): each label is linked to its url. */
+const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Runs for text that names nodes by label (a step's sentence): the first whole-word match of each
+ * label is linked to its url, so `PR #3` never links inside `PR #33`.
+ */
 export function labelRuns(text: string, refs: { label: string; href: string | null }[]): TextRun[] {
 	let runs: TextRun[] = [{ text }];
 	for (const { label, href } of refs) {
 		if (!href || !label) continue;
+		const word = new RegExp(`(?<![\\w#])${escape(label)}(?!\\w)`);
+		let done = false;
 		runs = runs.flatMap((run) => {
-			if (run.href !== undefined) return [run];
-			const i = run.text.indexOf(label);
-			if (i < 0) return [run];
+			if (done || run.href !== undefined) return [run];
+			const m = word.exec(run.text);
+			if (!m) return [run];
+			done = true;
+			const i = m.index;
 			return [
 				...(i > 0 ? [{ text: run.text.slice(0, i) }] : []),
 				{ text: label, href },

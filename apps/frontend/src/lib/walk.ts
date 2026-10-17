@@ -6,7 +6,7 @@
  * put as new steps arrive, works out what a citation lights up, and turns rows, calls and the
  * answer's Markdown into plain values the components render. Pure: no Svelte, no fetch.
  */
-import { codeRef, codeUrl, refContext, refUrl, textRuns, type RefContext } from './links';
+import { codeRef, codeUrl, labelRuns, refContext, refUrl, textRuns, type RefContext, type TextRun } from './links';
 import { NODE_LABELS, type AskSource, type NodeType, type WalkNode, type WalkRel, type WalkStep } from './types';
 
 const TYPES: Record<string, NodeType> = {
@@ -390,6 +390,45 @@ const REPEATS: Record<string, { key: string; many: string; verb: string }> = {
 	related_work_items: { key: 'text', many: 'searches', verb: 'Searched PRs and issues' },
 	related_documents: { key: 'text', many: 'searches', verb: 'Searched docs' }
 };
+
+/** The input keys that name a node in a step's sentence ("Opened PR #10", "how alice and PR #3 connect"). */
+const NAMED_KEYS = ['uid', 'from_uid', 'to_uid'];
+
+/** The uids a step's input names, in the order its sentence says them. */
+export function namedUids(input: Record<string, unknown> | null | undefined): string[] {
+	return NAMED_KEYS.map((k) => input?.[k]).filter((v): v is string => typeof v === 'string');
+}
+
+/**
+ * A sentence with the nodes it names linked (each once): to `urlOf(uid)`, else to the github.com
+ * page of a GitHub uid. Labels are `shortUid`'s, as the sentence wrote them.
+ */
+export function sentenceRuns(sentence: string, uids: string[], urlOf: (uid: string) => string | null = () => null): TextRun[] {
+	return labelRuns(
+		sentence,
+		[...new Set(uids)].map((uid) => ({ label: shortUid(uid), href: refUrl(uid, urlOf(uid)) }))
+	);
+}
+
+/** Node urls by uid from what steps returned: their walk nodes and every uid'd row (any depth). */
+export function stepUrls(steps: Pick<WalkStep, 'nodes' | 'rows'>[]): Map<string, string> {
+	const out = new Map<string, string>();
+	const visit = (v: unknown) => {
+		if (Array.isArray(v)) return v.forEach(visit);
+		if (!v || typeof v !== 'object') return;
+		const o = v as { uid?: unknown; url?: unknown };
+		if (typeof o.uid === 'string' && typeof o.url === 'string' && !out.has(o.uid)) out.set(o.uid, o.url);
+		for (const x of Object.values(o)) if (x && typeof x === 'object') visit(x);
+	};
+	for (const step of steps) visit([step.nodes ?? [], step.rows ?? []]);
+	return out;
+}
+
+/** A ledger row's sentence with the nodes it names linked to their pages. */
+export function ledgerRuns(item: LedgerItem): TextRun[] {
+	const urls = stepUrls(item.steps);
+	return sentenceRuns(item.sentence, item.steps.flatMap((s) => namedUids(s.input)), (uid) => urls.get(uid) ?? null);
+}
 
 export interface LedgerItem {
 	/** One step, or a run of the same tool folded into one row (`steps.length > 1`). */

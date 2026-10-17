@@ -10,6 +10,7 @@ import {
 	checkLine,
 	highlightFor,
 	ledgerItems,
+	ledgerRuns,
 	layoutWalk,
 	mergeWalk,
 	nodeType,
@@ -286,6 +287,33 @@ describe('answerBlocks', () => {
 			},
 			{ kind: 'ol', items: [[{ kind: 'text', text: 'one' }], [{ kind: 'text', text: 'two' }]] }
 		]);
+	});
+});
+
+describe('ledgerRuns', () => {
+	const opened = (id: string, uid: string, url: string | null) =>
+		({ id, n: 1, tool: 'get_entity', input: { uid }, status: 'done', count: 1, nodes: [{ uid, label: 'WorkItem', title: 't', url }] }) as unknown as WalkStep;
+
+	test("a step links the node it opened, with the walk's url", () => {
+		const [item] = ledgerItems([opened('a', 'synthetic:pr:10', 'https://example.com/10')], true);
+		expect(ledgerRuns(item)).toEqual([{ text: 'Opened ' }, { text: 'PR #10', href: 'https://example.com/10' }]);
+	});
+
+	test('a folded row links each node it names; one with no page stays text', () => {
+		const steps = [opened('a', 'github:o/r:pr:3', null), opened('b', 'github:o/r:pr:33', null), opened('c', 'person:alice', null)];
+		const [item] = ledgerItems(steps, true);
+		expect(ledgerRuns(item)).toEqual([
+			{ text: 'Opened 3 nodes: ' },
+			{ text: 'PR #3', href: 'https://github.com/o/r/pull/3' },
+			{ text: ', ' },
+			{ text: 'PR #33', href: 'https://github.com/o/r/pull/33' },
+			{ text: ', alice' }
+		]);
+	});
+
+	test('a step that names no node is one plain run', () => {
+		const [item] = ledgerItems([{ id: 'w', n: 1, tool: 'work_history', input: { system: 'Auth' }, status: 'done', count: 1 } as WalkStep], true);
+		expect(ledgerRuns(item)).toEqual([{ text: 'Read recent work on Auth' }]);
 	});
 });
 

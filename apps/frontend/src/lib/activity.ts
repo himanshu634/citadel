@@ -9,9 +9,9 @@
  * call, a folded comment) keep their place in the list, with no point. Consecutive steps on the
  * same node share one point, so their numbers never overlap.
  */
-import { labelRuns, refUrl, type TextRun } from './links';
+import type { TextRun } from './links';
 import type { ActivityRun, ActivityStep } from './types';
-import { shortUid, stepSentence, subjectOf } from './walk';
+import { namedUids, sentenceRuns, stepSentence, subjectOf } from './walk';
 
 export interface TrailPoint {
 	uid: string;
@@ -101,19 +101,12 @@ export function stepLine(step: ActivityStep): string {
 	return stepSentence(step, step.status !== 'running');
 }
 
-/** The input keys that name a node in a step's sentence ("Opened PR #10", "how alice and PR #3 connect"). */
-const NAMED = ['uid', 'from_uid', 'to_uid'];
-
 /**
  * `stepLine` with the nodes it names linked: each to `urlOf(uid)` (the graph's own url), else to
  * the github.com page of a GitHub uid.
  */
 export function stepLineRuns(step: ActivityStep, urlOf: (uid: string) => string | null = () => null): TextRun[] {
-	const uids = NAMED.map((k) => step.input?.[k]).filter((v): v is string => typeof v === 'string');
-	return labelRuns(
-		stepLine(step),
-		uids.map((uid) => ({ label: shortUid(uid), href: refUrl(uid, urlOf(uid)) }))
-	);
+	return sentenceRuns(stepLine(step), namedUids(step.input), urlOf);
 }
 
 /** What the agent is doing now, for the marker on the map: its running step, else thinking. */

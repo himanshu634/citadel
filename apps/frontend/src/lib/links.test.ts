@@ -159,6 +159,15 @@ describe('textRuns', () => {
 	});
 });
 
+describe('labelRuns, whole words', () => {
+	test('PR #3 never links inside PR #33', () => {
+		expect(labelRuns('Opened 2 nodes: PR #33, PR #3', [{ label: 'PR #3', href: 'u3' }])).toEqual([
+			{ text: 'Opened 2 nodes: PR #33, ' },
+			{ text: 'PR #3', href: 'u3' }
+		]);
+	});
+});
+
 describe('labelRuns', () => {
 	test('links each label once, skipping those with no url', () => {
 		expect(
