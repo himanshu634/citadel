@@ -134,18 +134,8 @@ rail's log says who did what, and why. Failed questions and thumbs-down answers 
 become gaps too, and the app runs a review after every build. While a company builds, Review now,
 approve and reject are refused (a rebuild's brain is empty until its ingest ends); try again when
 the build finishes. The same actions are in the API under `/api/companies/<slug>/keeper/`.
-
-## 9. The agent simulation (optional)
-
-The original simulated company, no longer the product story:
-
-```bash
-make agents                                           # the roles, their jobs and read tools
-make sim SLUG=synthetic SCENARIO=sprint OFFLINE=1     # a full sprint with scripted policies
-```
-
-`OFFLINE=1` plays each role with a deterministic policy, so no API key is used. Scenarios:
-`sprint`, `race`, `regression`. The spec is in [docs/agents.md](docs/agents.md).
+`make agents` lists the agent roles, their jobs and read tools; the spec is in
+[docs/agents.md](docs/agents.md).
 
 ## Tests and checks
 

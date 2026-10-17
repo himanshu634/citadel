@@ -19,9 +19,9 @@ def test_keeper_permissions():
     assert acl.can("citadel_keeper", "acme", "brain_acme", "W")
     assert acl.can("citadel_pm", "acme", g, "W") and acl.can("citadel_qa", "acme", g, "W")
     assert acl.can("citadel_brain", "acme", g, "W")  # Ask opens gaps
-    assert not acl.can("citadel_risk", "acme", g, "W")
+    assert not acl.can("citadel_loader", "acme", g, "W")
+    assert not acl.can("citadel_pm", "acme", "brain_acme", "W")
     assert acl.PERMISSIONS["citadel_keeper"] == {"brain": acl.RW, "keeper": acl.RW}
-    assert acl.ROLE_OF["citadel_keeper"] == "keeper"
 
 
 def test_keeper_setuser_commands():

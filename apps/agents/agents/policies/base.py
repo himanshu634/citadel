@@ -1,6 +1,6 @@
 """Offline policies: deterministic stand-ins for Claude, one per job (ground rule 6).
 
-Why: simulations and tests must run with no API key, and they should exercise the real path. A
+Why: offline runs and tests must run with no API key, and they should exercise the real path. A
 policy is a pure function of the run's context and the tool results so far; `ScriptedClient`
 plays it through the real brain loop, answering with the same message shapes the Messages API
 returns (like `agents/offline.py`). So the toolset, the grounding check and the store's guards
@@ -9,7 +9,7 @@ all run exactly as they do for Claude.
     def policy(context, results):
         if not results.called("list_systems"):
             return [("list_systems", {})]           # tool calls for this turn
-        return {"task": ..., "cites": [...]}        # the submit input: ends the run
+        return {"consult": ..., "cites": [...]}     # the submit input: ends the run
         return None                                 # no decision: the run ends with no answer
 """
 
@@ -134,16 +134,6 @@ def _results(messages: list[dict[str, Any]], submit: str) -> tuple[Results, str 
 
 
 # --- small helpers shared by the policies ------------------------------------------------------
-
-_WORD = re.compile(r"[a-z0-9]+")
-
-
-def words(text: str | None) -> set[str]:
-    return {w for w in _WORD.findall((text or "").lower()) if len(w) > 2}
-
-
-def first_line(text: str | None) -> str:
-    return (text or "").strip().splitlines()[0] if (text or "").strip() else ""
 
 
 def uniq(items: list[str]) -> list[str]:
