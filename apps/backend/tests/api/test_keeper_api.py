@@ -266,6 +266,28 @@ def test_while_the_brain_builds_reviews_and_decisions_are_refused(
     assert wait_review(ledger).trigger == "build"  # the post-build review still runs
 
 
+def test_a_build_that_begins_during_a_job_refuses_its_writes(ledger, brain, company):
+    """The build begins while a consult job is in its tool loop: the brain the review sees reads
+    as missing from then on, so the job writes nothing and the review stops brain_unavailable."""
+    gap = seed_gap(ledger)
+    building = threading.Event()
+
+    def graph_run(slug, name, **params):
+        building.set()  # the rebuild started while this job thinks
+        return fake_brain(slug, name, **params)
+
+    runs = KeeperRuns(store_for=lambda slug: ledger, client_for=offline_client,
+                      has_key=lambda: True, brain=brain, graph_run=graph_run,
+                      building=lambda slug: building.is_set())  # fmt: skip
+    runs.start(SLUG, "manual", 5)
+    assert runs.wait(SLUG, 5)
+    [r] = ledger.reviews
+    assert (r.state, r.stop) == ("stopped", "brain_unavailable")
+    assert {c.status for c in ledger.consults.values()} == {"open"}  # no answer written
+    assert ledger.claims == {}
+    assert (ledger.gaps[gap].status, ledger.gaps[gap].attempts) == ("open", 0)
+
+
 def test_a_rebuild_stops_the_running_review_before_it_empties_the_brain(
     keeper, ledger, brain, company, tmp_path
 ):

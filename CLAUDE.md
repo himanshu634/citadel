@@ -230,8 +230,7 @@ Reviews what the brain could not answer and updates it (spec: docs/agents.md "Th
   step by step on `/activity`. Releases gaps it did not
   decide; stops with `brain_unavailable` when brain_<slug> is gone. No API key: `skip_review`
   (re-project + notice only, recorded `skipped`); `--offline` plays the policies (refused unless
-  the company's `data_permission` is `synthetic`: they accept their own claims). A stop asked
-  while a job runs refuses that job's writes. pm's follow-up job is tried once per claim: a run
+  the company's `data_permission` is `synthetic`: they accept their own claims). pm's follow-up job is tried once per claim: a run
   that opens no task is recorded (`ledger/follow_up_tried`, logged `follow_up_skipped`).
 - Fixed rules (`keeper/rules.py`, `keeper/decide.py`), never the model: evidence uids must exist;
   sources win (`conflicts_with_source`, never projected, pm follow-up); critical =

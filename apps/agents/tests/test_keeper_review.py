@@ -435,12 +435,11 @@ def test_a_stopped_review_does_not_use_up_the_follow_up_try():
     assert f["claim"] == claim
 
 
-def test_a_stop_asked_during_a_job_writes_nothing():
-    """A rebuild asks the review to stop while a job is in its tool loop: the job's write is
-    refused (the brain is being emptied), and the review ends stopped."""
+def test_a_stop_asked_during_a_job_lets_that_job_write():
+    """Review stop takes effect at the next job: the running job's paid answer is kept."""
     store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
-    gap = seed_gap(store, GROUNDED)
-    stop = []
+    seed_gap(store, GROUNDED)
+    stop: list[bool] = []
 
     def stopping(slug, name, **params):
         stop.append(True)  # asked mid-job, after the stop check before it
@@ -448,10 +447,7 @@ def test_a_stop_asked_during_a_job_writes_nothing():
 
     r, _ = run_review(store, brain, graph_run=stopping, should_stop=lambda: bool(stop))
     assert (r.state, r.stop) == ("stopped", "requested")
-    assert {c.status for c in store.consults.values()} == {"open"}  # the answer was not written
-    assert "consult_answered" not in actions(store)
-    assert store.claims == {}
-    assert gap_status(store, gap) == "open" and store.gaps[gap].attempts == 0
+    assert [c.status for c in store.consults.values()].count("answered") == 1
 
 
 # --- noticing ---------------------------------------------------------------------------------

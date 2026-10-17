@@ -18,8 +18,9 @@ Every job goes through `runner.run_job` with `client_for(role, job)`: `llm.clien
 production, `policies.offline_client` offline.
 
 The run ends early, between jobs:
-- `should_stop()` -> `stopped`, stop "requested". Asked while a job runs, that job's writes are
-  refused too (a rebuild stops the review before it empties brain_<slug>).
+- `should_stop()` -> `stopped`, stop "requested". A job already running finishes and writes
+  (its model calls are paid for); a rebuild's empty brain is refused through `graph_exists`,
+  which the backend's brain reports False while the company builds.
 - brain_<slug> missing (`graph_exists` False, `BrainUnavailable`) or a FalkorDB `ResponseError`
   -> `stopped`, stop "brain_unavailable". `run_job` catches a job's errors, so the jobs' writes
   are wrapped to pass these two through.
@@ -381,9 +382,6 @@ class _Run:
         brain = self.brain
 
         def apply(store: WorkStore, ctx: Ctx, s: Subject, sub: Any) -> list[dict[str, Any]]:
-            if self.should_stop():  # asked while the job thought (a rebuild is emptying the
-                self.brain_error = _Stop(REQUESTED)  # brain): what it read may be gone already
-                raise self.brain_error
             try:
                 # The loop turns graph-tool errors into tool results, so a brain that vanished
                 # mid-run looks like "nothing found": write nothing from such a run.
