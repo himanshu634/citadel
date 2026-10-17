@@ -1,6 +1,6 @@
 /**
  * Builds for the /components gallery: running, queued, done, failed, stopped, a rebuild, a
- * build with a skipped source, and the embed stage running and skipped. Event times are fixed local times so the log reads the same on
+ * build with a skipped source, and the embed stage loading its model, running and skipped. Event times are fixed local times so the log reads the same on
  * every visit.
  */
 import type { BuildEvent, BuildSnapshot, BuildStage, BuildState, BuildStatus } from '$lib/types';
@@ -90,10 +90,15 @@ export const done = snapshot('done', [
 	ev('done', 'done')
 ]);
 
+const LOADING_MODEL = 'Loading the embedding model (the first run downloads about 0.2 GB)';
+
+/** Every source loaded; the embed stage waits for the model before its first batch. */
+export const embedLoading = snapshot('running', [...loaded(), ev('embed', 'running', null, undefined, LOADING_MODEL)]);
+
 /** Every source loaded; the text is being embedded, one batch at a time. */
 export const embedding = snapshot('running', [
 	...loaded(),
-	ev('embed', 'running'),
+	ev('embed', 'running', null, undefined, LOADING_MODEL),
 	ev('embed', 'running', null, 640)
 ]);
 

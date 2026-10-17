@@ -62,6 +62,12 @@ describe('buildTable', () => {
 		expect(buildTable([ev('prepare', 'running')], plan).embed).toEqual({ status: 'waiting' });
 	});
 
+	test('embed running says the model is loading until the first count', () => {
+		const loading = ev('embed', 'running', null, undefined, 'Loading the embedding model');
+		expect(buildTable([loading]).embed).toEqual({ status: 'running', message: 'Loading the embedding model' });
+		expect(buildTable([loading, ev('embed', 'running', null, 64)]).embed).toEqual({ status: 'running', count: 64 });
+	});
+
 	test('embed skipped keeps its reason', () => {
 		const t = buildTable([ev('embed', 'skipped', null, undefined, 'Embeddings are off')]);
 		expect(t.embed).toEqual({ status: 'skipped', message: 'Embeddings are off' });

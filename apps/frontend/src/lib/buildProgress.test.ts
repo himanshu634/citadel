@@ -325,6 +325,11 @@ describe('cellNote', () => {
 		expect(cellNote('embed', { status: 'running', count: 1280 })).toBe('1,280 embedded');
 	});
 
+	test('embed running before its first batch says the model is loading', () => {
+		const loading = 'Loading the embedding model (the first run downloads about 0.2 GB)';
+		expect(cellNote('embed', { status: 'running', message: loading })).toBe(loading);
+	});
+
 	test('embed skipped says why', () => {
 		const reason = 'Embeddings are off (EMBEDDING_PROVIDER=none), so semantic search finds nothing.';
 		expect(cellNote('embed', { status: 'skipped', message: reason })).toBe(reason);

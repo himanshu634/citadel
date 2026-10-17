@@ -119,6 +119,8 @@ def test_events_report_running_then_a_count_per_batch_then_done(fresh_synthetic,
     assert all((e.stage, e.source) == ("embed", None) for e in events)
     first, *progress, last = events
     assert (first.status, first.count) == ("running", None)
+    assert first.message == embeddings.LOADING_MODEL  # the build page says why it waits
+    assert all(e.message is None for e in progress)  # a count replaces it
     # one running event per written batch, with the chunks embedded so far
     assert len(progress) > 1 and all(e.status == "running" for e in progress)
     counts = [e.count for e in progress]

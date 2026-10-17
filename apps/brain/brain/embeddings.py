@@ -10,9 +10,11 @@ Tests swap in a fake with `set_embedder` (`brain.testing.FakeEmbedder`).
 The embed stage (`embed_pending`) runs after ingest. A chunk is embedded again only when its
 text, or the model, changed since: each vector is stored with the text hash and model it was
 made from. A model that cannot run skips the stage with a reason; it never fails the build.
-After a written batch it emits a `running` event with the count so far (the first batch, then
-at most one a second: each event rewrites the build's snapshot), so the build page shows
-progress and a build job's stop (raised from `on_event`) can act between batches.
+Its first `running` event says the model is loading (the first run downloads it), so the build
+page tells why it waits. After a written batch it emits a `running` event with the count so far
+(the first batch, then at most one a second: each event rewrites the build's snapshot), so the
+build page shows progress and a build job's stop (raised from `on_event`) can act between
+batches.
 """
 
 from __future__ import annotations
@@ -125,6 +127,9 @@ EMBEDDINGS_OFF = (
 )
 
 
+# On the stage's first event, before any model call: the first load (and download) takes a while.
+LOADING_MODEL = "Loading the embedding model (the first run downloads about 0.2 GB)"
+
 PROGRESS_EVERY = 1.0  # seconds between two progress events of the embed stage
 _clock = time.monotonic  # tests replace it to control which batches report
 
@@ -153,7 +158,7 @@ def embed_pending(
     e = embedder if embedder is not None else get_embedder()
     if e is None:
         return _skip(slug, report, EMBEDDINGS_OFF, emit)
-    emit(BuildEvent(slug, "embed", "running"))
+    emit(BuildEvent(slug, "embed", "running", message=LOADING_MODEL))
     if everything:
         loader.clear_embedded(slug)
     done: set[str] = set()
