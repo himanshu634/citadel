@@ -17,8 +17,7 @@ keeps it. `--fold-motion` (1, or 0 from AppShell before its first paint) turns t
 		MessageSquareText,
 		Network,
 		Palette,
-		Settings,
-		Users
+		Settings
 	} from '@lucide/svelte';
 	import type { Component } from 'svelte';
 	import { getCompanies } from '$lib/companies.svelte';
@@ -41,9 +40,8 @@ keeps it. `--fold-motion` (1, or 0 from AppShell before its first paint) turns t
 			{ label: 'Overview', path: '', icon: LayoutDashboard },
 			{ label: 'Ask', path: 'ask', icon: MessageSquareText },
 			{ label: 'Graph', path: 'graph', icon: Network },
-			{ label: 'People', icon: Users },
-			{ label: 'Systems', icon: Boxes },
-			{ label: 'Sources', icon: BookOpen }
+			{ label: 'Systems', path: 'systems', icon: Boxes },
+			{ label: 'Sources', path: 'sources', icon: BookOpen }
 		]
 	};
 	const manage: Group = {

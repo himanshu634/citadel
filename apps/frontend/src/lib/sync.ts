@@ -14,9 +14,10 @@ export type SyncOutcome =
 	| { kind: 'running' }
 	| { kind: 'failed'; message: string };
 
-export async function startSync(slug: string): Promise<SyncOutcome> {
+/** `sources` limits the download to those source keys (the Sources page's Sync on one row). */
+export async function startSync(slug: string, sources?: string[]): Promise<SyncOutcome> {
 	try {
-		await api.startBuild(slug);
+		await api.startBuild(slug, false, sources);
 		return { kind: 'started' };
 	} catch (e) {
 		if (e instanceof ApiError && e.status === 409) return { kind: 'running' };

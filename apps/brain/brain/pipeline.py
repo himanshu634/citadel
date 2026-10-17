@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 
 from brain import adapters, loader
 from brain.canonical import CanonicalRecord
-from brain.config import CompanyConfig, load_company, raw_dir
+from brain.config import CompanyConfig, SourceConfig, load_company, raw_dir
 from brain.events import BuildEvent, OnEvent, noop
 from brain.normalize import normalize
 
@@ -60,6 +60,33 @@ def _selected(cfg: CompanyConfig, only: str | None):
     for source in cfg.sources:
         if only is None or source.type == only:
             yield source, adapters.REGISTRY.get(source.type)
+
+
+@dataclass
+class ConfiguredSource:
+    """One `sources:` entry as the next build will see it, found without running one."""
+
+    key: str  # the adapter key, which also keys its SyncState; the type when no adapter exists
+    config: SourceConfig
+    downloads: bool  # the adapter's fetch does network I/O
+    problem: adapters.SourceProblem | None  # why the next build cannot read it, if anything
+
+
+def configured_sources(slug: str) -> list[ConfiguredSource]:
+    """Each configured source in file order, with what would stop the next build reading it
+    (the adapter's optional `check`: a folder, an env var; no network)."""
+    cfg = load_company(slug)
+    out = []
+    for source, adapter in _selected(cfg, None):
+        if adapter is None:
+            problem = adapters.SourceProblem(f"No adapter for source type {source.type}")
+            out.append(ConfiguredSource(source.type, source, False, problem))
+            continue
+        check = getattr(adapter, "check", None)
+        problem = check(cfg, source, raw_dir(slug, source.type)) if check else None
+        downloads = bool(getattr(adapter, "downloads", False))
+        out.append(ConfiguredSource(adapter.key(source), source, downloads, problem))
+    return out
 
 
 def planned_sources(slug: str, keys: set[str] | None = None) -> tuple[list[str], list[str]]:

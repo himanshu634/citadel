@@ -10,6 +10,7 @@ Design rules: [design-system.md](design-system.md). Live component gallery: `/co
 make fe-install     # pnpm install in apps/frontend
 make fe-dev         # dev server on http://localhost:5173
 make fe-check       # svelte-check (types and Svelte diagnostics)
+make fe-test        # vitest unit tests
 make fe-build       # static build into apps/frontend/build
 ```
 
@@ -18,6 +19,9 @@ make fe-build       # static build into apps/frontend/build
 ```
 src/lib/styles/       tokens.css (every colour, size, radius) and base.css
 src/lib/components/   ui/ generic, brain/ answer and graph patterns, layout/ the app frame
-src/lib/data/         sample data (replace with API calls; keep the shapes in src/lib/types.ts)
-src/routes/           / dashboard, /components gallery
+src/lib/types.ts      API shapes, written by hand to match the backend models
+src/routes/           / (opens the last-used company, or the first-run state)
+                      /c/[slug] overview, /c/[slug]/{ask,graph,systems,build,settings}
+                      /new (add a company), /components gallery
+src/routes/components/*-samples.ts   sample data for the gallery only
 ```

@@ -14,6 +14,7 @@
 		Card,
 		Checkbox,
 		ChoiceCard,
+		AgentRun,
 		ChatList,
 		CitedAnswer,
 		CompanyForm,
@@ -31,6 +32,7 @@
 		NodeInspector,
 		Select,
 		SourceCard,
+		SourceRow,
 		Splitter,
 		Stat,
 		StepRows,
@@ -50,8 +52,11 @@
 	import { RepoChecks, type RepoResult } from '$lib/repochecks.svelte';
 	import * as builds from './build-samples';
 	import { syntheticGraph } from './graph-samples';
+	import { doneRun, failedRun, runningRun } from './activity-samples';
+	import { doingNow, trailOf } from '$lib/activity';
 	import * as walks from './walk-samples';
 	import * as chatSamples from './chat-samples';
+	import * as sourceSamples from './source-samples';
 	import { carryOver, highlightFor } from '$lib/walk';
 	import { WALK_LIMITS, clampSize } from '$lib/splitter';
 	import {
@@ -293,6 +298,15 @@
 	let srcInvalid = $state<SourceConfig>({ type: 'github', repo: 'platform', include: ['commits'] });
 	let srcDocs = $state<SourceConfig>({ type: 'local_docs', path: 'data/inbox/acme_labs/docs' });
 	let srcJsonl = $state<SourceConfig>({ type: 'canonical_jsonl', path: '' });
+	let srcLinear = $state<SourceConfig>({ type: 'linear', workspace: 'synthetic-co', teams: ['IDN', 'PAY'] });
+	let srcLinearEmpty = $state<SourceConfig>({ type: 'linear', workspace: '', teams: [] });
+	let srcLinearBad = $state<SourceConfig>({ type: 'linear', workspace: 'Synthetic Co', teams: ['IDN', 'PAY-1', '9OPS'] });
+	const linearBadErrors = [
+		{ loc: ['sources', 10, 'workspace'], msg: "String should match pattern '^[a-z0-9-]+$'" },
+		{ loc: ['sources', 10, 'teams', 1], msg: "String should match pattern '^[A-Z][A-Z0-9]{0,6}$'" },
+		{ loc: ['sources', 10, 'teams', 2], msg: "String should match pattern '^[A-Z][A-Z0-9]{0,6}$'" }
+	];
+	let srcLinearPublic = $state<SourceConfig>({ type: 'linear', workspace: 'acme', teams: [] });
 	const previewYaml = [
 		'slug: acme_labs',
 		'name: Acme Labs',
@@ -403,6 +417,11 @@
 
 	// The graph map and inspector, on the synthetic company's real graph view.
 	const mapLayout = layoutMap(syntheticGraph, { ticks: 300 });
+	const mapTerritory = new Map(syntheticGraph.nodes.map((n) => [n.uid, n.territory]));
+	const drawnUid = (uid: string) => mapTerritory.get(uid) ?? null;
+	const runningTrail = trailOf(runningRun, drawnUid);
+	const doneTrail = trailOf(doneRun, drawnUid);
+	const failedTrail = trailOf(failedRun, drawnUid);
 	let mapSelected = $state<string | null>('person:alice');
 	const graphNode = (uid: string) => syntheticGraph.nodes.find((n) => n.uid === uid);
 	const territoryOf = (uid: string) =>
@@ -674,7 +693,8 @@
 			One card per source in the add-company form. GitHub: the repository, what to read, and what
 			GitHub said about it (found, rate limited), a note when no token exists, and an error when
 			GitHub cannot find the repository or when it is private while the data permission is not Own. Folder sources take one
-			path.
+			path. Linear: the workspace and its team keys; an error banner while the data permission is
+			Public, and the API's pattern errors as sentences under their field.
 		</p>
 		<div class="sources">
 			<SourceCard bind:source={srcFound} index={0} dataPermission="public" errors={[]} onremove={noop} checks={checksFound} />
@@ -699,6 +719,47 @@
 				onremove={noop}
 				checks={checksFound}
 			/>
+			<SourceCard bind:source={srcLinear} index={8} dataPermission="synthetic" errors={[]} onremove={noop} checks={checksFound} />
+			<SourceCard bind:source={srcLinearEmpty} index={9} dataPermission="own" errors={[{ loc: ['sources', 9, 'workspace'], msg: "String should match pattern '^[a-z0-9-]+$'" }]} onremove={noop} checks={checksFound} />
+			<SourceCard bind:source={srcLinearBad} index={10} dataPermission="own" errors={linearBadErrors} onremove={noop} checks={checksFound} />
+			<SourceCard bind:source={srcLinearPublic} index={11} dataPermission="public" errors={[]} onremove={noop} checks={checksFound} />
+		</div>
+	</Card>
+
+	<Card title="Source row">
+		<p class="note">
+			One source on the Sources page (direction A, the source ledger), a <code>tbody</code> inside
+			the page's table: synced and open (GitHub), two folders sharing one count (the first one's
+			window changed, and it takes a record's own <code>slack_export</code> label), skipped (folder
+			missing), blocked (no key, so every sync fails), never synced with a long name, and one
+			syncing while another is busy.
+		</p>
+		<div class="ledger-sample">
+			<table>
+				<thead>
+					<tr>
+						<th scope="col">Source</th>
+						<th scope="col">Status</th>
+						<th scope="col">Last sync</th>
+						<th scope="col">Read up to</th>
+						<th scope="col">In the graph</th>
+						<th scope="col"><span class="sr-only">Actions</span></th>
+					</tr>
+				</thead>
+				{#each sourceSamples.sampleSources as source, i (source.key)}
+					<SourceRow
+						{source}
+						credit={sourceSamples.sampleLedger.credits.get(source.key)!}
+						since="2026-04-15"
+						open={i < 2}
+						settingsHref="#source-row"
+						onsync={noop}
+						syncing={i === 0}
+						busy={i === 5}
+						locations={sourceSamples.sampleLocations}
+					/>
+				{/each}
+			</table>
 		</div>
 	</Card>
 
@@ -714,6 +775,10 @@
 			<figure>
 				<CompanyForm bind:draft={formNew} section="company" errors={[]} />
 				<figcaption>Company step, empty</figcaption>
+			</figure>
+			<figure>
+				<CompanyForm bind:draft={formNew} section="sources" errors={[]} />
+				<figcaption>Sources step, Public data: Linear is off, with the reason</figcaption>
 			</figure>
 			<figure>
 				<CompanyForm bind:draft={formErrors} section="company" errors={formErrorList} />
@@ -1136,6 +1201,48 @@
 		</div>
 	</Card>
 
+	<Card title="Agent trail">
+		<p class="note">
+			The Systems page: an agent's run drawn over the territory map. Each step sits on the node it
+			was about, numbered, joined by an ink line; nodes it touched stay bright. While the run is
+			going, an ink ring and a label mark where the agent is now, and its territory is outlined.
+		</p>
+		<div class="map-sample">
+			<TerritoryMap
+				view={syntheticGraph}
+				layout={mapLayout}
+				trail={runningTrail}
+				here="Ask agent · {doingNow(runningRun)}"
+				scrollZoom={false}
+			/>
+		</div>
+		<h3 class="sub">Run finished</h3>
+		<div class="map-sample short">
+			<TerritoryMap view={syntheticGraph} layout={mapLayout} trail={doneTrail} scrollZoom={false} />
+		</div>
+	</Card>
+
+	<Card title="Agent run">
+		<p class="note">
+			The Systems page's rail: one run's steps, numbered as on the map. A ring is the step
+			running now; a dash is a step with nothing on the map.
+		</p>
+		<div class="runs">
+			<div>
+				<h3 class="sub">Working now</h3>
+				<AgentRun run={runningRun} trail={runningTrail} href="#agent-run" />
+			</div>
+			<div>
+				<h3 class="sub">Done</h3>
+				<AgentRun run={doneRun} trail={doneTrail} href="#agent-run" />
+			</div>
+			<div>
+				<h3 class="sub">Failed, no steps</h3>
+				<AgentRun run={failedRun} trail={failedTrail} />
+			</div>
+		</div>
+	</Card>
+
 	<Card title="Node inspector">
 		<p class="note">
 			What the Graph page says about a selected node. Counts come from the links the map draws;
@@ -1205,6 +1312,11 @@
 	.map-sample.short {
 		height: 18rem;
 	}
+	.runs {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+		gap: var(--space-6);
+	}
 	.inspectors {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
@@ -1230,6 +1342,25 @@
 		margin-top: var(--space-2);
 		color: var(--color-text-muted);
 		font-size: var(--text-xs);
+	}
+	.ledger-sample {
+		overflow-x: auto;
+		margin-top: var(--space-4);
+		background: var(--color-surface);
+		border: var(--border-hair) solid var(--color-line);
+		border-radius: var(--radius-md);
+	}
+	.ledger-sample table {
+		width: 100%;
+		min-width: 56rem;
+		border-collapse: collapse;
+	}
+	.ledger-sample thead th {
+		padding: var(--space-2) var(--space-4);
+		text-align: left;
+		font-size: var(--text-xs);
+		font-weight: var(--weight-semibold);
+		color: var(--color-text-muted);
 	}
 	.sources {
 		display: grid;

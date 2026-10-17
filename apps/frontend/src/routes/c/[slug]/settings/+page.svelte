@@ -27,8 +27,8 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 		debounce,
 		errorsIn,
 		firstSectionWithErrors,
-		repoErrors,
 		saveGate,
+		sourceErrors,
 		visibleErrors,
 		type Gate,
 		type Section
@@ -186,7 +186,7 @@ loaded. A switch resets it, and answers that arrive for the company you left are
 	const tabs = $derived(
 		SECTIONS.map((s) => {
 			const shown = form ? errorsIn(visibleErrors(form.draft, errors), s).length : 0;
-			const repo = form && s === 'sources' ? repoErrors(form.draft, (r) => repoChecks.fact(r)).length : 0;
+			const repo = form && s === 'sources' ? sourceErrors(form.draft, (r) => repoChecks.fact(r)).length : 0;
 			return {
 				value: s,
 				label: STEP_NAMES[s],
