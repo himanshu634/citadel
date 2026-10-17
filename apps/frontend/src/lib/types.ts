@@ -60,7 +60,8 @@ export interface WorkItem {
 	/** An ISO date or timestamp; omitted when the source gave none. */
 	date?: string;
 	/** The systems it touched, comma-separated. */
-	system?: string;
+	system?: string;	/** Where it opens (its source's page). */
+	url?: string;
 }
 
 export interface MenuItem {

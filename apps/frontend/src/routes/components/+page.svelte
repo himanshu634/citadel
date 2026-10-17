@@ -32,6 +32,8 @@
 		ModelPicker,
 		NodeChip,
 		NodeInspector,
+		RefLink,
+		RefText,
 		Select,
 		SourceCard,
 		SourceRow,
@@ -60,7 +62,8 @@
 	import * as walks from './walk-samples';
 	import * as chatSamples from './chat-samples';
 	import * as sourceSamples from './source-samples';
-	import { carryOver, highlightFor } from '$lib/walk';
+	import { answerRefs, carryOver, highlightFor } from '$lib/walk';
+	import { refContext, textRuns } from '$lib/links';
 	import { WALK_LIMITS, clampSize } from '$lib/splitter';
 	import {
 		NODE_LABELS,
@@ -138,9 +141,17 @@
 			}
 		]
 	};
+	// References: the walk saw PR #1 and #10 (example.com urls); the repo makes the rest GitHub links.
+	const refRepo = refContext([], ['acme/app']);
+	const refAnswer = {
+		...walks.answer,
+		text: 'Sessions moved to JWT in #1 and the token code left the monolith in #10 [1]. The check lives in `services/auth/token.py:42`; see `docs/auth-design.md` and #23 for what is left. `identity` owns it.'
+	};
+	const refAnswerRefs = answerRefs(walks.done, walks.answer.sources, ['acme/app']);
+
 	const recentWork: WorkItem[] = [
-		{ uid: 'synthetic:issue:14', kind: 'issue', number: 14, title: 'Invoice emails sometimes sent twice', state: 'open', author: 'erin', date: '2026-09-10', system: 'Billing' },
-		{ uid: 'synthetic:pr:10', kind: 'pull_request', number: 10, title: 'refactor(auth): extract token service', state: 'merged', author: 'carol', date: '2026-09-01', system: 'Auth' },
+		{ uid: 'synthetic:issue:14', kind: 'issue', number: 14, title: 'Invoice emails sometimes sent twice', state: 'open', author: 'erin', date: '2026-09-10', system: 'Billing', url: 'https://example.com/synthetic/app/issues/14' },
+		{ uid: 'synthetic:pr:10', kind: 'pull_request', number: 10, title: 'refactor(auth): extract token service', state: 'merged', author: 'carol', date: '2026-09-01', system: 'Auth', url: 'https://example.com/synthetic/app/pull/10' },
 		{ uid: 'synthetic:slack:thread:eng-2026-07-15', kind: 'thread', title: '#eng: should billing own the checkout page?', state: 'open', author: 'bob', date: '2026-07-15' },
 		{ uid: 'synthetic:ticket:7', kind: 'ticket', number: 7, title: 'Ticket with no author, date or system', state: 'done' }
 	];
@@ -537,6 +548,27 @@
 			</div>
 		</Card>
 	</div>
+
+	<Card title="References">
+		<div class="stack">
+			<p>
+				Text with a <RefLink href="https://github.com/acme/app/pull/12">#12</RefLink> in it, a path
+				<RefLink href="https://github.com/acme/app/blob/HEAD/src/auth/token.py#L42" code>src/auth/token.py:42</RefLink>
+				and an icon link beside a row's name:
+				<RefLink icon href="https://github.com/acme/app/commit/a001" label="commit a001" />
+			</p>
+			<p>
+				<RefText
+					runs={textRuns('Bodies link #12, acme/web#3 and src/auth/token.py:42 but not page#3, &#12; or https://example.com/a.py.', refRepo)}
+				/>
+			</p>
+			<WalkAnswer answer={refAnswer} refs={refAnswerRefs} />
+			<p class="note">
+				Answer refs: #1 and #10 open the url the walk saw (example.com here); #23 and the paths open in
+				the company's one GitHub repo; <code>identity</code> is a word, so it stays code.
+			</p>
+		</div>
+	</Card>
 
 	<Card title="Banner">
 		<p class="note">
@@ -1246,7 +1278,7 @@
 		<div class="runs">
 			<div>
 				<h3 class="sub">Working now</h3>
-				<AgentRun run={runningRun} trail={runningTrail} href="#agent-run" />
+				<AgentRun run={runningRun} trail={runningTrail} href="#agent-run" urlOf={(uid) => syntheticGraph.nodes.find((n) => n.uid === uid)?.url ?? null} />
 			</div>
 			<div>
 				<h3 class="sub">Done</h3>

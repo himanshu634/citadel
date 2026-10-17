@@ -18,7 +18,7 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 	import type { Attachment } from 'svelte/attachments';
 	import type { Turn } from '$lib/ask.svelte';
 	import type { Rating, WalkStep } from '$lib/types';
-	import { answerPlainText, carryOver, highlightFor, mergeWalk, progressLine, stepHighlight } from '$lib/walk';
+	import { answerPlainText, answerRefs, carryOver, highlightFor, mergeWalk, progressLine, stepHighlight } from '$lib/walk';
 	import Banner from '../ui/Banner.svelte';
 	import Button from '../ui/Button.svelte';
 	import AnswerRating from './AnswerRating.svelte';
@@ -53,6 +53,8 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 		answeredBy?: string | null;
 		/** This question ran on another model than the one before it. */
 		switched?: { from: string; to: string } | null;
+		/** The company's GitHub repos (`owner/name`): a bare `#12` in the answer opens there. */
+		repos?: string[];
 	};
 
 	let {
@@ -69,7 +71,8 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 		onreplay,
 		onrate,
 		answeredBy = null,
-		switched = null
+		switched = null,
+		repos = []
 	}: Props = $props();
 	const id = $props.id();
 
@@ -131,6 +134,8 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 		return last !== null && last > 1 ? last : null;
 	});
 	const carried = $derived(carryOver(earlier, shown));
+	// Refs in the answer resolve against everything this thread has seen so far.
+	const refs = $derived(turn.answer ? answerRefs([...earlier, ...turn.steps], turn.answer.sources, repos) : undefined);
 
 	let copyTimer: ReturnType<typeof setTimeout> | undefined;
 	async function copy() {
@@ -212,6 +217,7 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 				active={lit}
 				{pinned}
 				reveal={live}
+				{refs}
 				onactive={(c) => (active = c)}
 				onpin={(c) => (pinned = pinned === c ? null : c)}
 			/>

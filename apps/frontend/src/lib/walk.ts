@@ -6,6 +6,7 @@
  * put as new steps arrive, works out what a citation lights up, and turns rows, calls and the
  * answer's Markdown into plain values the components render. Pure: no Svelte, no fetch.
  */
+import { codeRef, codeUrl, labelRuns, refContext, refUrl, textRuns, type RefContext, type TextRun } from './links';
 import { NODE_LABELS, type AskSource, type NodeType, type WalkNode, type WalkRel, type WalkStep } from './types';
 
 const TYPES: Record<string, NodeType> = {
@@ -417,6 +418,45 @@ const REPEATS: Record<string, { key: string; many: string; verb: string }> = {
 	semantic_search: { key: 'text', many: 'searches', verb: 'Searched by meaning' }
 };
 
+/** The input keys that name a node in a step's sentence ("Opened PR #10", "how alice and PR #3 connect"). */
+const NAMED_KEYS = ['uid', 'from_uid', 'to_uid'];
+
+/** The uids a step's input names, in the order its sentence says them. */
+export function namedUids(input: Record<string, unknown> | null | undefined): string[] {
+	return NAMED_KEYS.map((k) => input?.[k]).filter((v): v is string => typeof v === 'string');
+}
+
+/**
+ * A sentence with the nodes it names linked (each once): to `urlOf(uid)`, else to the github.com
+ * page of a GitHub uid. Labels are `shortUid`'s, as the sentence wrote them.
+ */
+export function sentenceRuns(sentence: string, uids: string[], urlOf: (uid: string) => string | null = () => null): TextRun[] {
+	return labelRuns(
+		sentence,
+		[...new Set(uids)].map((uid) => ({ label: shortUid(uid), href: refUrl(uid, urlOf(uid)) }))
+	);
+}
+
+/** Node urls by uid from what steps returned: their walk nodes and every uid'd row (any depth). */
+export function stepUrls(steps: Pick<WalkStep, 'nodes' | 'rows'>[]): Map<string, string> {
+	const out = new Map<string, string>();
+	const visit = (v: unknown) => {
+		if (Array.isArray(v)) return v.forEach(visit);
+		if (!v || typeof v !== 'object') return;
+		const o = v as { uid?: unknown; url?: unknown };
+		if (typeof o.uid === 'string' && typeof o.url === 'string' && !out.has(o.uid)) out.set(o.uid, o.url);
+		for (const x of Object.values(o)) if (x && typeof x === 'object') visit(x);
+	};
+	for (const step of steps) visit([step.nodes ?? [], step.rows ?? []]);
+	return out;
+}
+
+/** A ledger row's sentence with the nodes it names linked to their pages. */
+export function ledgerRuns(item: LedgerItem): TextRun[] {
+	const urls = stepUrls(item.steps);
+	return sentenceRuns(item.sentence, item.steps.flatMap((s) => namedUids(s.input)), (uid) => urls.get(uid) ?? null);
+}
+
 export interface LedgerItem {
 	/** One step, or a run of the same tool folded into one row (`steps.length > 1`). */
 	steps: WalkStep[];
@@ -567,6 +607,8 @@ export function stepCall(step: Pick<WalkStep, 'tool' | 'input'>): string {
 export interface ChainLink {
 	title: string;
 	uid: string;
+	/** Where the node opens, when it has a page. */
+	url?: string;
 	/** The relationship to the next node and which way it points; absent on the last node. */
 	rel?: string;
 	forward?: boolean;
@@ -576,6 +618,8 @@ export interface RowView {
 	chain?: ChainLink[];
 	/** Otherwise one line: the row's name and a few of its numbers. */
 	text?: string;
+	/** Where the row's node opens (its own url, else one made from a GitHub uid). */
+	url?: string;
 	/** The nodes the row names, to mark the citations that used it. */
 	uids: string[];
 }
@@ -608,14 +652,16 @@ export function rowViews(step: Pick<WalkStep, 'tool' | 'rows'>): RowView[] {
 	return (step.rows ?? []).map((raw) => {
 		const row = (raw ?? {}) as Record<string, unknown>;
 		if (step.tool === 'path_between') {
-			const nodes = (row.nodes ?? []) as { uid: string; name?: string | null }[];
+			const nodes = (row.nodes ?? []) as { uid: string; name?: string | null; url?: string | null }[];
 			const rels = (row.rels ?? []) as { type: string; from: string; to: string }[];
 			const chain = nodes.map((n, i): ChainLink => {
 				const next = nodes[i + 1];
 				const rel = next && rels.find((r) => (r.from === n.uid && r.to === next.uid) || (r.from === next.uid && r.to === n.uid));
+				const url = refUrl(n.uid, n.url);
 				return {
 					title: n.name ?? shortUid(n.uid),
 					uid: n.uid,
+					...(url ? { url } : {}),
 					...(rel ? { rel: rel.type, forward: rel.from === n.uid } : {})
 				};
 			});
@@ -631,7 +677,8 @@ export function rowViews(step: Pick<WalkStep, 'tool' | 'rows'>): RowView[] {
 				const n = Number.isInteger(v) ? String(v) : v.toFixed(2);
 				return label ? `${label} ${n}` : n;
 			});
-		return { text: [name || 'row', ...numbers].join(' · '), uids: uidsOf(row) };
+		const url = refUrl(typeof row.uid === 'string' ? row.uid : null, typeof row.url === 'string' ? row.url : null);
+		return { text: [name || 'row', ...numbers].join(' · '), ...(url ? { url } : {}), uids: uidsOf(row) };
 	});
 }
 
@@ -639,7 +686,9 @@ export function rowViews(step: Pick<WalkStep, 'tool' | 'rows'>): RowView[] {
 
 export type Inline =
 	| { kind: 'text' | 'bold' | 'code'; text: string }
-	| { kind: 'cite'; n: number };
+	| { kind: 'cite'; n: number }
+	/** A reference that opens where it lives: `#12`, `owner/name#12` or a file path (`code`). */
+	| { kind: 'link'; text: string; href: string; code: boolean };
 export type Block =
 	| { kind: 'p'; inlines: Inline[] }
 	| { kind: 'ul' | 'ol'; items: Inline[][] };
@@ -648,29 +697,42 @@ export type Block =
 const CITE = String.raw`\[(\d+(?:\s*,\s*\d+)*)\]`;
 const INLINE = new RegExp(`${/\*\*(.+?)\*\*|`([^`]+)`/.source}|${CITE}`, 'g');
 
-export function inlines(text: string): Inline[] {
+/**
+ * One line's inlines. With `refs`, `#12`, `owner/name#12` and paths in the text, and `code` runs
+ * that are a file path, become links where they resolve (`textRuns`, `codeRef` in links.ts).
+ */
+export function inlines(text: string, refs?: RefContext): Inline[] {
 	const out: Inline[] = [];
+	const plain = (t: string) => {
+		if (!refs) return void out.push({ kind: 'text', text: t });
+		for (const run of textRuns(t, refs))
+			out.push(run.href ? { kind: 'link', text: run.text, href: run.href, code: false } : { kind: 'text', text: run.text });
+	};
 	let at = 0;
 	for (const m of text.matchAll(INLINE)) {
-		if (m.index > at) out.push({ kind: 'text', text: text.slice(at, m.index) });
+		if (m.index > at) plain(text.slice(at, m.index));
 		if (m[1] !== undefined) out.push({ kind: 'bold', text: m[1] });
-		else if (m[2] !== undefined) out.push({ kind: 'code', text: m[2] });
-		else for (const n of m[3].split(',')) out.push({ kind: 'cite', n: Number(n.trim()) });
+		else if (m[2] !== undefined) {
+			const ref = refs && codeRef(m[2]);
+			const href = ref && refs ? codeUrl(ref, refs) : null;
+			out.push(href ? { kind: 'link', text: m[2], href, code: true } : { kind: 'code', text: m[2] });
+		} else for (const n of m[3].split(',')) out.push({ kind: 'cite', n: Number(n.trim()) });
 		at = m.index + m[0].length;
 	}
-	if (at < text.length) out.push({ kind: 'text', text: text.slice(at) });
+	if (at < text.length) plain(text.slice(at));
 	return out;
 }
 
 /**
  * The few Markdown forms answers use: paragraphs, - and 1. lists, **bold**, `code` and [n]
- * citations. Everything is text; nothing becomes HTML, so an answer can never inject markup.
+ * citations, and with `refs` the links of `inlines`. Everything is text; nothing becomes HTML, so
+ * an answer can never inject markup (a link's href comes only from links.ts, http(s) only).
  */
-export function answerBlocks(text: string): Block[] {
+export function answerBlocks(text: string, refs?: RefContext): Block[] {
 	const blocks: Block[] = [];
 	let para: string[] = [];
 	const flush = () => {
-		if (para.length) blocks.push({ kind: 'p', inlines: inlines(para.join(' ')) });
+		if (para.length) blocks.push({ kind: 'p', inlines: inlines(para.join(' '), refs) });
 		para = [];
 	};
 	for (const raw of text.split('\n')) {
@@ -682,14 +744,23 @@ export function answerBlocks(text: string): Block[] {
 			flush();
 			const kind = /^\d/.test(item[1]) ? 'ol' : 'ul';
 			const last = blocks.at(-1);
-			if (last && last.kind === kind) last.items.push(inlines(item[2]));
-			else blocks.push({ kind, items: [inlines(item[2])] });
+			if (last && last.kind === kind) last.items.push(inlines(item[2], refs));
+			else blocks.push({ kind, items: [inlines(item[2], refs)] });
 		} else {
-			para.push(line.replace(/^#+\s*/, ''));
+			// A heading's hashes need a space after them: `#12 fixed it` keeps its number.
+			para.push(line.replace(/^#{1,6}\s+/, ''));
 		}
 	}
 	flush();
 	return blocks;
+}
+
+/**
+ * What an answer's `#12` and paths resolve against: the nodes and rows of its steps (and of
+ * earlier questions in the thread), its sources, and the company's GitHub repos.
+ */
+export function answerRefs(steps: WalkStep[], sources: AskSource[] = [], repos: string[] = []): RefContext {
+	return refContext([sources, steps.map((s) => [s.nodes ?? [], s.rows ?? []])], repos);
 }
 
 /** The answer's text without its citation markers (and the space before each), for copying. */

@@ -4,14 +4,17 @@ An answer from the brain on the Ask page: the text with citation chips, then the
 each saying which step of the walk found it. Hovering or focusing a chip or a source makes it the
 active citation (`onactive`), which lights its path in `GraphWalk`; a click keeps it lit until
 clicked again (`onpin`). With no answer it says why (refused, stopped, too many steps).
-Only a small set of Markdown is understood, and never as HTML (`answerBlocks` in walk.ts).
+Only a small set of Markdown is understood, and never as HTML (`answerBlocks` in walk.ts). With
+`refs`, `#12` and file paths in the text open on GitHub (or the item's own site) in a new tab.
 Pass `reveal` for an answer that just arrived live: its blocks fade in one after another.
 A source that is a Keeper claim (label `Claim`) carries an ink "Keeper" mark, so what the Keeper
 holds is told apart from what the sources say; its chip says so to screen readers.
 -->
 <script lang="ts">
+	import type { RefContext } from '$lib/links';
 	import type { AskAnswer } from '$lib/types';
 	import { answerBlocks, sourceKind, type Inline } from '$lib/walk';
+	import RefLink from '../ui/RefLink.svelte';
 
 	type Props = {
 		answer: AskAnswer;
@@ -23,9 +26,11 @@ holds is told apart from what the sources say; its chip says so to screen reader
 		onpin?: (n: number) => void;
 		/** Fade the blocks in, staggered (an answer that just arrived). */
 		reveal?: boolean;
+		/** What `#12` and paths in the text resolve against (`answerRefs`); none: they stay text. */
+		refs?: RefContext;
 	};
 
-	let { answer, active = null, pinned = null, onactive, onpin, reveal = false }: Props = $props();
+	let { answer, active = null, pinned = null, onactive, onpin, reveal = false, refs }: Props = $props();
 	const id = $props.id();
 
 	/** Each block starts this much after the one before, up to REVEAL_MAX blocks in. */
@@ -33,7 +38,7 @@ holds is told apart from what the sources say; its chip says so to screen reader
 	const REVEAL_MAX = 10;
 	const delay = (i: number) => (reveal ? `${Math.min(i, REVEAL_MAX) * REVEAL_STAGGER_MS}ms` : undefined);
 
-	const blocks = $derived(answer.text ? answerBlocks(answer.text) : []);
+	const blocks = $derived(answer.text ? answerBlocks(answer.text, refs) : []);
 	const NO_ANSWER: Record<string, string> = {
 		refusal: 'Claude declined to answer this question.',
 		stopped: 'You stopped this answer. The steps it took are kept above.',
@@ -62,6 +67,8 @@ holds is told apart from what the sources say; its chip says so to screen reader
 			>
 		{:else if part.kind === 'bold'}
 			<strong>{part.text}</strong>
+		{:else if part.kind === 'link'}
+			<RefLink href={part.href} code={part.code}>{part.text}</RefLink>
 		{:else if part.kind === 'code'}
 			<code>{part.text}</code>
 		{:else}

@@ -130,6 +130,7 @@ read again when a Keeper run starts or ends, after Review now and after each dec
 		picked = { id, featuredAt: featured(runs ?? [])?.id ?? null };
 	}
 	const territoryOf = $derived(new Map((graph?.nodes ?? []).map((n) => [n.uid, n.territory])));
+	const urls = $derived(new Map((graph?.nodes ?? []).map((n) => [n.uid, n.url])));
 	const trail = $derived(run && graph ? trailOf(run, (uid) => territoryOf.get(uid) ?? null) : null);
 	const here = $derived(run?.status === 'running' ? hereLabel(run) : null);
 	const others = $derived((runs ?? []).filter((r) => r.id !== run?.id));
@@ -341,7 +342,7 @@ read again when a Keeper run starts or ends, after Review now and after each dec
 					{:else if !runs}
 						<p class="note">Reading the agents' runs</p>
 					{:else if run && trail}
-						<AgentRun {run} {trail} href={chatHref(run.thread_id)} />
+						<AgentRun {run} {trail} href={chatHref(run.thread_id)} urlOf={(uid) => urls.get(uid) ?? null} />
 					{:else}
 						<EmptyState
 							title="No agent has walked this graph yet"

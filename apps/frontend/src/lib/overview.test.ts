@@ -159,16 +159,23 @@ describe('workItemOf', () => {
 			state: 'merged',
 			author: 'alice',
 			date: '2026-02-06T10:00:00Z',
-			system: 'Auth, Web app'
+			system: 'Auth, Web app',
+			url: 'https://example.com/1'
 		});
 	});
 
+	test('a GitHub item with no url still opens on GitHub; an unsafe url is dropped', () => {
+		expect(workItemOf({ ...item, uid: 'github:o/r:issue:4', url: null }).url).toBe('https://github.com/o/r/issues/4');
+		expect(workItemOf({ ...item, url: 'javascript:alert(1)' }).url).toBeUndefined();
+	});
+
 	test('leaves out what the API has not got', () => {
-		const bare = workItemOf({ ...item, number: null, author: null, last_at: null, systems: [] });
+		const bare = workItemOf({ ...item, number: null, url: null, author: null, last_at: null, systems: [] });
 		expect(bare.number).toBeUndefined();
 		expect(bare.author).toBeUndefined();
 		expect(bare.date).toBeUndefined();
 		expect(bare.system).toBeUndefined();
+		expect(bare.url).toBeUndefined();
 	});
 });
 
