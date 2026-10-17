@@ -152,6 +152,48 @@ Rules:
 - No motion: the layout is worked out before the map is shown (in a worker), and panning to a
   selection jumps.
 
+### The Systems page and the agent trail (design direction A)
+
+- The Systems page is the Graph page's map with an agent's run drawn over it. It answers "where is
+  an agent working, and what has it done on the graph" (canvas: Systems · Agent at work).
+- **The agent is ink, never accent or status.** Each step sits on the node it was about (the system
+  it read, the node it opened), else on the first drawn node it returned when all it returned
+  sits in one territory. A step spread over several (listing the systems) gets no point: its nodes
+  are lit and the rail says "across the graph". Its number is an ink
+  disc (`--color-text` with `--color-surface` text). One ink line joins the steps in order.
+  Steps in a row on one node share a disc ("1, 2").
+- While the run is going, the agent's node has an ink ring, its territory an ink outline, and an
+  ink label says who and what ("Ask agent · Reading recent work on Auth"). Nothing moves on its
+  own: the trail grows as steps land, and the map is not laid out again.
+- The nodes a run touched stay bright and the rest dim, as a selection does. A selection still
+  wins over the trail.
+- The rail lists every step, numbered as on the map. A ring is the step running now. A dash marks
+  a step with nothing on the map (the answer check, an MCP call), and it says "not on the map".
+- The page opens on a running run, else the newest. A run that starts takes the map back from a
+  run picked in "Other runs". Runs are read every 1.5 s while one is going, every 6 s otherwise,
+  every 20 s in a hidden tab.
+
+### The Sources page (design direction A, the source ledger)
+
+- **One row per source in the company file** (`SourceRow`), in file order: source and what it
+  reads, a status badge (Synced, Not synced yet, Skipped = warning, Stops the build = danger), last
+  sync with the records it loaded, how far it has read, and what it put in the graph. A chevron
+  opens the row: counts per kind with node-colour bars and their states, and how it is read (what,
+  window, what the next sync reads, the sync key).
+- **Say why, then where to fix it.** A skipped or blocked source puts its reason under its name
+  (icon plus words in the status colour) and links to Settings, which stays the only editor. One
+  banner over the table sums them up; a blocked source (its download fails, so every sync fails)
+  comes before skipped ones.
+- **Counts are per `source` label, never guessed per source.** Two sources of one type share one
+  count and say so. A label a JSONL record chose itself (`slack_export`) counts with the JSONL
+  sources. People, teams and systems made from links get their own sunken row, credited to no
+  source.
+- **Sync** on a row downloads only that source and shows only for sources with a download step
+  (GitHub, Linear); loading always walks every source. A running build disables every Sync.
+- **Leftovers**: sync records whose source left the file are listed under the table; Remove asks
+  first and keeps every node.
+- Below the table's width (56rem) the table scrolls inside its box; the page does not.
+
 ### The Ask page (design direction J + L)
 
 - **One lane per question** (`AskLane`). A strip across the top (`Q1`, the question, how it went),
@@ -187,7 +229,12 @@ Rules:
   there is no splitter.
 - **The sidebar folds** to its icons (`--sidebar-folded`, 56px) from the top bar's fold button or
   the `[` key, and the choice is kept (`citadel-sidebar`). Folded items are named by tooltips and
-  for screen readers. Below 900px the drawer is never folded. The Ask page, like the Graph page,
+  for screen readers. The fold animates: the sidebar column's width eases over `--duration-base`,
+  the labels fade out at once (`--duration-fast`) and fade back in once there is room, folded
+  headings turn into the hairlines between groups, and the fold button's chevron turns over. Open
+  and folded are one markup, so no icon or row moves. A page load never animates: a kept fold is
+  drawn folded. Below 900px the drawer is never folded; it slides in and out with a fading scrim.
+  The Ask page, like the Graph page,
   fills the height under the top bar (a bleed page).
 - **Past chats** (`ChatList`) are a column left of the lanes, with New chat at its top; below
   1400px they sit above the lanes as a short scrolling strip. "Hide past chats" folds the column
@@ -236,14 +283,16 @@ not add another component library.
 | `TurnTimeline` | How one answer came about (on the Ask page, folded under the lane's answer): one summary line ("How it answered · 3 responses · 5 tool calls · 17,340 tokens") on the sunken fill that folds open (its `running` prop opens it while an answer runs; the Ask page leaves it folded). Inside, each Claude response is a hairline-ruled block: model, ms and stop reason in meta, its reasoning folded, its text, then every tool call as a row: status icon (success, danger, spinner), a badge for where it ran (Graph tool, Answer check, Server tool neutral; MCP with the server name in accent), the call in mono and its rows count or status. MCP and server calls fold open to their result. |
 | `EntityRow`, `WorkItemRow`, `ActivityBars` | List and comparison patterns for people, teams, systems and work items. |
 | `CompanyForm` | The fields of a company file for one wizard step or all three (Settings). Edits the draft; the page validates and hands back `errors`, which show under the field their `loc` names. Errors no field shows are listed at the foot of the step, so nothing blocks without a reason. Rules in `src/lib/onboarding.ts`. |
-| `SourceCard` | One source of a company. GitHub: repository, what to read, token note with "Check again", GitHub's answer; an error only when the repository is private while the data is not `own`. Not found, rate limits and outages are warnings with "Check again", never blockers; Continue waits while a check is unanswered. |
+| `SourceRow` | One source on the Sources page (section 6): a `tbody` with the row and its detail, inside the page's table. Status is a badge word; a skipped or blocked source says why under its name and links to Settings; Sync only for sources with a download step; the chevron is a button with `aria-expanded`. |
+| `SourceCard` | One source of a company. GitHub: repository, what to read, token note with "Check again", GitHub's answer; an error only when the repository is private while the data is not `own`. Not found, rate limits and outages are warnings with "Check again", never blockers; Continue waits while a check is unanswered. Linear: workspace (`linear.app/` prefix; a pasted address is cut to its key) and team keys (put in capitals; none means every team), a hint naming `LINEAR_API_KEY`; a danger banner while the data is `public` (the build refuses it), which also shuts Continue and Save. The API's pattern errors show as sentences under their field, the bad team keys named once; an empty workspace shows none (the footer asks for it). Folders: one path. In "Add a source" a kind the data permission rules out (Linear under `public`) stays visible but off, its reason in text beside the row. |
 | `ConfigPreview` | The YAML the server will write, with the top-level keys of the current step marked (bar, tint and a line of words). Shows the last valid text while the form has errors, and says so. |
 | `BuildProgress` | One build: "Step n of N" from the plan, an ink progress meter (the one accent block of the view is the primary button), a table with a cell per source and stage (Prepare, and Reset in a rebuild, above the sources; Embed text once below them), and the plain log. Each cell is icon plus word plus count or message; a skipped source is one merged cell saying why, and a skipped embed says why too. Rules live in `src/lib/buildProgress.ts`. |
 | `AddCompanyDialog` | Add a company from one public GitHub repository: one field (a link or `owner/name`), then what Citadel will make (company, graph, window). Private repos are refused in the field's error; no token, GitHub down and a company that already reads the repo or its owner are banners with their one action. "Advanced setup" opens the step-by-step form at `/new`. Rules in `src/lib/addCompany.svelte.ts`. |
 | `CompanyRail` | One tile per company brain; one click switches company and keeps the section you are on. Monogram 15px at width 118; ink for the current tile (section 3). Tooltip shows the name and `brain_<slug>` in mono. The + opens `AddCompanyDialog`. |
-| `TerritoryMap` | The whole company graph as territories (section 6, The graph map). Canvas plus an HTML label layer; drag pans, scroll zooms (`scrollZoom={false}` where it sits in a scrolling page; pinch and the buttons still zoom), click selects. Colours are read from the tokens and re-read when the theme changes. |
+| `TerritoryMap` | The whole company graph as territories (section 6, The graph map). Canvas plus an HTML label layer; drag pans, scroll zooms (`scrollZoom={false}` where it sits in a scrolling page; pinch and the buttons still zoom), click selects. Colours are read from the tokens and re-read when the theme changes. With `trail` (and `here`) it draws an agent's run over the map (section 6, The Systems page). |
+| `AgentRun` | One agent run in the Systems page's rail: who and when, the question, a status (Working now in ink, Done, Stopped, Failed in danger), "n steps · m not on the map", then every step numbered as on the map, its tool and rows. Links to the chat an Ask run came from. |
 | `NodeInspector` | The selected node: kind, territory and state, its fields (`get_entity`), where its neighbours live, its links by relationship, and its most linked neighbours, which select in turn. Counts come from the links the map draws. "Open on GitHub" only when the node has a url. |
-| `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". The sidebar folds to icons (`--sidebar-folded`) from the top bar's fold button or the `[` key; the choice is kept in `citadel-sidebar`. `/graph` and `/ask` are bleed pages: no width cap, no padding. |
+| `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". The sidebar folds to icons (`--sidebar-folded`) from the top bar's fold button or the `[` key; the choice is kept in `citadel-sidebar`. `/graph`, `/ask` and `/systems` are bleed pages: no width cap, no padding. |
 
 Adding a component:
 
@@ -266,6 +315,10 @@ Adding a component:
   `prefers-reduced-motion`. `--duration-slow` (320ms) is for motion that shows where something
   came from in a walk: a link drawing on from its ends and a node gliding to its new place (with
   its links). The scroll to a new question is the browser's native smooth scroll, not a token.
+- Micro-interactions in the frame are `--duration-fast`: hover fills and colours fade, pressed
+  controls give a little (`scale(0.97)` for sidebar items, `0.94` for rail tiles, `0.92` for the
+  fold button), tooltips fade in a few pixels from their trigger, and the drawer's scrim fades in.
+  The press is dropped under reduced motion.
 
 ## 9. Writing
 

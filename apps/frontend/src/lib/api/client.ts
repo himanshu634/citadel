@@ -6,6 +6,7 @@
  * streams (SSE) are separate and not here.
  */
 import type {
+	Activity,
 	BuildSnapshot,
 	Company,
 	CompanyConfig,
@@ -22,6 +23,7 @@ import type {
 	Overview,
 	Rating,
 	RepoLookup,
+	SourcesOut,
 	Thread,
 	ThreadPage,
 	ThreadSummary,
@@ -83,6 +85,8 @@ export const api = {
 	/** Delete a chat and its checkpoints. 409 while it is answering. */
 	deleteThread: (slug: string, id: string) =>
 		request<void>('DELETE', `${company(slug)}/threads/${encodeURIComponent(id)}`),
+	/** The agents' latest runs with their steps on the graph, newest first (the Systems page). */
+	activity: (slug: string, limit = 6) => request<Activity>('GET', `${company(slug)}/activity?limit=${limit}`),
 	/** The chats that touched or cited one node of the company graph. */
 	refThreads: (slug: string, uid: string) =>
 		request<ThreadSummary[]>('GET', `${company(slug)}/refs/${encodeURIComponent(uid)}/threads`),
@@ -104,14 +108,20 @@ export const api = {
 		(slug: string, cfg: CompanyConfig, opts: { rebuild: true }): Promise<BuildSnapshot>;
 		(slug: string, cfg: CompanyConfig, opts?: { dryRun?: boolean; rebuild?: boolean }): Promise<CompanyDetail>;
 	},
-	/** `full` ignores the sync cursors and loads everything in the window again. */
-	startBuild: (slug: string, full = false) =>
-		request<BuildSnapshot>('POST', `${company(slug)}/builds`, { full }),
+	/** `full` ignores the sync cursors and loads everything in the window again. `sources` limits
+	 * the download to those source keys (loading still walks every source). */
+	startBuild: (slug: string, full = false, sources?: string[]) =>
+		request<BuildSnapshot>('POST', `${company(slug)}/builds`, sources ? { full, sources } : { full }),
 	/** The running build, else the last one. 404 when the company never built. */
 	currentBuild: (slug: string) => request<BuildSnapshot>('GET', `${company(slug)}/builds/current`),
 	stopBuild: (slug: string) => request<BuildSnapshot>('DELETE', `${company(slug)}/builds/current`),
 	/** 503 while FalkorDB is down. */
 	overview: (slug: string) => request<Overview>('GET', `${company(slug)}/overview`),
+	/** Each configured source with its status, the graph's counts per source label, leftovers. */
+	sources: (slug: string) => request<SourcesOut>('GET', `${company(slug)}/sources`),
+	/** Delete a sync record whose source left the config. 409: still configured, or a build runs. */
+	forgetLeftover: (slug: string, key: string) =>
+		request<void>('DELETE', `${company(slug)}/sources/leftovers?key=${encodeURIComponent(key)}`),
 	/** The whole graph for the Graph page; `bots` adds the bot accounts and their links. */
 	graph: (slug: string, bots = false) =>
 		request<GraphView>('GET', `${company(slug)}/graph${bots ? '?bots=true' : ''}`),

@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from brain.adapters.base import SourceUnavailable
+from brain.adapters.base import SourceProblem, SourceUnavailable
 from brain.canonical import CanonicalRecord, Document
 from brain.config import CompanyConfig, PathSource
 
@@ -39,6 +39,13 @@ class LocalDocsAdapter:
 
     def fetch(self, company: CompanyConfig, source: LocalDocsSource, cache_dir: Path) -> None:
         """Nothing to download: the files are already local."""
+
+    def check(
+        self, company: CompanyConfig, source: LocalDocsSource, cache_dir: Path
+    ) -> SourceProblem | None:
+        if company.resolve(source.path).is_dir():
+            return None
+        return SourceProblem(f"Folder {source.path.as_posix()} does not exist")
 
     def records(
         self, company: CompanyConfig, source: LocalDocsSource, cache_dir: Path
