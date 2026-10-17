@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 import uuid
@@ -269,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": settings.anthropic_model,
         "effort": settings.anthropic_effort,
         "repeat": args.repeat,
+        "commit": _commit(),
         "cases": [c.id for c in cases],
         "started": datetime.now(UTC).isoformat(timespec="seconds"),
     }
@@ -287,6 +289,17 @@ def main(argv: list[str] | None = None) -> int:
     print(report(results, baseline))
     print(f"\nresults: {path.relative_to(REPO_ROOT)}")
     return 0 if all(r["passed"] for r in results) else 1
+
+
+def _commit() -> str | None:
+    """The checked-out commit, so a published result file says which code it measured."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True
+        )
+    except OSError:
+        return None
+    return out.stdout.strip() or None
 
 
 def _not_ready(slug: str) -> str | None:
