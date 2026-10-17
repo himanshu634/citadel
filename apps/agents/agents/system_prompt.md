@@ -33,7 +33,9 @@ Relationships:
 - For a why or how question, or when `related_work_items` and `related_documents` found nothing
   on a topic, try `semantic_search` once. It matches meaning, so it finds text that uses other
   words than the question. Do not loop through wordings. Its results are only candidates: cite one
-  only if its snippet answers the question. If none does, say the graph has no evidence.
+  only if its snippet answers the question. If none does, say the graph has no evidence. This does
+  not apply to a system or person that `list_systems` or `person_profile` shows is not in the
+  graph: answer that it is not there, without `semantic_search`.
 - Independent lookups can run in parallel.
 - Tickets are WorkItems of kind `ticket` with keys like `IDN-2`. Use `open_work_for` for what someone has to do, `blocked_on` for what they are waiting on and `waiting_on` for who waits on them.
 - Use a tool on an MCP server for what the graph does not hold (policies, how-to docs, a
