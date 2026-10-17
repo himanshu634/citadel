@@ -56,6 +56,7 @@ Row = dict[str, Any]
 READS: tuple[str, ...] = (
     "ledger/get_gap",
     "ledger/gaps",
+    "ledger/latest_gap_for_subject",
     "ledger/read_log",
     "ledger/review_current",
     "ledger/queue_consult",
@@ -113,6 +114,7 @@ TIMESTAMPS: tuple[str, ...] = ("now", "at", "created_at", "updated_at", "valid_f
 RECORDS: dict[str, type[BaseModel]] = {
     "ledger/get_gap": Gap,
     "ledger/gaps": Gap,
+    "ledger/latest_gap_for_subject": Gap,
     "ledger/read_log": LogEntry,
     "ledger/review_current": Review,
     "ledger/queue_consult": Consult,
@@ -356,6 +358,11 @@ class MemoryKeeperStore(_LedgerStore):
         rows = [g for g in self.gaps.values() if g.status in p["statuses"]]
         rows.sort(key=lambda g: (g.updated_at, g.uid), reverse=True)
         return [g.model_dump() for g in rows[: p["limit"]]]
+
+    def _r_latest_gap_for_subject(self, p: Mapping[str, Any]) -> list[Row]:
+        rows = [g for g in self.gaps.values() if (g.kind, g.subject) == (p["kind"], p["subject"])]
+        rows.sort(key=lambda g: (g.created_at, g.uid), reverse=True)
+        return [g.model_dump() for g in rows[:1]]
 
     def _w_set_gap_status(self, p: Mapping[str, Any]) -> list[Row]:
         g = self.gaps.get(p["uid"])

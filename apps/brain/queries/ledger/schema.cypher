@@ -1,5 +1,5 @@
 // purpose: Indexes for the Keeper's ledger in keeper_<slug>: every write finds its record by
-//          uid; gap and review reads filter on status/state, consults on gap, claims on
+//          uid; gap and review reads filter on status/state (noticing gaps on subject), consults on gap, claims on
 //          subject and follow-ups on claim.
 // params:  none
 // returns: nothing
@@ -8,6 +8,7 @@
 // example: KeeperStore("synthetic").write("ledger/open_gap", "citadel_brain", {...})
 CREATE INDEX FOR (n:Gap) ON (n.uid);
 CREATE INDEX FOR (n:Gap) ON (n.status);
+CREATE INDEX FOR (n:Gap) ON (n.subject);
 CREATE INDEX FOR (n:LogEntry) ON (n.uid);
 CREATE INDEX FOR (n:Review) ON (n.uid);
 CREATE INDEX FOR (n:Review) ON (n.state);

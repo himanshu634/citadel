@@ -159,18 +159,55 @@ def test_brain_unavailable_stops():
 
 
 def test_brain_vanishes_mid_run_returns_gaps_to_open():
-    """The brain goes missing after the gaps were picked: the next job does not start."""
+    """The brain goes missing during the first consult's tool loop: the loop turns the graph
+    error into a tool result (so the policy answers can_ground False), but nothing is written
+    and no further job starts."""
     store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
     gaps = [seed_gap(store, GROUNDED), seed_gap(store, "zzq unanswerable")]
 
     def vanishing(slug, name, **params):
         brain.exists = False
-        return fake_brain(slug, name, **params)
+        raise ResponseError("brain_synthetic: no such graph")
 
     r, _ = run_review(store, brain, graph_run=vanishing)
     assert (r.state, r.stop) == ("stopped", "brain_unavailable")
     assert [gap_status(store, g) for g in gaps] == ["open", "open"]
     assert [store.gaps[g].attempts for g in gaps] == [0, 0]  # no attempt used up
+    assert {c.status for c in store.consults.values()} == {"open"}  # no answer recorded
+    assert "consult_answered" not in actions(store)
+    assert actions(store).count("episode") == 1  # the one run that started, its write refused
+
+
+def test_orphaned_in_review_gaps_are_released_first():
+    """A review killed mid-run leaves gaps in review; the next run sends them back to open,
+    except one whose claim waits for a lead."""
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
+    orphan, waiting = seed_gap(store, GROUNDED), seed_gap(store, "zzq waiting for a lead")
+    for g in (orphan, waiting):
+        store.write("ledger/set_gap_status", KEEPER,
+                    {"uid": g, "from": ["open"], "to": "in_review", "now": NOW})  # fmt: skip
+    seed_claim(store, "pending_approval", gap=waiting)
+    r, events = run_review(store, brain, budget=0)
+    assert r.state == "done"
+    assert (gap_status(store, orphan), gap_status(store, waiting)) == ("open", "in_review")
+    assert store.gaps[orphan].attempts == 0
+    [e] = [e for e in store.log if e.action == "gap_released"]
+    assert e.gap == orphan and actions(store).index("gap_released") == 1  # right after start
+    assert any(ev.step == "release" for ev in events)
+
+
+def test_a_failure_before_the_steps_still_finishes_the_review():
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
+
+    def on_event(e):
+        if e.kind == "start":
+            raise RuntimeError("stream closed")
+
+    r = review(store, SLUG, budget=5, trigger="manual", client_for=offline_client,
+               graph_run=fake_brain, brain=brain, on_event=on_event, now=clock)  # fmt: skip
+    assert r.state == "failed" and "stream closed" in r.stop
+    assert store.read("ledger/review_current", {})[0]["state"] == "failed"
+    assert actions(store)[-1] == "review_failed"
 
 
 def test_falkordb_error_inside_a_job_stops():
@@ -278,6 +315,23 @@ def test_notice_skips_settled_subjects():
     assert [e.gap for e in opened] == new
 
 
+def test_notice_skips_subjects_whose_latest_gap_is_settled():
+    store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
+    subjects = ["system:A", "system:B", "system:C", "system:D", "system:E"]
+    brain.notices["stale_owner"] = _rows(*subjects)
+    first = notice(store, SLUG, cap=10, brain=brain, now=NOW)
+    for uid, to in zip(first, ["resolved", "dismissed", "needs_person", "in_review"], strict=False):
+        store.write("ledger/set_gap_status", KEEPER,
+                    {"uid": uid, "from": ["open"], "to": to, "now": NOW})  # fmt: skip
+    # system:E's gap is still open: it is bumped, not opened again; system:D's is in review
+    assert notice(store, SLUG, cap=10, brain=brain, now=NOW) == []
+    assert len(store.gaps) == 5
+    assert [store.gaps[u].count for u in first] == [1, 1, 1, 2, 2]
+    # an unowned_hot_system gap about system:A is a different kind: not settled by the first
+    brain.notices = {"unowned_hot_system": _rows("system:A")}
+    assert len(notice(store, SLUG, cap=10, brain=brain, now=NOW)) == 1
+
+
 def test_notice_cap():
     store, brain = MemoryKeeperStore(SLUG), FakeBrainFacts()
     brain.notices["stale_owner"] = _rows("system:A", "system:B", "system:C")
@@ -306,6 +360,20 @@ def test_reproject_superseded_by_source():
     assert brain.projected == [] and brain.retired == [(claim, "superseded", NOW)]
     [e] = [e for e in store.log if e.action == "claim_superseded"]
     assert e.claim == claim and e.why == "source: declared owners: team:identity"
+
+
+def test_reproject_logs_before_retiring():
+    class Ordered(FakeBrainFacts):
+        def retire(self, slug, uid, status, valid_to):
+            assert [e.claim for e in store.log if e.action == f"claim_{status}"] == [uid]
+            super().retire(slug, uid, status, valid_to)
+
+    store, brain = MemoryKeeperStore(SLUG), Ordered()
+    superseded = seed_claim(store)
+    stale = seed_claim(store, kind="fact", subject="system:Billing", evidence=("fake:pr:404",))
+    brain.facts["system:Auth"] = SourceFacts(exists=True, declared_owners=["team:identity"])
+    reproject(store, SLUG, brain=brain, now=NOW)
+    assert [u for u, *_ in brain.retired] == [superseded, stale]
 
 
 def test_reproject_projects_and_marks_stale():

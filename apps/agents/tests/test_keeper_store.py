@@ -95,6 +95,26 @@ def test_noticing_gap_dedupes_on_subject(store):
     assert get_gap(store, a["uid"])["trace_ids"] == []  # noticing has no trace
 
 
+def test_latest_gap_for_subject(store):
+    def latest(kind, subject):
+        q = {"kind": kind, "subject": subject}
+        return [g["uid"] for g in store.read("ledger/latest_gap_for_subject", q)]
+
+    [a] = open_gap(store, "billing owner left", kind="stale_owner", subject="system:billing")
+    open_gap(store, "auth owner left", kind="stale_owner", subject="system:auth", now=T2)
+    open_gap(store, "billing is hot", kind="unowned_hot_system", subject="system:billing",
+             now=T3)  # fmt: skip
+    assert latest("stale_owner", "system:billing") == [a["uid"]]
+    set_status(store, a["uid"], ["open"], "resolved")
+    [b] = open_gap(store, "billing owner left again", kind="stale_owner",
+                   subject="system:billing", now=T3)  # fmt: skip
+    assert b["created"] and latest("stale_owner", "system:billing") == [b["uid"]]
+    [g] = store.read("ledger/latest_gap_for_subject",
+                     {"kind": "stale_owner", "subject": "system:billing"})  # fmt: skip
+    assert (g["status"], g["subject"]) == ("open", "system:billing")
+    assert latest("stale_owner", "system:nowhere") == []
+
+
 def test_resolved_gap_is_not_bumped(store):
     [first] = open_gap(store, "who owns billing", "t1")
     assert set_status(store, first["uid"], ["open"], "resolved") == [

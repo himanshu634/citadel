@@ -119,7 +119,7 @@ def apply_decision(
 
     brain = brain or DEFAULT_BRAIN
     slug = store.slug  # type: ignore[attr-defined]  # the ledger stores know their company
-    _brain_present(brain, slug)
+    brain_present(brain, slug)
     subject = sub.subject_uid or ""
     claim = Claim(
         uid=claim_uid(),
@@ -139,7 +139,7 @@ def apply_decision(
     labels = brain.evidence(slug, claim.evidence)
     missing = [u for u in claim.evidence if u not in labels]
     if missing:
-        _brain_present(brain, slug)  # not every uid gone because the whole graph is
+        brain_present(brain, slug)  # not every uid gone because the whole graph is
         why = f"evidence_missing: {', '.join(missing)}"
         _write_claim(store, ctx.now, claim, status="rejected", why=why)
         _reopen(store, ctx.now, gap, why, rejected=True)
@@ -295,7 +295,7 @@ def approve(
     brain = brain or DEFAULT_BRAIN
     now = int(time.time()) if now is None else now
     claim = _pending(store, claim_uid)
-    _brain_present(brain, slug)
+    brain_present(brain, slug)
     clash = conflict(claim.kind, claim.value, brain.source_facts(slug, claim.subject))
     if clash:
         if not _set_claim(store, now, claim.uid, "conflicts_with_source", by=by, why=why,
@@ -344,7 +344,9 @@ def _ctx(now: str | float) -> Ctx:
     return Ctx("keeper", DB_USER, now)  # type: ignore[arg-type]  # iso() takes either
 
 
-def _brain_present(brain: BrainFacts, slug: str) -> None:
+def brain_present(brain: BrainFacts, slug: str) -> None:
+    """Raise `BrainUnavailable` when brain_<slug> does not exist (the review run checks this
+    before every job's writes, too)."""
     if not brain.graph_exists(slug):
         raise BrainUnavailable(slug)
 

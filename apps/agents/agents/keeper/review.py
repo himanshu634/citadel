@@ -25,7 +25,11 @@ The run ends early, between jobs:
 
 Whatever the end, the gaps this run moved to in_review and left undecided (still in_review, no
 claim waiting for a lead) go back to `open` without using an attempt, so the next review can
-pick them. Every step emits a `ReviewEvent`; every end writes the LogEntry `review_<state>`.
+pick them; a run first does the same for gaps an earlier run left behind (a killed process).
+Each is logged `gap_released`. Every job's writes are refused when brain_<slug> is gone: the loop
+turns graph-tool errors into tool results, so such a run would record "nothing found". Every step
+emits a `ReviewEvent`; every end, even an unexpected one, finishes the review and writes the
+LogEntry `review_<state>`.
 """
 
 from __future__ import annotations
@@ -38,7 +42,14 @@ from brain.config import get_settings
 from redis.exceptions import ResponseError
 
 from agents.keeper import decide
-from agents.keeper.decide import DB_USER, BrainFacts, BrainUnavailable, _log, _set_gap
+from agents.keeper.decide import (
+    DB_USER,
+    BrainFacts,
+    BrainUnavailable,
+    _log,
+    _set_gap,
+    brain_present,
+)
 from agents.keeper.gaps import utc_now
 from agents.keeper.model import Gap, Review, review_uid
 from agents.keeper.notice import notice
@@ -100,29 +111,38 @@ def review(
         [current] = store.read("ledger/review_current", {})
         return Review(**current)
 
-    run = _Run(store, slug, brain or decide.DEFAULT_BRAIN, client_for, graph_run, on_event,
-               should_stop, now)  # fmt: skip
-    _log(store, started, "keeper", "review_start", why=f"{uid}: {trigger}, budget {budget}")
-    on_event(ReviewEvent("start", message=f"Review started ({trigger}, budget {budget})."))
-
-    state: Literal["done", "stopped", "failed"]
+    run: _Run | None = None
+    state: Literal["done", "stopped", "failed"] = "failed"
+    stop: str | None = "interrupted"  # an end the handlers below did not see (e.g. Ctrl-C)
+    message = "Review failed: interrupted."
     try:
-        run.steps(budget)
-        state, stop, message = "done", None, "Review done."
-    except _Stop as e:
-        state, stop, message = "stopped", str(e), "Review stopped on request."
-    except (BrainUnavailable, ResponseError) as e:
-        state, stop = "stopped", BRAIN_UNAVAILABLE
-        message = f"Review stopped: the brain is unavailable ({type(e).__name__}: {e})."
-    except Exception as e:  # any other failure ends the run as failed, with its message
-        state, stop = "failed", f"{type(e).__name__}: {e}"[:300]
-        message = f"Review failed: {stop}"
-
-    run.release(f"{uid} {state} before deciding it")
-    ended = now()
-    store.write("ledger/review_finish", DB_USER,
-                {"uid": uid, "state": state, "stop": stop, "now": ended})  # fmt: skip
-    _log(store, ended, "keeper", f"review_{state}", why=f"{uid}: {stop or state}")
+        try:
+            run = _Run(store, slug, brain or decide.DEFAULT_BRAIN, client_for, graph_run,
+                       on_event, should_stop, now)  # fmt: skip
+            _log(store, started, "keeper", "review_start", why=f"{uid}: {trigger}, budget {budget}")
+            on_event(ReviewEvent("start", message=f"Review started ({trigger}, budget {budget})."))
+            run.steps(budget)
+            state, stop, message = "done", None, "Review done."
+        except _Stop as e:
+            state, stop, message = "stopped", str(e), "Review stopped on request."
+        except (BrainUnavailable, ResponseError) as e:
+            state, stop = "stopped", BRAIN_UNAVAILABLE
+            message = f"Review stopped: the brain is unavailable ({type(e).__name__}: {e})."
+        except Exception as e:  # any other failure ends the run as failed, with its message
+            state, stop = "failed", f"{type(e).__name__}: {e}"[:300]
+            message = f"Review failed: {stop}"
+        if run is not None:
+            try:
+                run.release(f"{uid} {state} before deciding it")
+            except Exception as e:  # the ledger refused: still finish the review
+                if state == "done":
+                    state, stop = "failed", f"release: {type(e).__name__}: {e}"[:300]
+                    message = f"Review failed: {stop}"
+    finally:  # whatever happened above, the review does not stay `running`
+        ended = now()
+        store.write("ledger/review_finish", DB_USER,
+                    {"uid": uid, "state": state, "stop": stop, "now": ended})  # fmt: skip
+        _log(store, ended, "keeper", f"review_{state}", why=f"{uid}: {stop or state}")
     on_event(ReviewEvent(state, message=message))
     return Review(uid=uid, slug=slug, trigger=trigger, state=state, budget=budget,
                   started_at=started, ended_at=ended, stop=stop)  # fmt: skip
@@ -144,6 +164,7 @@ class _Run:
         self.brain_error: Exception | None = None  # raised inside a job's write
 
     def steps(self, budget: int) -> None:
+        self.release_orphans()
         if not self.brain.graph_exists(self.slug):
             raise BrainUnavailable(self.slug)
         counts = reproject(self.store, self.slug, brain=self.brain, now=self.now())
@@ -203,15 +224,33 @@ class _Run:
         for subject in job.queue(self.store, self.ctx("pm")):  # read once: each claim at most once
             self.run("pm", "follow_up", subject, gap=subject.data.get("gap"), claim=subject.uid)
 
+    def release_orphans(self) -> None:
+        """Gaps an earlier review left in review with no claim waiting for a lead (a killed
+        process, a failed finish) go back to `open`. Only one review runs at a time, so no
+        other run owns them."""
+        rows = self.store.read("ledger/gaps", {"statuses": ["in_review"], "limit": GAP_LIMIT})
+        n = sum(self.release_gap(g["uid"], "left in review by an earlier review") for g in rows)
+        if n:
+            self.event("release", message=f"Released {n} gap(s) an earlier review left in review.")
+
     def release(self, reason: str) -> None:
         """Gaps this run picked that are still in review with no claim waiting for a lead go
         back to `open` (no attempt used): a consult or decision that never came, or an early
         end."""
         for gap in self.picked:
-            waiting = {"gap": gap, "statuses": ["pending_approval"]}
-            if self.store.read("ledger/claims_for_gap", waiting):
-                continue
-            _set_gap(self.store, self.now(), gap, ["in_review"], "open", reason)
+            self.release_gap(gap, reason)
+
+    def release_gap(self, gap: str, reason: str) -> bool:
+        """in_review -> open, no attempt used, logged `gap_released`; not when a claim of the
+        gap waits for a lead (the gap stays in review until the lead acts)."""
+        waiting = {"gap": gap, "statuses": ["pending_approval"]}
+        if self.store.read("ledger/claims_for_gap", waiting):
+            return False
+        now = self.now()
+        if not _set_gap(self.store, now, gap, ["in_review"], "open", reason):
+            return False
+        _log(self.store, now, "keeper", "gap_released", gap=gap, why=reason)
+        return True
 
     # --- one job ------------------------------------------------------------------------------
 
@@ -241,14 +280,18 @@ class _Run:
         self.event(step, gap=gap, claim=written.get("uid") or claim, message=outcome)
 
     def job(self, role: str, name: str) -> Job:
-        """The role's job, its writes passing the review's brain (keeper.decide) and letting a
-        missing brain or a FalkorDB error through `run_job`, which catches job errors."""
+        """The role's job, its writes refused when brain_<slug> is gone, passing the review's
+        brain (keeper.decide), and letting a missing brain or a FalkorDB error through
+        `run_job`, which catches job errors."""
         job = ROLES[role].job(name)
         base = job.apply
         brain = self.brain
 
         def apply(store: WorkStore, ctx: Ctx, s: Subject, sub: Any) -> list[dict[str, Any]]:
             try:
+                # The loop turns graph-tool errors into tool results, so a brain that vanished
+                # mid-run looks like "nothing found": write nothing from such a run.
+                brain_present(brain, self.slug)
                 if (role, name) == ("keeper", "decide"):
                     return base(store, ctx, s, sub, brain)  # type: ignore[call-arg]
                 return base(store, ctx, s, sub)

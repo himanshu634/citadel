@@ -6,7 +6,9 @@ owner does little of its work (`stale_owner`) or that a busy system has no owner
 settled (docs/superpowers/specs/2026-10-16-keeper-design.md, "Gap lifecycle"):
 
 - it has an accepted `owner` claim, or
-- an `owner` claim about it has an open follow-up (pm is getting its source fixed).
+- an `owner` claim about it has an open follow-up (pm is getting its source fixed), or
+- its latest gap of the same kind was settled (`resolved`, `dismissed` or `needs_person`), so a
+  settled subject does not reopen on every build.
 
 The ledger dedupes noticing gaps on (kind, subject), so a subject already open or in review is
 bumped, not opened again; only new gaps count toward `cap`, so a fresh brain cannot flood the
@@ -26,6 +28,7 @@ from agents.keeper.model import NOTICING_KINDS, gap_uid
 from agents.work.store import WorkStore
 
 SETTLED_BY = "owner"  # the claim kind that settles both noticing kinds
+SETTLED_GAP = ("resolved", "dismissed", "needs_person")  # a latest gap here settles its subject
 FOLLOWUP_LIMIT = 10_000  # open follow-ups read per pass
 
 
@@ -52,7 +55,7 @@ def notice(
         for row in brain.notice(slug, kind, cap):
             if len(new) >= cap:
                 return new
-            if _settled(store, row["subject"], fixing):
+            if _settled(store, kind, row["subject"], fixing):
                 continue
             params = {
                 "uid": gap_uid(),
@@ -70,8 +73,12 @@ def notice(
     return new
 
 
-def _settled(store: WorkStore, subject: str, fixing: set[str]) -> bool:
-    """An accepted owner claim on the subject, or an owner claim whose source is being fixed."""
+def _settled(store: WorkStore, kind: str, subject: str, fixing: set[str]) -> bool:
+    """The subject's latest gap of this kind was settled; or it has an accepted owner claim, or
+    an owner claim whose source is being fixed."""
+    latest = store.read("ledger/latest_gap_for_subject", {"kind": kind, "subject": subject})
+    if latest and latest[0]["status"] in SETTLED_GAP:
+        return True
     claims = store.read(
         "ledger/claims_for_subject",
         {"kind": SETTLED_BY, "subject": subject, "statuses": ["accepted", "conflicts_with_source"]},

@@ -23,11 +23,11 @@ from __future__ import annotations
 from agents.keeper.decide import (
     EARLIER_LIMIT,
     BrainFacts,
-    _brain_present,
     _gap,
     _log,
     _reopen,
     _set_claim,
+    brain_present,
 )
 from agents.keeper.model import Claim
 from agents.keeper.rules import conflict
@@ -38,7 +38,7 @@ STALE_WHY = "projection: its subject or every evidence uid is gone from the brai
 
 def reproject(store: WorkStore, slug: str, *, brain: BrainFacts, now: str) -> dict[str, int]:
     """Re-check and re-project every accepted claim. Returns the counts of each outcome."""
-    _brain_present(brain, slug)
+    brain_present(brain, slug)
     accepted = [
         Claim(**c)
         for c in store.read("ledger/claims", {"statuses": ["accepted"], "limit": EARLIER_LIMIT})
@@ -54,27 +54,27 @@ def reproject(store: WorkStore, slug: str, *, brain: BrainFacts, now: str) -> di
         why = f"source: {clash}"
         if _set_claim(store, now, claim.uid, "superseded", frm=["accepted"], why=why,
                       valid_to=now):  # fmt: skip
-            brain.retire(slug, claim.uid, "superseded", now)
             _log(store, now, "keeper", "claim_superseded", gap=claim.gap, claim=claim.uid,
                  why=why, evidence=[claim.subject])  # fmt: skip
+            brain.retire(slug, claim.uid, "superseded", now)  # after the log, as decide does
             out["superseded_by_source"] += 1
 
     if not keep:
         return out
     missing = set(brain.project(slug, [c.model_dump() for c in keep]))
     if missing:
-        _brain_present(brain, slug)  # not every claim missing because the whole graph is
+        brain_present(brain, slug)  # not every claim missing because the whole graph is
     out["projected"] = len(keep) - len(missing)
     for claim in keep:
         if claim.uid not in missing:
             continue
         if not _set_claim(store, now, claim.uid, "stale", frm=["accepted"], why=STALE_WHY):
             continue
-        brain.retire(slug, claim.uid, "stale", now)
         gap = _gap(store, claim.gap) if claim.gap else None
         if gap is not None:
             _reopen(store, now, gap, STALE_WHY, rejected=False, frm=["in_review", "resolved"])
         _log(store, now, "keeper", "claim_stale", gap=claim.gap, claim=claim.uid, why=STALE_WHY,
              evidence=claim.evidence)  # fmt: skip
+        brain.retire(slug, claim.uid, "stale", now)
         out["stale"] += 1
     return out
