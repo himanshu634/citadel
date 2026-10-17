@@ -166,8 +166,13 @@ def _in_window(dt: datetime | None, since: datetime) -> bool:
     return dt is None or dt >= since
 
 
-def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterator[CanonicalRecord]:
+def normalize(
+    records: Iterable[CanonicalRecord], cfg: CompanyConfig, keep: frozenset[str] = frozenset()
+) -> Iterator[CanonicalRecord]:
     """Apply the company config to a stream of canonical records.
+
+    `keep` holds uids of archived work items: such an item, and every comment or review on it,
+    ignores the window (they were fetched because they are older than it).
 
     Yields the cleaned records, then any Person/Team/System that was referenced but never
     defined, so every relationship has both ends.
@@ -251,16 +256,20 @@ def normalize(records: Iterable[CanonicalRecord], cfg: CompanyConfig) -> Iterato
         elif isinstance(rec, WorkItem):
             own_dates = (rec.created_at, rec.closed_at, rec.merged_at)
             # open tickets stay visible however old they are
-            if rec.is_open_ticket() or any(d is not None and to_utc(d) >= since for d in own_dates):
+            if (
+                rec.uid in keep
+                or rec.is_open_ticket()
+                or any(d is not None and to_utc(d) >= since for d in own_dates)
+            ):
                 yield clean_item(rec)
             elif rec.updated_at is not None and to_utc(rec.updated_at) >= since:
                 maybe_items[rec.uid] = rec  # decided after all comments/reviews are seen
         elif isinstance(rec, Review):
-            if _in_window(rec.changed_at(), since):
+            if rec.work_item_uid in keep or _in_window(rec.changed_at(), since):
                 active_items.add(rec.work_item_uid)
                 yield rec.model_copy(update={"reviewer_login": login(rec.reviewer_login)})
         elif isinstance(rec, Comment):
-            if _in_window(rec.changed_at(), since):
+            if rec.work_item_uid in keep or _in_window(rec.changed_at(), since):
                 active_items.add(rec.work_item_uid)
                 yield rec.model_copy(
                     update={"author_login": login(rec.author_login), "body": scrub_emails(rec.body)}

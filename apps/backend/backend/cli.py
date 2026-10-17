@@ -30,8 +30,8 @@ def reset(slug: str, yes: bool = typer.Option(False, "--yes", help="Confirm dele
     """Delete everything the slug left in the graph store and its history: graphs brain_<slug>,
     agent_<slug> and keeper_<slug> (the Keeper's ledger), data/jobs/<slug>.json and
     data/traces/<slug>.jsonl (the Ask traces).
-    companies/<slug>.yaml and the raw cache in data/raw/ are kept (a refetch is slow). Frees the
-    slug for a new company."""
+    companies/<slug>.yaml and the raw cache in data/raw/ (the archive cache included) are kept (a
+    refetch is slow). Frees the slug for a new company."""
     name = graph_name(slug)
     agent = agent_graph_name(slug)
     keeper = keeper_graph_name(slug)
