@@ -1,0 +1,11 @@
+{"data": {"searchIssues": {"nodes": [
+  {"id": "0b7c2c4e-1111-4a2b-9c3d-000000000012", "identifier": "ENG-12",
+   "title": "Billing retries double-charge customers",
+   "description": "Retries after a timeout charge twice.",
+   "url": "https://linear.app/acme/issue/ENG-12/billing-retries-double-charge-customers",
+   "createdAt": "2023-05-01T10:00:00Z", "team": {"key": "ENG"}},
+  {"id": "0b7c2c4e-1111-4a2b-9c3d-000000000030", "identifier": "OPS-30",
+   "title": "Billing alerts", "description": "Another team's ticket.",
+   "url": "https://linear.app/acme/issue/OPS-30/billing-alerts",
+   "createdAt": "2023-05-03T10:00:00Z", "team": {"key": "OPS"}}
+]}}}

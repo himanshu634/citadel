@@ -77,6 +77,22 @@ class Settings(BaseSettings):
     keeper_build_budget: int = 3  # the review the app starts after a build
     keeper_notice_cap: int = 10  # max new gaps per noticing run
 
+    # The Archivist's limits (per request unless said otherwise): external calls (search +
+    # fetch), items loaded, hops from the request's own item, the inline Ask run's wall clock
+    # (seconds) and its job's step limit, items archived per company per UTC day, requests per
+    # Keeper review, days an answer is remembered, and the shortest quote that grounds a find.
+    archivist_calls_ask: int = 6
+    archivist_calls_keeper: int = 10
+    archivist_items_ask: int = 3
+    archivist_items_keeper: int = 8
+    archivist_depth: int = 2
+    archivist_ask_timeout: int = 45
+    archivist_steps: int = 24
+    archivist_daily_cap: int = 100
+    archivist_per_review: int = 2
+    archivist_memory_days: int = 30
+    archivist_quote_min: int = 20
+
     @field_validator(
         "falkordb_username",
         "falkordb_password",

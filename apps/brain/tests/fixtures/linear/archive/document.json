@@ -1,0 +1,8 @@
+{"data": {"document": {
+  "id": "d1a2b3c4-0000-4000-8000-00000000d0c1", "slugId": "5e1f2a3b4c5d",
+  "title": "Billing retry policy",
+  "url": "https://linear.app/acme/document/billing-retry-policy-5e1f2a3b4c5d",
+  "createdAt": "2023-04-10T10:00:00Z", "updatedAt": "2023-04-12T10:00:00Z",
+  "content": "# Billing retry policy\n\nEvery charge carries an idempotency key kept for 24 hours.",
+  "creator": {"displayName": "carol"}
+}}}

@@ -30,6 +30,7 @@ from brain.canonical import (
     CLOSED_STATUS,
     CanonicalRecord,
     Comment,
+    Document,
     Link,
     Person,
     Team,
@@ -59,6 +60,10 @@ REMOVED_STATE = "Removed from Linear"  # state of a tombstone (see the module do
 
 def issue_uid(id: str) -> str:
     return f"linear:issue:{id}"
+
+
+def doc_uid(id: str) -> str:
+    return f"linear:doc:{id}"
 
 
 def _login(user: dict[str, Any] | None) -> str | None:
@@ -185,6 +190,21 @@ def ticket_records(node: dict[str, Any], known: Callable[[str], bool]) -> Iterat
     for attachment in nodes(node.get("attachments")):
         if attachment.get("url"):
             yield _link("MENTIONS", ticket.uid, url_ref(attachment["url"]))
+
+
+def document_record(node: dict[str, Any]) -> Document:
+    """A Linear document as a Document node. Only archived ones reach the graph: a build does
+    not fetch Linear documents."""
+    return Document(
+        uid=doc_uid(node["id"]),
+        source=SOURCE,
+        url=node.get("url"),
+        path=f"linear/document/{node['id']}",
+        title=node.get("title") or node["id"],
+        body=(node.get("content") or "")[:MAX_BODY],
+        author_login=_login(node.get("creator")),
+        updated_at=node.get("updatedAt") or node.get("createdAt"),
+    )
 
 
 def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRecord]:

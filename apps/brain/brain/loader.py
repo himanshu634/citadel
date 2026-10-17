@@ -479,10 +479,16 @@ def _load_ownership(slug: str, owns: list[Ownership], rep: LoadReport) -> None:
 # --- embeddings -------------------------------------------------------------------------------
 
 
-def chunks_to_embed(slug: str, model: str, limit: int) -> list[dict[str, Any]]:
+def chunks_to_embed(
+    slug: str, model: str, limit: int, sources: list[str] | None = None
+) -> list[dict[str, Any]]:
     """The next `limit` chunks (uid, text, text_hash) not yet embedded from their current text
-    by `model`, by uid. Chunks with no text are never returned."""
-    return db.run(slug, "load/chunks_to_embed", {"model": model, "limit": limit}, read_only=True)
+    by `model`, by uid. Chunks with no text are never returned. `sources` limits them to the
+    chunks of those work items or documents."""
+    params: dict[str, Any] = {"model": model, "limit": limit}
+    if sources is None:
+        return db.run(slug, "load/chunks_to_embed", params, read_only=True)
+    return db.run(slug, "load/chunks_to_embed_from", {**params, "sources": sources}, read_only=True)
 
 
 def set_embeddings(slug: str, rows: list[dict[str, Any]], model: str) -> int:

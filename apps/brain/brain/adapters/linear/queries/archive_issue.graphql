@@ -1,0 +1,17 @@
+# One issue for the Archivist; $id is the uuid or the key ("ENG-12"). The fields match
+# issues.graphql, so transform.ticket_records reads it as is.
+query ArchiveIssue($id: String!) {
+  issue(id: $id) {
+    id identifier number title description url priority dueDate
+    createdAt updatedAt completedAt canceledAt
+    state { name type }
+    team { key name }
+    creator { displayName }
+    assignee { displayName }
+    labels(first: 25) { nodes { name } }
+    relations(first: 25) { nodes { type relatedIssue { id } } }
+    inverseRelations(first: 25) { nodes { type issue { id } } }
+    attachments(first: 25) { nodes { url title } }
+    comments(first: 25) { nodes { id body createdAt user { displayName } } }
+  }
+}

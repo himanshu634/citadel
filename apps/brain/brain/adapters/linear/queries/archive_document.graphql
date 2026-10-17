@@ -1,0 +1,7 @@
+# One document for the Archivist, by id (or slug id). Becomes a Document node.
+query ArchiveDocument($id: String!) {
+  document(id: $id) {
+    id slugId title url createdAt updatedAt content
+    creator { displayName }
+  }
+}

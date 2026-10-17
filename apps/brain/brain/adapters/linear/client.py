@@ -73,8 +73,10 @@ def _seconds_until_reset(resp: httpx.Response) -> float | None:
 
 class LinearClient:
     """`attempts` bounds retries of rate limits and 5xx answers; a quick check can pass
-    attempts=1 and never sleeps. `transport` swaps the HTTP transport (tests). Close it (or use
-    it in a `with`) when done."""
+    attempts=1 and never sleeps. `max_wait` (seconds) caps any wait: a longer one fails the call
+    (or, for a low budget after a success, is skipped) instead (the Archivist's calls, inside an
+    Ask answer). `transport` swaps the HTTP transport (tests). Close it (or use it in a `with`)
+    when done."""
 
     def __init__(
         self,
@@ -83,6 +85,7 @@ class LinearClient:
         timeout: float = 60,
         attempts: int = 5,
         transport: httpx.BaseTransport | None = None,
+        max_wait: float | None = None,
     ) -> None:
         # Linear takes a personal API key as-is; a "Bearer" prefix is only for OAuth tokens.
         self._http = httpx.Client(
@@ -92,6 +95,7 @@ class LinearClient:
         )
         self._log = log
         self._attempts = attempts
+        self._max_wait = max_wait
 
     def close(self) -> None:
         self._http.close()
@@ -119,6 +123,8 @@ class LinearClient:
                 wait = _seconds_until_reset(resp) if rate_limited else None
                 if wait is None:
                     wait = 2**attempt * 5
+                if self._max_wait is not None and wait > self._max_wait:
+                    break  # a capped caller fails now rather than wait for the reset
                 what = "rate limited" if rate_limited else str(resp.status_code)
                 self._log(f"  linear {what}; retrying in {wait:.0f}s")
                 time.sleep(wait)
@@ -139,7 +145,7 @@ class LinearClient:
         if remaining is None or not remaining.isdigit() or int(remaining) >= LOW_REQUESTS:
             return
         wait = _seconds_until_reset(resp)
-        if wait is None:
+        if wait is None or (self._max_wait is not None and wait > self._max_wait):
             return
         self._log(f"  linear rate limit low ({remaining} left); sleeping {wait:.0f}s")
         time.sleep(wait)

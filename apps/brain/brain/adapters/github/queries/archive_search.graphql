@@ -1,0 +1,12 @@
+# The Archivist's search: issues and PRs matching $q, which the backend builds as
+# "repo:<owner>/<name> <terms> created:<<window.since>" (terms without qualifiers). First 10.
+query ArchiveSearch($q: String!) {
+  rateLimit { remaining resetAt cost }
+  search(query: $q, type: ISSUE, first: 10) {
+    nodes {
+      __typename
+      ... on Issue { number title url createdAt body repository { nameWithOwner } }
+      ... on PullRequest { number title url createdAt body repository { nameWithOwner } }
+    }
+  }
+}

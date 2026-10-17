@@ -1,0 +1,30 @@
+{
+  "data": {
+    "issue": {
+      "id": "0b7c2c4e-1111-4a2b-9c3d-000000000012",
+      "identifier": "ENG-12", "number": 12,
+      "title": "Billing retries double-charge customers",
+      "description": "Retries after a timeout charge twice. Blocked by the idempotency key work.",
+      "url": "https://linear.app/acme/issue/ENG-12/billing-retries-double-charge-customers",
+      "priority": 2, "dueDate": null,
+      "createdAt": "2023-05-01T10:00:00Z", "updatedAt": "2023-06-01T10:00:00Z",
+      "completedAt": "2023-06-01T10:00:00Z", "canceledAt": null,
+      "state": {"name": "Done", "type": "completed"},
+      "team": {"key": "ENG", "name": "Engineering"},
+      "creator": {"displayName": "carol"},
+      "assignee": {"displayName": "dave"},
+      "labels": {"nodes": [{"name": "billing"}]},
+      "relations": {"nodes": [
+        {"type": "related", "relatedIssue": {"id": "0b7c2c4e-1111-4a2b-9c3d-000000000099"}}
+      ]},
+      "inverseRelations": {"nodes": [
+        {"type": "blocks", "issue": {"id": "0b7c2c4e-1111-4a2b-9c3d-000000000007"}}
+      ]},
+      "attachments": {"nodes": []},
+      "comments": {"nodes": [
+        {"id": "lc-1", "body": "We keep the idempotency key for 24 hours.",
+         "createdAt": "2023-05-02T10:00:00Z", "user": {"displayName": "dave"}}
+      ]}
+    }
+  }
+}

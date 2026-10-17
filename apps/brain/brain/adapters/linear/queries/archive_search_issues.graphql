@@ -1,0 +1,7 @@
+# The Archivist's issue search: full-text $term, $filter built by the backend (created before the
+# window, the configured teams). First 10; just what a candidate list shows.
+query ArchiveSearchIssues($term: String!, $filter: IssueFilter) {
+  searchIssues(term: $term, filter: $filter, first: 10) {
+    nodes { id identifier title description url createdAt team { key } }
+  }
+}
