@@ -210,6 +210,22 @@ def _people_activity(b: _Builder, params: Row, rows: list[Row]) -> None:
             b.rel(me, b.team(t), "MEMBER_OF")
 
 
+def _collaborators(b: _Builder, params: Row, rows: list[Row]) -> None:
+    for r in rows:
+        pair = [b.person(p.get("login"), p.get("person_uid")) for p in r.get("people") or []]
+        for ex in r.get("examples") or []:
+            pr = b.item(ex)
+            for who in pair:  # one authored it, the other reviewed it; the row doesn't say which
+                b.rel(who, pr, "worked_on", inferred=True)
+
+
+def _issues_by_system(b: _Builder, params: Row, rows: list[Row]) -> None:
+    for r in rows:
+        sys = b.system(r.get("system"), r.get("system_uid"))
+        for ex in r.get("examples") or []:
+            b.rel(b.item(ex), sys, "MENTIONS", inferred=True)
+
+
 _LABEL_BY_PREFIX = {"system": "System", "person": "Person", "team": "Team"}
 
 
@@ -225,9 +241,11 @@ def _keeper_notes(b: _Builder, params: Row, rows: list[Row]) -> None:
 
 
 _BY_TOOL: dict[str, Callable[[_Builder, Row, list[Row]], None]] = {
+    "collaborators": _collaborators,
     "experts_for_system": _experts_for_system,
     "get_entity": _get_entity,
     "impact_of": _impact_of,
+    "issues_by_system": _issues_by_system,
     "keeper_notes": _keeper_notes,
     "list_systems": _list_systems,
     "owners_vs_experts": _owners_vs_experts,

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from brain import db, loader, tools
-from brain.canonical import Document, Link, WorkItem
+from brain.canonical import Document, Link, Person, System, WorkItem
 from brain.embeddings import embed_pending
 from brain.testing import FakeEmbedder, load_company, needs_graph, synthetic_company
 from redis.exceptions import ResponseError
@@ -123,6 +123,73 @@ def test_people_activity_excludes_bots(synthetic_graph):
         "alice",
         "erin",
     ]
+
+
+def test_collaborators_rank_pairs_by_reviews_of_each_other(synthetic_graph):
+    rows = tools.collaborators(synthetic_graph)
+    pairs = [[p.login for p in r.people] for r in rows]
+    # alice+carol and bob+erin each reviewed 3 of the other's PRs; ties go by login
+    assert pairs[:3] == [["alice", "carol"], ["bob", "erin"], ["alice", "dave"]]
+    top = rows[0]
+    assert (top.reviews, top.a_reviewed_b, top.b_reviewed_a) == (3, 1, 2)
+    assert [e.uid for e in top.examples] == ["synthetic:pr:10", "synthetic:pr:2", "synthetic:pr:1"]
+    assert top.people[1].person_uid == "person:carol" and top.shared_threads == 0
+    assert all("ci-bot" not in p for p in pairs)
+
+    erin = tools.collaborators(synthetic_graph, login="Erin")  # that person first
+    assert [[p.login for p in r.people] for r in erin] == [
+        ["erin", "bob"],
+        ["erin", "alice"],
+        ["erin", "carol"],
+    ]
+    assert (erin[0].a_reviewed_b, erin[0].b_reviewed_a) == (2, 1)
+    assert tools.collaborators(synthetic_graph, login="nobody") == []
+
+
+def test_issues_by_system_counts_linked_issues(synthetic_graph):
+    rows = tools.issues_by_system(synthetic_graph)
+    assert [(r.system, r.issues) for r in rows] == [("Web app", 3), ("Billing", 2), ("Auth", 1)]
+    web = rows[0]
+    assert (web.open, web.closed, web.mentioned, web.fixed_in) == (0, 3, 0, 3)
+    assert [e.number for e in web.examples] == [13, 12, 11]
+    assert web.system_uid == "system:Web app"
+    assert tools.issues_by_system(synthetic_graph, state="open") == []
+
+
+def test_issues_by_system_ranks_mentions_and_leaves_out_bot_issues():
+    slug = "test_issue_counts"
+    db.delete_graph(slug)
+    try:
+
+        def issue(n: int, state: str = "open", author: str = "erin", **kw) -> WorkItem:
+            kw.setdefault("kind", "issue")
+            return WorkItem(uid=f"t:issue:{n}", source="t", number=n,
+                            title=f"bug {n}", state=state, author_login=author,
+                            created_at=f"2026-05-0{n}T00:00:00Z", **kw)  # fmt: skip
+
+        def mentions(n: int, system: str) -> Link:
+            return Link(rel="MENTIONS", from_uid=f"t:issue:{n}", from_label="WorkItem",
+                        to_uid=f"system:{system}", to_label="System", source="t")  # fmt: skip
+
+        records = [
+            Person(login="erin"), Person(login="ci-bot", is_bot=True),
+            System(name="Auth"), System(name="Web app"),
+            issue(1), issue(2, "closed"), issue(3), issue(4, author="ci-bot"),
+            # tickets: open or closed by status_category, not by the state's name
+            issue(5, "In Progress", kind="ticket", status_category="in_progress"),
+            issue(6, "Done", kind="ticket", status_category="done"),
+            mentions(1, "Auth"), mentions(2, "Auth"), mentions(5, "Auth"), mentions(6, "Auth"),
+            mentions(3, "Web app"), mentions(4, "Web app"), mentions(1, "Web app"),
+        ]  # fmt: skip
+        loader.load(slug, records)
+        rows = tools.issues_by_system(slug)
+        assert [(r.system, r.mentioned, r.open, r.closed) for r in rows] == [
+            ("Auth", 4, 2, 2),
+            ("Web app", 2, 2, 0),  # issue 4 is the bot's
+        ]
+        assert [r.system for r in tools.issues_by_system(slug, state="closed")] == ["Auth"]
+    finally:
+        db.delete_graph(slug)
 
 
 def test_unknown_tool_and_bad_params(synthetic_graph):

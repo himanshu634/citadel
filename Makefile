@@ -85,7 +85,7 @@ tools: ## List the named query tools and their parameters
 agents: ## List the agent roles, their jobs and read tools
 	$(AGENTS) agents
 
-# Evals default to the synthetic company; SLUG=falkordb runs the live repo's cases.
+# Evals default to the synthetic company: it is the one with golden cases.
 EVAL_SLUG = $(if $(filter file,$(origin SLUG)),synthetic,$(SLUG))
 
 eval: ## Agent evals (calls the API; SLUG defaults to synthetic): CASE=id|tag REPEAT=3 MODEL=.. EFFORT=.. BASELINE=file
