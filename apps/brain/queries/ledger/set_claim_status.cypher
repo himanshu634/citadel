@@ -2,6 +2,7 @@
 //          one of $from, so of two racing approvals (or approve and reject) only one wins.
 //          - accepted: valid_from is set (if not yet), approved_by = $by;
 //          - rejected: approved_by = $by (who decided);
+//          - pending_approval (an accept undone): approved_by and valid_from are cleared;
 //          - $why, when given, replaces why (why the claim has its status now);
 //          - $valid_to, when given, is set (superseded);
 //          - $conflict, when given, is set (conflicts_with_source: what the sources say).
@@ -16,8 +17,10 @@ WHERE c.status IN $from
 SET c.status = $to,
     c.updated_at = $now,
     c.valid_from = CASE WHEN $to = 'accepted' THEN coalesce(c.valid_from, $now)
+                        WHEN $to = 'pending_approval' THEN null
                         ELSE c.valid_from END,
-    c.approved_by = CASE WHEN $to IN ['accepted', 'rejected'] AND $by IS NOT NULL THEN $by
+    c.approved_by = CASE WHEN $to = 'pending_approval' THEN null
+                         WHEN $to IN ['accepted', 'rejected'] AND $by IS NOT NULL THEN $by
                          ELSE c.approved_by END,
     c.why = coalesce($why, c.why),
     c.valid_to = coalesce($valid_to, c.valid_to),

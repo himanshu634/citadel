@@ -367,6 +367,20 @@ def test_claim_status_records_the_conflict(store):
     assert store.read("ledger/get_claim", {"uid": c.uid})[0]["conflict"] == "owners: team:x"
 
 
+def test_back_to_pending_clears_the_approval(store):
+    """An accept undone (the projection failed) waits for a lead again, unapproved."""
+    c = write_claim(store, status="pending_approval")
+    move = {"uid": c.uid, "from": ["pending_approval"], "to": "accepted", "by": "Dana", "now": T2}
+    store.write("ledger/set_claim_status", KEEPER, move)
+    back = {"uid": c.uid, "from": ["accepted"], "to": "pending_approval", "by": "Dana",
+            "why": "projection failed", "now": T3}  # fmt: skip
+    assert store.write("ledger/set_claim_status", KEEPER, back) == [
+        {"uid": c.uid, "status": "pending_approval"}]  # fmt: skip
+    [got] = store.read("ledger/get_claim", {"uid": c.uid})
+    assert (got["status"], got["approved_by"], got["valid_from"], got["why"]) == (
+        "pending_approval", None, None, "projection failed")  # fmt: skip
+
+
 def test_queue_follow_up(store):
     owner = write_claim(store, "owner", "accepted", now=T1)
     conflict = write_claim(store, "fact", "conflicts_with_source", now=T2)

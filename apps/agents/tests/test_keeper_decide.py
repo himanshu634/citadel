@@ -341,17 +341,74 @@ def test_approve_with_the_brain_gone_writes_nothing():
     assert actions(store) == ["claim_queued"]
 
 
-def test_brain_deleted_during_projection_puts_the_claim_back():
-    """The graph goes between the check and the projection: the claim waits again, not stale."""
+class Vanishing(FakeBrainFacts):
+    """brain_<slug> is deleted while the claim is being projected."""
 
-    class Vanishing(FakeBrainFacts):
-        def project(self, slug, claims):
-            self.exists, self.labels = False, {}
-            return super().project(slug, claims)
+    def project(self, slug, claims):
+        self.exists, self.labels = False, {}
+        return super().project(slug, claims)
 
+
+class Broken(FakeBrainFacts):
+    """The projection fails another way (a timeout, a dropped connection)."""
+
+    def project(self, slug, claims):
+        self.project_calls += 1
+        raise RuntimeError("connection reset")
+
+
+def test_brain_deleted_during_auto_accept_goes_stale():
+    """Not back to pending_approval: the queue would skip that gap for good. Stale, gap open."""
     store, brain = MemoryKeeperStore(SLUG), Vanishing()
     g = seed_gap(store)
     with pytest.raises(BrainUnavailable):
         apply_decision(store, CTX, g, claim_sub(g), brain)
-    assert the_claim(store, g)["status"] == "pending_approval"
-    assert gap(store, g.uid).status == "in_review" and store.log == []
+    c = the_claim(store, g)
+    assert (c["status"], c["why"]) == ("stale", "brain unavailable during projection")
+    after = gap(store, g.uid)
+    assert (after.status, after.attempts) == ("open", 0)
+    assert actions(store) == ["claim_stale"]
+    assert store.log[0].actor == "auto"
+
+
+def test_brain_deleted_during_approval_puts_the_claim_back():
+    """A lead's approval that fails waits for the lead again, logged once."""
+    store, brain = MemoryKeeperStore(SLUG), Vanishing(high_impact={"system:Auth"})
+    g = seed_gap(store)
+    apply_decision(store, CTX, g, claim_sub(g), brain)
+    uid = the_claim(store, g)["uid"]
+    with pytest.raises(BrainUnavailable):
+        approve(store, SLUG, uid, "Dana", "Checked.", brain=brain, now=LATER)
+    c = the_claim(store, g)
+    assert (c["status"], c["approved_by"], c["valid_from"]) == ("pending_approval", None, None)
+    assert gap(store, g.uid).status == "in_review"
+    assert actions(store) == ["claim_queued", "claim_approval_failed"]
+    [e] = entries(store, "claim_approval_failed")
+    assert (e.actor, e.claim) == ("Dana", uid) and "brain unavailable" in e.why
+
+
+def test_projection_error_on_auto_accept_goes_stale_and_raises():
+    store, brain = MemoryKeeperStore(SLUG), Broken()
+    g = seed_gap(store)
+    with pytest.raises(RuntimeError, match="connection reset"):
+        apply_decision(store, CTX, g, claim_sub(g), brain)
+    c = the_claim(store, g)
+    assert c["status"] == "stale" and "RuntimeError: connection reset" in c["why"]
+    assert brain.retired == [(c["uid"], "stale", iso(NOW))]  # in case it was half written
+    assert gap(store, g.uid).status == "open"
+    assert actions(store) == ["claim_stale"]
+
+
+def test_projection_error_on_approval_puts_the_claim_back():
+    store, brain = MemoryKeeperStore(SLUG), Broken(high_impact={"system:Auth"})
+    g = seed_gap(store)
+    apply_decision(store, CTX, g, claim_sub(g), brain)
+    uid = the_claim(store, g)["uid"]
+    with pytest.raises(RuntimeError):
+        approve(store, SLUG, uid, "Dana", None, brain=brain, now=LATER)
+    c = the_claim(store, g)
+    assert (c["status"], c["approved_by"], c["valid_from"]) == ("pending_approval", None, None)
+    assert brain.retired == [(uid, "pending_approval", iso(LATER))]
+    assert actions(store) == ["claim_queued", "claim_approval_failed"]
+    approve(store, SLUG, uid, "Dana", None, brain=FakeBrainFacts(), now=LATER)  # retry works
+    assert the_claim(store, g)["status"] == "accepted"

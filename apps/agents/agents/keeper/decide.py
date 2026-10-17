@@ -24,7 +24,8 @@ writes exactly one LogEntry for its outcome (plus one `claim_superseded` per cla
 
     decide:  gap_dismissed | needs_person | claim_rejected | claim_conflicts_with_source
              | claim_queued | claim_written (actor "auto") | claim_stale
-    approve: claim_approved | claim_conflicts_with_source | claim_stale  (actor: the lead)
+    approve: claim_approved | claim_conflicts_with_source | claim_stale
+             | claim_approval_failed (the projection failed)  (actor: the lead)
     reject:  claim_rejected  (actor: the lead)
 """
 
@@ -188,8 +189,10 @@ def accept(
     missing; a stale claim supersedes nothing, so the earlier claim stays.
 
     The guarded move to `accepted` comes first, so a caller that loses a race raises
-    `ClaimNotPending` before writing anything. If brain_<slug> vanished during the projection,
-    the claim goes back to `pending_approval` and `BrainUnavailable` is raised (nothing logged)."""
+    `ClaimNotPending` before writing anything. If the projection fails (brain_<slug> vanished:
+    `BrainUnavailable`, or any other error), the accept is undone (`_undo_accept`) and the error
+    raised: an auto-accept goes `stale` and its gap reopens; a lead's approval goes back to
+    `pending_approval`, logged `claim_approval_failed`."""
     brain = brain or DEFAULT_BRAIN
     now = ctx.now
     slug = slug or store.slug  # type: ignore[attr-defined]
@@ -198,11 +201,14 @@ def accept(
         raise ClaimNotPending(claim.uid)
 
     stored = _claim(store, claim.uid)
-    if brain.project(slug, [stored.model_dump()]):
-        if not brain.graph_exists(slug):
-            back = "brain unavailable during projection; waits again"
-            _set_claim(store, now, claim.uid, "pending_approval", frm=["accepted"], why=back)
-            raise BrainUnavailable(slug)
+    try:
+        missing = brain.project(slug, [stored.model_dump()])
+        if missing and not brain.graph_exists(slug):
+            raise BrainUnavailable(slug)  # not missing: the whole graph is gone
+    except Exception as e:
+        _undo_accept(store, now, stored, by, brain, slug, e)
+        raise
+    if missing:
         why_stale = "projection: its subject or every evidence uid is gone from the brain"
         _set_claim(store, now, claim.uid, "stale", frm=["accepted"], why=why_stale)
         if stored.gap:
@@ -222,15 +228,56 @@ def accept(
             continue
         if _set_claim(store, now, old["uid"], "superseded", frm=["accepted"],
                       why=f"superseded by {claim.uid}", valid_to=now):  # fmt: skip
-            brain.retire(slug, old["uid"], "superseded", iso(now))
             _log(store, now, by, "claim_superseded", gap=old["gap"], claim=old["uid"],
                  why=f"superseded by {claim.uid}", evidence=[claim.uid])  # fmt: skip
+            # Logged first: the ledger is the truth. A failed retire leaves the old node current
+            # in the brain until the next rebuild; re-projection (keeper/project.py) projects only
+            # accepted claims, so it does not repair this, but it does not bring it back either.
+            brain.retire(slug, old["uid"], "superseded", iso(now))
 
     if stored.gap:
         _set_gap(store, now, stored.gap, ["in_review"], "resolved", f"claim {claim.uid}")
     _log(store, now, by, action, gap=stored.gap, claim=claim.uid, why=why or stored.why,
          evidence=stored.evidence)  # fmt: skip
     return _claim(store, claim.uid)
+
+
+def _undo_accept(
+    store: WorkStore,
+    now: str | float,
+    claim: Claim,
+    by: str,
+    brain: BrainFacts,
+    slug: str,
+    error: Exception,
+) -> None:
+    """The projection of a just-accepted claim failed: take the accept back, with one log line.
+
+    - auto (the decide job): `stale`, its gap back to `open` (no attempt used). Not back to
+      pending_approval: no lead was asked, and the decide queue would skip the gap for good.
+    - a lead's approval: back to `pending_approval` (approved_by and valid_from cleared), logged
+      `claim_approval_failed`, so the lead can approve again.
+
+    A failure other than a missing brain may have written the node anyway, so it is retired, best
+    effort (the original error is the one raised)."""
+    if isinstance(error, BrainUnavailable):
+        why = "brain unavailable during projection"
+    else:
+        why = f"projection failed: {type(error).__name__}: {error}"[:300]
+    auto = by == "auto"
+    to = "stale" if auto else "pending_approval"
+    if not _set_claim(store, now, claim.uid, to, frm=["accepted"], why=why):
+        return
+    if not isinstance(error, BrainUnavailable):
+        try:
+            brain.retire(slug, claim.uid, to, iso(now))
+        except Exception:  # the projection's error is the one that matters
+            pass
+    if auto and claim.gap:
+        _set_gap(store, now, claim.gap, ["in_review"], "open", why)
+    action = "claim_stale" if auto else "claim_approval_failed"
+    _log(store, now, by, action, gap=claim.gap, claim=claim.uid, why=why,
+         evidence=claim.evidence)  # fmt: skip
 
 
 def approve(

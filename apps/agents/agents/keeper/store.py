@@ -506,6 +506,8 @@ class MemoryKeeperStore(_LedgerStore):
             c.valid_from = p["now"]
         if to in ("accepted", "rejected") and p["by"] is not None:
             c.approved_by = p["by"]
+        if to == "pending_approval":  # an accept undone: not approved, not valid
+            c.approved_by = c.valid_from = None
         if p["why"] is not None:
             c.why = p["why"]
         if p["valid_to"] is not None:
