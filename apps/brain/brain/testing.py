@@ -155,18 +155,31 @@ def ticket_graph():
 
 
 @pytest.fixture(scope="session")
-def embedded_graph():
+def embedded_graph_built():
     """brain_test_embedded: the synthetic company with every chunk embedded by a FakeEmbedder,
-    which stays the process embedder (so tools embed questions the same way) until teardown,
-    which also deletes the graph."""
+    built once per run; deleted afterwards. The fake is the process embedder only while
+    embedding, so the session default (no embedder) holds for every other test. Tests ask for
+    `embedded_graph`, which also sets the fake for the question side."""
     if not falkordb_up():
         pytest.skip("FalkorDB not reachable (make up)")
     slug = "test_embedded"
     db.delete_graph(slug)
     load_company(synthetic_company(slug))
     embeddings.set_embedder(FakeEmbedder())
-    report = embeddings.embed_pending(slug)
+    try:
+        report = embeddings.embed_pending(slug)
+    finally:
+        embeddings.set_embedder(None)
     assert report.skipped_reason is None and report.embedded > 0, report
     yield slug
-    embeddings.set_embedder(None)
     db.delete_graph(slug)
+
+
+@pytest.fixture
+def embedded_graph(embedded_graph_built):
+    """The embedded synthetic graph, with a FakeEmbedder set for this test only (so tools embed
+    questions the way the chunks were embedded); reset to the settings default afterwards.
+    Request `embeddings_off` after it to run with no embedder at all."""
+    embeddings.set_embedder(FakeEmbedder())
+    yield embedded_graph_built
+    embeddings.set_embedder(None)

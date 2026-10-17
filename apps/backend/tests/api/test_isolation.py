@@ -11,7 +11,7 @@ from backend.api import create_app
 from backend.api.companies import status_of
 from backend.testing import second_company
 from brain import tools
-from brain.testing import needs_graph, synthetic_company
+from brain.testing import FakeEmbedder, needs_graph, synthetic_company
 from fastapi.testclient import TestClient
 
 pytestmark = needs_graph
@@ -94,6 +94,9 @@ def test_every_company_route_answers_only_for_its_company(
     for slug in slugs.values():
         client.post(f"/api/companies/{slug}/builds", json={})
         wait_done(runner, slug)
+    # After the builds, so nothing is embedded: semantic_search embeds its question and finds
+    # no vectors, which is still a 200 answer for this company only.
+    monkeypatch.setattr("brain.embeddings._override", FakeEmbedder())
 
     seen: dict[str, set[str]] = {}
     for key, slug in slugs.items():
