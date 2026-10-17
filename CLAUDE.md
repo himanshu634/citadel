@@ -242,6 +242,10 @@ Reviews what the brain could not answer and updates it (spec: docs/agents.md "Th
   and `api/keeper.py` (`/api/companies/{slug}/keeper/...`: gaps, claims, log, followups,
   approve/reject, review, review/stop, review/events SSE). No Keeper page: reviews show on the
   Systems page's activity trail (`GET .../activity`), its controls in that page's rail.
+- Frontend: Review now in the Systems page's bar; in its rail the claims waiting for a lead
+  (`ClaimApproval`: typed name, optional why) and the log (`KeeperLog`), read again when a Keeper
+  run starts, steps or ends. Words for reasons, log actions, errors in `src/lib/keeper.ts`; Ask
+  marks a cited `Claim` source "Keeper" (`WalkAnswer`).
 
 ### Agent roles (`agents/roles`, `agents/work`, `agents/sim`)
 

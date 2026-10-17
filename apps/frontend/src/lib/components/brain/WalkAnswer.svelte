@@ -6,6 +6,8 @@ active citation (`onactive`), which lights its path in `GraphWalk`; a click keep
 clicked again (`onpin`). With no answer it says why (refused, stopped, too many steps).
 Only a small set of Markdown is understood, and never as HTML (`answerBlocks` in walk.ts).
 Pass `reveal` for an answer that just arrived live: its blocks fade in one after another.
+A source that is a Keeper claim (label `Claim`) carries an ink "Keeper" mark, so what the Keeper
+holds is told apart from what the sources say; its chip says so to screen readers.
 -->
 <script lang="ts">
 	import type { AskAnswer } from '$lib/types';
@@ -40,6 +42,7 @@ Pass `reveal` for an answer that just arrived live: its blocks fade in one after
 	};
 	const why = $derived(NO_ANSWER[answer.stop ?? ''] ?? 'No answer came back. Try asking again.');
 	const sourceTitle = (n: number) => answer.sources[n - 1]?.title ?? answer.sources[n - 1]?.uid ?? '';
+	const isClaim = (n: number) => answer.sources[n - 1]?.label === 'Claim';
 </script>
 
 {#snippet runs(inlines: Inline[])}
@@ -49,7 +52,7 @@ Pass `reveal` for an answer that just arrived live: its blocks fade in one after
 				type="button"
 				class={['cite', { on: active === part.n }]}
 				aria-pressed={pinned === part.n}
-				aria-label="Source {part.n}: {sourceTitle(part.n)}"
+				aria-label="Source {part.n}{isClaim(part.n) ? ', a Keeper claim' : ''}: {sourceTitle(part.n)}"
 				aria-describedby="{id}-src-{part.n}"
 				onmouseenter={() => onactive?.(part.n)}
 				onmouseleave={() => onactive?.(null)}
@@ -96,6 +99,7 @@ Pass `reveal` for an answer that just arrived live: its blocks fade in one after
 				>
 					<span class="n tabular">{n}</span>
 					<div>
+						{#if src.label === 'Claim'}<span class="keeper">Keeper</span>{/if}
 						{#if src.url}
 							<a href={src.url} target="_blank" rel="noreferrer" onfocus={() => onactive?.(n)} onblur={() => onactive?.(null)}
 								>{src.title ?? src.uid}</a
@@ -201,6 +205,19 @@ Pass `reveal` for an answer that just arrived live: its blocks fade in one after
 	}
 	.sources a {
 		text-decoration-color: var(--color-line-strong);
+	}
+	.keeper {
+		display: inline-block;
+		margin-right: var(--space-2);
+		padding: 0 var(--space-1);
+		border: var(--border-hair) solid var(--color-text);
+		border-radius: var(--radius-sm);
+		color: var(--color-text);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-semibold);
+		font-variation-settings: 'wdth' var(--width-label);
+		line-height: 1.4;
+		vertical-align: 0.0625rem;
 	}
 	small {
 		display: block;

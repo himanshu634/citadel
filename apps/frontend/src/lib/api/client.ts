@@ -7,22 +7,30 @@
  */
 import type {
 	Activity,
+	ApprovalIn,
 	BuildSnapshot,
+	Claim,
+	ClaimStatus,
 	Company,
 	CompanyConfig,
 	CompanyDetail,
 	ConfigChange,
 	Feedback,
+	FollowUp,
+	Gap,
+	GapStatus,
 	GithubRepoCheck,
 	GithubTokenCheck,
 	Entity,
 	GraphView,
+	LogEntry,
 	ModelsOut,
 	OnboardRequest,
 	OnboardResult,
 	Overview,
 	Rating,
 	RepoLookup,
+	Review,
 	Thread,
 	ThreadPage,
 	ThreadSummary,
@@ -65,6 +73,13 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 const company = (slug: string) => `/companies/${encodeURIComponent(slug)}`;
+const keeper = (slug: string) => `${company(slug)}/keeper`;
+const query = (params: Record<string, string | number | null | undefined>) => {
+	const q = new URLSearchParams();
+	for (const [k, v] of Object.entries(params)) if (v !== null && v !== undefined) q.set(k, String(v));
+	const text = q.toString();
+	return text ? `?${text}` : '';
+};
 
 export const api = {
 	companies: () => request<Company[]>('GET', '/companies'),
@@ -89,6 +104,30 @@ export const api = {
 	/** The chats that touched or cited one node of the company graph. */
 	refThreads: (slug: string, uid: string) =>
 		request<ThreadSummary[]>('GET', `${company(slug)}/refs/${encodeURIComponent(uid)}/threads`),
+	keeper: {
+		/** The Keeper's gaps, newest first; every status unless one is given. */
+		gaps: (slug: string, status?: GapStatus, limit = 100) =>
+			request<Gap[]>('GET', `${keeper(slug)}/gaps${query({ status, limit })}`),
+		/** Its claims, newest first; `pending_approval` lists the ones waiting for a lead. */
+		claims: (slug: string, status?: ClaimStatus, limit = 100) =>
+			request<Claim[]>('GET', `${keeper(slug)}/claims${query({ status, limit })}`),
+		/** Its log, newest first. */
+		log: (slug: string, limit = 20) => request<LogEntry[]>('GET', `${keeper(slug)}/log${query({ limit })}`),
+		followups: (slug: string) => request<FollowUp[]>('GET', `${keeper(slug)}/followups`),
+		/**
+		 * A lead accepts a pending claim. 404 unknown claim, 409 not pending (decided already),
+		 * 503 the company's brain is missing, 422 a name of 1..80 or a why of 500 at most.
+		 */
+		approve: (slug: string, uid: string, body: ApprovalIn) =>
+			request<Claim>('POST', `${keeper(slug)}/claims/${encodeURIComponent(uid)}/approve`, body),
+		/** A lead rejects a pending claim; its gap goes back to open. Same errors as approve. */
+		reject: (slug: string, uid: string, body: ApprovalIn) =>
+			request<Claim>('POST', `${keeper(slug)}/claims/${encodeURIComponent(uid)}/reject`, body),
+		/** Review now: 202 with the new review, or the one already running. */
+		review: (slug: string) => request<Review>('POST', `${keeper(slug)}/review`),
+		/** Ask the running review to stop at its next job. 404 when none runs. */
+		stop: (slug: string) => request<Review>('POST', `${keeper(slug)}/review/stop`)
+	},
 	company: (slug: string) => request<CompanyDetail>('GET', company(slug)),
 	/** Check a draft on every form change; writes nothing. */
 	validate: (draft: CompanyConfig) => request<ValidateResult>('POST', '/companies/validate', draft),

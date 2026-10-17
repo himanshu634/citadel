@@ -27,7 +27,9 @@ export function nodeType(label: string | null | undefined): NodeType {
  * an outside MCP server returned (uid `mcp:<server>/<tool>`, label `MCP`; not in the walk).
  */
 export function sourceKind(label: string | null | undefined): string {
-	return label === 'MCP' ? 'MCP result' : NODE_LABELS[nodeType(label)];
+	if (label === 'MCP') return 'MCP result';
+	if (label === 'Claim') return 'Keeper claim';
+	return NODE_LABELS[nodeType(label)];
 }
 
 export const relKey = (r: Pick<WalkRel, 'from' | 'to' | 'type'>) => `${r.from}|${r.type}|${r.to}`;
@@ -357,8 +359,31 @@ const SAID: Record<string, (p: Record<string, unknown>) => Said> = {
 	recent_work_items: () => ['Reading the latest work', 'Read the latest work'],
 	people_activity: () => ['Listing people and their activity', 'Listed people and their activity'],
 	graph_stats: () => ['Counting what the graph holds', 'Counted what the graph holds'],
-	submit_answer: () => ['Checking the answer against what was found', 'Checked the answer against what was found']
+	submit_answer: () => ['Checking the answer against what was found', 'Checked the answer against what was found'],
+	// The Keeper review's tools and the submits of its pm, qa and keeper jobs.
+	keeper_notes: (p) => [`Reading the Keeper's notes on ${shortUid(str(p.uid))}`, `Read the Keeper's notes on ${shortUid(str(p.uid))}`],
+	submit_consult: (p) => [
+		'Answering the Keeper',
+		p.can_ground === false
+			? 'Told the Keeper the graph does not support a claim'
+			: `Drafted ${p.kind ? `${article(str(p.kind))} ${str(p.kind)} claim` : 'a claim'} for the Keeper`
+	],
+	submit_keeper_decision: (p) => [
+		'Deciding the gap',
+		p.outcome === 'needs_person'
+			? 'Decided the gap needs a person'
+			: p.outcome === 'dismiss'
+				? 'Dismissed the gap'
+				: 'Decided to write a claim'
+	],
+	submit_follow_up: (p) => [
+		'Opening a follow-up',
+		p.title ? `Opened a follow-up: ${str(p.title)}` : 'Opened a follow-up'
+	]
 };
+
+/** "a" or "an" before a word. */
+const article = (word: string) => (/^[aeiou]/i.test(word) ? 'an' : 'a');
 
 /** What the agent is doing in this step, in plain words; `done` says what it did. */
 export function stepSentence(step: Pick<WalkStep, 'tool' | 'input'>, done = false): string {

@@ -45,6 +45,25 @@ describe('api', () => {
 		]);
 	});
 
+	test('the Keeper routes: filters in the query, decisions as JSON, uids escaped', async () => {
+		const fetchMock = reply(200, []);
+		await api.keeper.claims('acme', 'pending_approval');
+		expect((fetchMock.mock.calls[0] as unknown[])[0]).toBe('/api/companies/acme/keeper/claims?status=pending_approval&limit=100');
+		await api.keeper.gaps('acme');
+		expect((fetchMock.mock.calls[1] as unknown[])[0]).toBe('/api/companies/acme/keeper/gaps?limit=100');
+		await api.keeper.log('acme', 20);
+		expect((fetchMock.mock.calls[2] as unknown[])[0]).toBe('/api/companies/acme/keeper/log?limit=20');
+		await api.keeper.approve('acme', 'claim:ab 1', { by: 'Dana', why: '' });
+		expect(fetchMock.mock.calls[3]).toEqual([
+			'/api/companies/acme/keeper/claims/claim%3Aab%201/approve',
+			expect.objectContaining({ method: 'POST', body: JSON.stringify({ by: 'Dana', why: '' }) })
+		]);
+		await api.keeper.reject('acme', 'claim:1', { by: 'Dana', why: 'no' });
+		expect((fetchMock.mock.calls[4] as unknown[])[0]).toBe('/api/companies/acme/keeper/claims/claim%3A1/reject');
+		await api.keeper.review('acme');
+		expect(fetchMock.mock.calls[5]).toEqual(['/api/companies/acme/keeper/review', expect.objectContaining({ method: 'POST' })]);
+	});
+
 	test('githubRepo escapes the path parts', async () => {
 		const fetchMock = reply(200, { exists: true, private: false });
 		await api.githubRepo('FalkorDB', 'a b');
