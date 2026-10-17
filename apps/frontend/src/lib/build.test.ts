@@ -46,6 +46,39 @@ describe('buildTable', () => {
 		expect(buildTable([]).reset).toBeUndefined();
 	});
 
+	test('embed is one cell for the whole company, after every source', () => {
+		const plan: BuildStage[] = ['prepare', 'fetch', 'records', 'normalize', 'load', 'embed'];
+		const t = buildTable(
+			[
+				ev('load', 'done', 'github:a/b', 90),
+				ev('embed', 'running'),
+				ev('embed', 'running', null, 64),
+				ev('embed', 'done', null, 120)
+			],
+			plan
+		);
+		expect(t.embed).toEqual({ status: 'done', count: 120 });
+		expect(t.rows.map((r) => r.source)).toEqual(['github:a/b']); // not a source row
+		expect(buildTable([ev('prepare', 'running')], plan).embed).toEqual({ status: 'waiting' });
+	});
+
+	test('embed skipped keeps its reason', () => {
+		const t = buildTable([ev('embed', 'skipped', null, undefined, 'Embeddings are off')]);
+		expect(t.embed).toEqual({ status: 'skipped', message: 'Embeddings are off' });
+	});
+
+	test('a build planned before embed existed has no embed cell', () => {
+		expect(buildTable([ev('prepare', 'done')], ['prepare', 'fetch', 'records', 'normalize', 'load']).embed).toBe(
+			undefined
+		);
+	});
+
+	test('a stop during embed lands on the embed cell, not on a source stage', () => {
+		const t = buildTable([ev('embed', 'running', null, 64), ev('embed', 'stopped')]);
+		expect(t.embed).toEqual({ status: 'stopped' });
+		expect(t.closing).toBeUndefined();
+	});
+
 	test('the planned stages decide which stage cells exist', () => {
 		const events = [ev('prepare', 'running')];
 		// A build plans no reset; a rebuild does.

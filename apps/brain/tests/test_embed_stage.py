@@ -12,6 +12,7 @@ import pytest
 from brain import db, loader
 from brain.canonical import Comment, WorkItem
 from brain.embeddings import EmbeddingUnavailable, embed_pending
+from brain.events import BuildStopped
 from brain.testing import FakeEmbedder, load_company, needs_graph, synthetic_company
 
 pytestmark = needs_graph
@@ -96,16 +97,35 @@ def test_no_provider_skips_with_a_reason(fresh_synthetic, embeddings_off):
     assert report.embedded == 0 and "EMBEDDING_PROVIDER" in report.skipped_reason
     assert events[-1].stage == "embed" and events[-1].status == "skipped"
     assert events[-1].message == report.skipped_reason
+    assert events[-1].count is None  # nothing embedded: no "0 embedded" beside the reason
 
 
-def test_events_report_running_then_done_with_the_count(fresh_synthetic):
+def test_events_report_running_then_a_count_per_batch_then_done(fresh_synthetic):
     events = []
-    report = embed_pending(fresh_synthetic, FakeEmbedder(), on_event=events.append)
-    assert [(e.stage, e.status, e.source) for e in events] == [
-        ("embed", "running", None),
-        ("embed", "done", None),
-    ]
-    assert events[-1].count == report.embedded > 0
+    report = embed_pending(fresh_synthetic, FakeEmbedder(), batch=4, on_event=events.append)
+    assert all((e.stage, e.source) == ("embed", None) for e in events)
+    first, *progress, last = events
+    assert (first.status, first.count) == ("running", None)
+    # one running event per written batch, with the chunks embedded so far
+    assert len(progress) > 1 and all(e.status == "running" for e in progress)
+    counts = [e.count for e in progress]
+    assert counts == sorted(set(counts)) and counts[-1] == report.embedded
+    assert (last.status, last.count) == ("done", report.embedded)
+    assert report.embedded > 0
+
+
+def test_a_stop_between_batches_stops_the_stage(fresh_synthetic):
+    """A build job raises BuildStopped from on_event; the stage must not swallow it."""
+    events = []
+
+    def stop_after_first_batch(event):
+        events.append(event)
+        if event.count is not None:
+            raise BuildStopped
+
+    with pytest.raises(BuildStopped):
+        embed_pending(fresh_synthetic, FakeEmbedder(), batch=4, on_event=stop_after_first_batch)
+    assert [(e.status, e.count) for e in events] == [("running", None), ("running", 4)]
 
 
 def test_everything_reembeds_each_chunk_once(fresh_synthetic):

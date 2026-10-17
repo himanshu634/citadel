@@ -3,8 +3,9 @@
  * draws, and a snapshot's stage into "step n of N".
  *
  * Why: the backend sends events (one per stage change, per source); the UI wants one cell per
- * source and stage. Folding is pure, so it is tested here and the same code serves the live stream
- * and a finished build read from disk.
+ * source and stage, plus one cell each for the company-wide stages (reset, prepare, embed).
+ * Folding is pure, so it is tested here and the same code serves the live stream and a finished
+ * build read from disk.
  */
 import type { BuildEvent, BuildStage, BuildStatus, BuildSummary } from './types';
 
@@ -27,6 +28,11 @@ export interface BuildTable {
 	/** Only a rebuild resets the graph first. */
 	reset?: Cell;
 	/**
+	 * The company's embed stage, once after every source (vectors for semantic search). Absent for
+	 * a build planned before the stage existed.
+	 */
+	embed?: Cell;
+	/**
 	 * How the build ended when the failure or stop belongs to no source: the backend closes a job
 	 * that failed or stopped between sources with a source-less event on a source stage.
 	 */
@@ -36,6 +42,9 @@ export interface BuildTable {
 
 const SOURCE_STAGES = ['fetch', 'records', 'normalize', 'load'] as const;
 type SourceStage = (typeof SOURCE_STAGES)[number];
+/** Stages that run once for the whole company: their events carry no source. */
+const COMPANY_STAGES = ['reset', 'prepare', 'embed'] as const;
+type CompanyStage = (typeof COMPANY_STAGES)[number];
 
 function cellOf(event: BuildEvent): Cell {
 	const cell: Cell = { status: event.status };
@@ -46,10 +55,11 @@ function cellOf(event: BuildEvent): Cell {
 
 /**
  * The latest event of each (source, stage) becomes that cell; a cell nothing has reported is
- * `waiting`. `stages` is the plan (`BuildSnapshot.stages`): without a `reset` stage the table has
- * no reset cell, and when the plan has no `fetch` (a rebuild that downloads nothing) the fetch
- * cells nothing reported are `skipped` without a message, because nothing will ever run there. An
- * event always wins over the plan. Without `stages`, nothing is assumed beyond the events.
+ * `waiting`. `stages` is the plan (`BuildSnapshot.stages`): without a `reset` or `embed` stage the
+ * table has no reset or embed cell, and when the plan has no `fetch` (a rebuild that downloads
+ * nothing) the fetch cells nothing reported are `skipped` without a message, because nothing will
+ * ever run there. An event always wins over the plan. Without `stages`, nothing is assumed beyond
+ * the events.
  *
  * A source whose fetch cell nothing reported but which has a later-stage event is `skipped` too:
  * a partial refetch fetches only the changed sources, the others go straight to records.
@@ -59,13 +69,13 @@ function cellOf(event: BuildEvent): Cell {
  * keeps running after the build ended.
  */
 export function buildTable(events: BuildEvent[], stages?: BuildStage[]): BuildTable {
-	const company = new Map<'prepare' | 'reset', Cell>();
+	const company = new Map<CompanyStage, Cell>();
 	const bySource = new Map<string, Partial<Record<SourceStage, Cell>>>();
 	let closing: BuildTable['closing'];
 
 	for (const event of events) {
-		if (event.stage === 'prepare' || event.stage === 'reset') {
-			company.set(event.stage, cellOf(event));
+		if ((COMPANY_STAGES as readonly string[]).includes(event.stage)) {
+			company.set(event.stage as CompanyStage, cellOf(event));
 		} else if (event.source != null && (SOURCE_STAGES as readonly string[]).includes(event.stage)) {
 			const cells = bySource.get(event.source) ?? {};
 			cells[event.stage as SourceStage] = cellOf(event);
@@ -107,6 +117,8 @@ export function buildTable(events: BuildEvent[], stages?: BuildStage[]): BuildTa
 	}
 	const reset = company.get('reset') ?? (stages?.includes('reset') ? waiting() : undefined);
 	if (reset) table.reset = reset;
+	const embed = company.get('embed') ?? (stages?.includes('embed') ? waiting() : undefined);
+	if (embed) table.embed = embed;
 	return table;
 }
 

@@ -10,6 +10,8 @@ Tests swap in a fake with `set_embedder` (`brain.testing.FakeEmbedder`).
 The embed stage (`embed_pending`) runs after ingest. A chunk is embedded again only when its
 text, or the model, changed since: each vector is stored with the text hash and model it was
 made from. A model that cannot run skips the stage with a reason; it never fails the build.
+After each written batch it emits a `running` event with the count so far, so the build page
+shows progress and a build job's stop (raised from `on_event`) can act between batches.
 """
 
 from __future__ import annotations
@@ -179,11 +181,14 @@ def embed_pending(
         if written == 0:
             break  # nothing was stored, so the same batch would come back
         done.update(uids)
+        # Progress, and the point where a build job's stop (raised by on_event) takes effect.
+        emit(BuildEvent(slug, "embed", "running", count=report.embedded))
     emit(BuildEvent(slug, "embed", "done", count=report.embedded))
     return report
 
 
 def _skip(slug: str, report: EmbedReport, reason: str, emit: OnEvent) -> EmbedReport:
     report.skipped_reason = reason
-    emit(BuildEvent(slug, "embed", "skipped", count=report.embedded, message=reason))
+    count = report.embedded or None  # no "0 embedded" beside the reason
+    emit(BuildEvent(slug, "embed", "skipped", count=count, message=reason))
     return report

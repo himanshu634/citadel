@@ -81,7 +81,15 @@ export type DataPermission = 'public' | 'synthetic' | 'own';
 
 export type BuildKind = 'build' | 'rebuild';
 export type BuildState = 'queued' | 'running' | 'done' | 'failed' | 'stopped';
-export type BuildStage = 'reset' | 'prepare' | 'fetch' | 'records' | 'normalize' | 'load' | 'done';
+export type BuildStage =
+	| 'reset'
+	| 'prepare'
+	| 'fetch'
+	| 'records'
+	| 'normalize'
+	| 'load'
+	| 'embed'
+	| 'done';
 export type BuildStatus = 'waiting' | 'running' | 'done' | 'skipped' | 'failed' | 'stopped';
 
 export interface BuildEvent {

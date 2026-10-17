@@ -89,14 +89,17 @@ def test_ingest_emits_stages_in_order(events_company, fake_embedder):
         ("load", "running"),
         ("load", "done"),
         ("embed", "running"),
+        ("embed", "running"),  # the count after the one batch
         ("embed", "done"),
     ]
     assert seen[1].count > 0 and seen[1].source.startswith("canonical_jsonl:")
-    sourced = seen[:-2]
+    sourced = seen[:-3]
     assert all(e.slug == events_company and e.source == seen[0].source for e in sourced)
     assert sourced[-1].count > 0  # rows written for this source
     # the embed stage is the whole company's, after every source
-    assert seen[-1].source is None and seen[-1].count == report.embed.embedded > 0
+    embedded = report.embed.embedded
+    assert all(e.source is None for e in seen[-3:]) and embedded > 0
+    assert [e.count for e in seen[-3:]] == [None, embedded, embedded]
 
 
 @needs_graph

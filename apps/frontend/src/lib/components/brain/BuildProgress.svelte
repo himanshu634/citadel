@@ -1,7 +1,8 @@
 <!--
 @component
 One build of one company: the step it is on, a progress meter, a table with a cell per source and
-stage (Prepare, and Reset in a rebuild, above the sources), and the plain log of every event.
+stage (Prepare, and Reset in a rebuild, above the sources; Embed text, once for the company, below
+them), and the plain log of every event.
 Every cell and the badge pair an icon with a word, so state is never colour alone. It draws only
 the snapshot it is given; the page feeds it live and passes the buttons in `actions`.
 -->
@@ -158,6 +159,12 @@ the snapshot it is given; the page feeds it live and passes the buttons in `acti
 						<td colspan={COLUMNS.length + 1} class="none">Sources appear here as they start.</td>
 					</tr>
 				{/each}
+				{#if table.embed}
+					<tr>
+						<th scope="row"><b>Embed text</b><span class="sub">Vectors for semantic search</span></th>
+						<td colspan={COLUMNS.length}>{@render status(table.embed, 'embed')}</td>
+					</tr>
+				{/if}
 			</tbody>
 		</table>
 	</div>

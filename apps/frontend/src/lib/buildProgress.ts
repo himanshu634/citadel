@@ -138,7 +138,8 @@ const UNITS: Partial<Record<BuildStage, string>> = {
 	fetch: 'items',
 	records: 'read',
 	normalize: 'kept',
-	load: 'written'
+	load: 'written',
+	embed: 'embedded'
 };
 const number = new Intl.NumberFormat('en-US');
 
@@ -155,8 +156,10 @@ const finished = (cell: Cell) => cell.status === 'done' || cell.status === 'skip
 
 function rawPercent(events: BuildEvent[], stages: BuildStage[]): number {
 	const table: BuildTable = buildTable(events, stages);
-	let total = table.reset ? 2 : 1; // prepare, and reset in a rebuild
-	let done = Number(finished(table.prepare)) + Number(table.reset ? finished(table.reset) : 0);
+	// prepare, reset in a rebuild, and embed after the sources
+	const company = [table.prepare, table.reset, table.embed].filter((cell) => cell != null);
+	let total = company.length;
+	let done = company.filter(finished).length;
 	// Sources not met yet are unknown: until the first one shows, assume one.
 	total += Math.max(table.rows.length, 1) * SOURCE_STAGES.length;
 	for (const row of table.rows) {

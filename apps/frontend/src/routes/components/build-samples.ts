@@ -1,13 +1,13 @@
 /**
- * Builds for the /components gallery: running, queued, done, failed, stopped, a rebuild, and a
- * build with a skipped source. Event times are fixed local times so the log reads the same on
+ * Builds for the /components gallery: running, queued, done, failed, stopped, a rebuild, a
+ * build with a skipped source, and the embed stage running and skipped. Event times are fixed local times so the log reads the same on
  * every visit.
  */
 import type { BuildEvent, BuildSnapshot, BuildStage, BuildState, BuildStatus } from '$lib/types';
 
 const GITHUB = 'github:acme-labs/platform';
 const DOCS = 'local_docs:data/inbox/acme_labs/docs';
-const BUILD: BuildStage[] = ['prepare', 'fetch', 'records', 'normalize', 'load'];
+const BUILD: BuildStage[] = ['prepare', 'fetch', 'records', 'normalize', 'load', 'embed'];
 const REBUILD: BuildStage[] = ['reset', ...BUILD];
 
 let tick = 0;
@@ -76,11 +76,37 @@ export const skippedSource = snapshot('running', [
 	ev('records', 'skipped', DOCS, undefined, 'Folder not found. Put files there and choose Sync now.')
 ]);
 
-export const done = snapshot('done', [
+const loaded = () => [
 	...fetched(),
 	ev('records', 'done', GITHUB, 2310),
 	ev('normalize', 'done', GITHUB, 2290),
-	ev('load', 'done', GITHUB, 6844),
+	ev('load', 'done', GITHUB, 6844)
+];
+
+export const done = snapshot('done', [
+	...loaded(),
+	ev('embed', 'running'),
+	ev('embed', 'done', null, 1872),
+	ev('done', 'done')
+]);
+
+/** Every source loaded; the text is being embedded, one batch at a time. */
+export const embedding = snapshot('running', [
+	...loaded(),
+	ev('embed', 'running'),
+	ev('embed', 'running', null, 640)
+]);
+
+/** Embeddings are off: the build finishes, and the embed cell says why it was skipped. */
+export const embedSkipped = snapshot('done', [
+	...loaded(),
+	ev(
+		'embed',
+		'skipped',
+		null,
+		undefined,
+		'Embeddings are off (EMBEDDING_PROVIDER=none), so semantic search finds nothing. Set EMBEDDING_PROVIDER=fastembed and run make embed.'
+	),
 	ev('done', 'done')
 ]);
 
