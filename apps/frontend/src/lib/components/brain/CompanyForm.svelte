@@ -23,6 +23,7 @@ Settings should mount a new form when it loads another company.
 	import {
 		SECTIONS,
 		SOURCE_KINDS,
+		addSourceBlocked,
 		aliasRowsToRecord,
 		blankSource,
 		errorsIn,
@@ -85,6 +86,11 @@ Settings should mount a new form when it loads another company.
 	function removeSource(index: number) {
 		draft.sources.splice(index, 1);
 	}
+	// A kind the data permission rules out stays in the row, off, with its reason beside it.
+	const uid = $props.id();
+	const addKinds = $derived(
+		SOURCE_KINDS.map((kind) => ({ ...kind, blocked: addSourceBlocked(kind.type, draft.data_permission) }))
+	);
 
 	// --- Systems and people ----------------------------------------------------------------------
 	const FALLBACKS = [
@@ -213,12 +219,22 @@ Settings should mount a new form when it loads another company.
 			<div class="add">
 				<span class="label" id="add-source">Add a source</span>
 				<div class="buttons" role="group" aria-labelledby="add-source">
-					{#each SOURCE_KINDS as kind (kind.type)}
-						<Button size="sm" onclick={() => addSource(kind.type)}>
+					{#each addKinds as kind (kind.type)}
+						<Button
+							size="sm"
+							disabled={kind.blocked !== null}
+							aria-describedby={kind.blocked ? `${uid}-${kind.type}-why` : undefined}
+							onclick={() => addSource(kind.type)}
+						>
 							<Plus aria-hidden="true" />{kind.title}
 						</Button>
 					{/each}
 				</div>
+				{#each addKinds as kind (kind.type)}
+					{#if kind.blocked}
+						<p class="hint why" id="{uid}-{kind.type}-why">{kind.blocked}</p>
+					{/if}
+				{/each}
 			</div>
 			{@render looseErrors('sources')}
 		</section>
@@ -420,6 +436,9 @@ Settings should mount a new form when it loads another company.
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: var(--space-3);
+	}
+	.why {
+		margin-top: var(--space-2);
 	}
 	.hint,
 	.none {

@@ -3,29 +3,38 @@
 One source of a company, edited in place. GitHub: the repository (with a fixed `github.com/` in
 front), the six things to read, a note when no GitHub token exists, what GitHub said about the
 repository, and "Check again". "Not found", a rate limit and an outage are warnings; only a private
-repository while the data permission is not Own is an error (the build refuses it). Documents
-folder and JSONL records: one path, relative to the Citadel folder. Errors for this card (`loc`
+repository while the data permission is not Own is an error (the build refuses it). Linear: the
+workspace's URL key (a pasted linear.app address is cut down to it) and the team keys (typed keys
+turn to capitals; none means every team), a note that the key is read from `LINEAR_API_KEY`, and an
+error banner while the data permission is Public (the build refuses it). Documents folder and
+JSONL records: one path, relative to the Citadel folder. Errors for this card (`loc`
 starting `['sources', index]`) show under the field they name; any other error of the card is
 listed at its foot.
 -->
 <script lang="ts">
-	import { FileJson, Folder, GitBranch, Trash2 } from '@lucide/svelte';
+	import { FileJson, Folder, GitBranch, ListTodo, Trash2 } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import Banner from '../ui/Banner.svelte';
 	import Button from '../ui/Button.svelte';
 	import Checkbox from '../ui/Checkbox.svelte';
 	import Input from '../ui/Input.svelte';
+	import TagInput from '../ui/TagInput.svelte';
 	import {
 		GITHUB_PARTS,
 		SOURCE_KINDS,
 		debounce,
 		MISSING_REPO_MESSAGE,
 		friendly,
+		linearErrorFor,
 		messageAt,
 		normalizeRepo,
+		normalizeTeams,
+		normalizeWorkspace,
 		parseRepo,
 		repoErrorFor,
-		unmatched
+		teamsMessage,
+		unmatched,
+		workspaceMessage
 	} from '$lib/onboarding';
 	import { repoChecks, type RepoChecks } from '$lib/repochecks.svelte';
 	import type { FieldError, SourceConfig } from '$lib/types';
@@ -50,9 +59,12 @@ listed at its foot.
 	}: Props = $props();
 
 	const title = $derived(SOURCE_KINDS.find((k) => k.type === source.type)?.title ?? source.type);
-	const Icon = $derived(
-		source.type === 'github' ? GitBranch : source.type === 'local_docs' ? Folder : FileJson
-	);
+	const ICONS: Record<string, typeof FileJson> = {
+		github: GitBranch,
+		local_docs: Folder,
+		linear: ListTodo
+	};
+	const Icon = $derived(ICONS[source.type] ?? FileJson);
 	const at = (field: string) => ['sources', index, field];
 
 	// --- GitHub ----------------------------------------------------------------------------------
@@ -87,11 +99,16 @@ listed at its foot.
 		if (parseRepo(repo)) await checks.check(repo, true);
 	}
 
+	// --- Linear ----------------------------------------------------------------------------------
+	const workspace = $derived(typeof source.workspace === 'string' ? source.workspace : '');
+	const teams = $derived(Array.isArray(source.teams) ? (source.teams as string[]) : []);
+	const permissionError = $derived(source.type === 'linear' ? linearErrorFor(dataPermission) : undefined);
+
 	// --- The other fields' errors that no input of the card shows ----------------------------------
 	const rest = $derived(
 		unmatched(
 			errors.filter((e) => e.loc[0] === 'sources' && e.loc[1] === index),
-			[at('repo'), at('path'), at('include')]
+			[at('repo'), at('path'), at('include'), at('workspace'), at('teams')]
 		)
 	);
 </script>
@@ -166,6 +183,31 @@ listed at its foot.
 		{:else if result && ['missing', 'rate_limited', 'unreachable'].includes(result.kind)}
 			<div><Button size="sm" onclick={checkAgain}>Check again</Button></div>
 		{/if}
+	{:else if source.type === 'linear'}
+		{#if permissionError}
+			<Banner tone="danger" title="Not allowed with Public data">{permissionError}</Banner>
+		{/if}
+		<div class="two">
+			<Input
+				label="Workspace"
+				prefix="linear.app/"
+				placeholder="acme"
+				mono
+				autocomplete="off"
+				spellcheck="false"
+				bind:value={() => workspace, (v) => (source.workspace = normalizeWorkspace(v))}
+				hint="The part of your Linear address after linear.app/. Citadel reads it with LINEAR_API_KEY from .env."
+				error={workspaceMessage(errors, index, workspace)}
+			/>
+			<TagInput
+				label="Teams"
+				mono
+				placeholder="ENG"
+				bind:values={() => teams, (v) => (source.teams = normalizeTeams(v))}
+				hint="Team keys, like ENG in ENG-123. Leave empty to read every team the key can see."
+				error={teamsMessage(errors, index, teams)}
+			/>
+		</div>
 	{:else}
 		<Input
 			label={source.type === 'local_docs' ? 'Folder' : 'Folder with the JSONL files'}
@@ -223,6 +265,17 @@ listed at its foot.
 	.head :global(.btn svg) {
 		width: 1rem;
 		height: 1rem;
+	}
+	.two {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: var(--space-4);
+		align-items: start;
+	}
+	@media (max-width: 52rem) {
+		.two {
+			grid-template-columns: minmax(0, 1fr);
+		}
 	}
 	.field {
 		display: flex;

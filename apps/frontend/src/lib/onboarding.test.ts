@@ -17,6 +17,18 @@ import {
 	repoErrorFor,
 	repoErrors,
 	PRIVATE_REPO_MESSAGE,
+	LINEAR_ADD_REASON,
+	LINEAR_PERMISSION_MESSAGE,
+	SOURCE_KINDS,
+	WORKSPACE_MESSAGE,
+	addSourceBlocked,
+	linearErrorFor,
+	normalizeTeams,
+	normalizeWorkspace,
+	requiredField,
+	sourceErrors,
+	teamsMessage,
+	workspaceMessage,
 	continueGate,
 	saveGate,
 	visibleErrors,
@@ -479,5 +491,111 @@ describe('gates', () => {
 	test('Save waits for validation', () => {
 		expect(saveGate(gate({ validating: true }))).toEqual({ blocked: true, reason: 'Checking' });
 		expect(saveGate(gate())).toEqual({ blocked: false, reason: null });
+	});
+});
+
+describe('Linear sources', () => {
+	const linear = (over: Record<string, unknown> = {}) => ({
+		type: 'linear',
+		workspace: 'acme',
+		teams: ['ENG'],
+		...over
+	});
+	const workspacePattern = "String should match pattern '^[a-z0-9-]+$'";
+	const teamPattern = "String should match pattern '^[A-Z][A-Z0-9]{0,6}$'";
+
+	test('Linear is offered last, and a new one starts with no workspace and every team', () => {
+		expect(SOURCE_KINDS.at(-1)).toEqual({ type: 'linear', title: 'Linear workspace' });
+		expect(blankSource('linear')).toEqual({ type: 'linear', workspace: '', teams: [] });
+	});
+
+	test('a Linear source can be added only for own or synthetic data', () => {
+		expect(addSourceBlocked('linear', 'public')).toBe(LINEAR_ADD_REASON);
+		expect(addSourceBlocked('linear', 'own')).toBeNull();
+		expect(addSourceBlocked('linear', 'synthetic')).toBeNull();
+		expect(addSourceBlocked('github', 'public')).toBeNull();
+		expect(linearErrorFor('public')).toBe(LINEAR_PERMISSION_MESSAGE);
+		expect(linearErrorFor('own')).toBeUndefined();
+	});
+
+	test('the workspace is required, the teams are not', () => {
+		expect(requiredField('github')).toBe('repo');
+		expect(requiredField('linear')).toBe('workspace');
+		expect(requiredField('local_docs')).toBe('path');
+		const with_ = (source: Record<string, unknown>) =>
+			incompleteReason(draft({ data_permission: 'own', sources: [source as never] }), 'sources');
+		expect(with_(linear({ teams: [] }))).toBeNull();
+		expect(with_(linear({ workspace: ' ' }))).toBe(
+			'Fill in every source, or remove the ones you do not need.'
+		);
+	});
+
+	test('a pasted Linear address becomes the workspace key; typing is left alone', () => {
+		expect(normalizeWorkspace('https://linear.app/Acme/team/ENG/active')).toBe('acme');
+		expect(normalizeWorkspace('linear.app/synthetic-co')).toBe('synthetic-co');
+		expect(normalizeWorkspace('linear.app/acme?x=1')).toBe('acme');
+		expect(normalizeWorkspace('Acme')).toBe('Acme');
+		expect(normalizeWorkspace('')).toBe('');
+	});
+
+	test('team keys are trimmed, put in capitals and kept once', () => {
+		expect(normalizeTeams([' eng', 'ENG', 'pay', '', 'Pay '])).toEqual(['ENG', 'PAY']);
+	});
+
+	test('cleanDraft trims the workspace and normalises the teams', () => {
+		const out = cleanDraft(draft({ sources: [linear({ workspace: ' acme ', teams: ['eng', 'ENG'] })] }));
+		expect(out.sources[0]).toEqual({ type: 'linear', workspace: 'acme', teams: ['ENG'] });
+	});
+
+	test("the API's workspace error shows as a sentence, and not while the field is empty", () => {
+		const errors = [err(['sources', 1, 'workspace'], workspacePattern)];
+		expect(workspaceMessage(errors, 1, 'Acme')).toBe(WORKSPACE_MESSAGE);
+		expect(workspaceMessage(errors, 1, '')).toBeUndefined();
+		expect(workspaceMessage(errors, 0, 'Acme')).toBeUndefined();
+		expect(workspaceMessage([err(['sources', 1, 'workspace'], 'Field required')], 1, 'x')).toBe(
+			'Field required'
+		);
+	});
+
+	test("the API's team errors name the bad keys once, plus any other error of the list", () => {
+		const teams = ['IDN', 'ENG-1', '1AB'];
+		const errors = [
+			err(['sources', 0, 'teams', 1], teamPattern),
+			err(['sources', 0, 'teams', 2], teamPattern),
+			err(['sources', 2, 'teams', 0], teamPattern)
+		];
+		expect(teamsMessage(errors, 0, teams)).toBe(
+			'ENG-1, 1AB: team keys are a capital letter, then up to six capitals or digits, like ENG.'
+		);
+		expect(teamsMessage([], 0, teams)).toBeUndefined();
+		expect(teamsMessage([err(['sources', 0, 'teams'], 'Input should be a valid list')], 0, [])).toBe(
+			'Input should be a valid list'
+		);
+	});
+
+	test('a Linear source under Public data is an error on its type, and shuts the gates', () => {
+		const pub = draft({ sources: [{ type: 'canonical_jsonl', path: 'x' }, linear()] });
+		expect(sourceErrors(pub, () => undefined)).toEqual([
+			{ loc: ['sources', 1, 'type'], msg: LINEAR_PERMISSION_MESSAGE }
+		]);
+		expect(sourceErrors({ ...pub, data_permission: 'synthetic' }, () => undefined)).toEqual([]);
+		const g: Gate = {
+			draft: pub,
+			errors: [],
+			validating: false,
+			answered: true,
+			unreachable: false,
+			fact: () => undefined,
+			repoPending: () => false
+		};
+		expect(continueGate(g, 'sources')).toEqual({
+			blocked: true,
+			reason: 'Fix the fields marked above to continue.'
+		});
+		expect(saveGate(g).blocked).toBe(true);
+		expect(saveGate({ ...g, draft: { ...pub, data_permission: 'own' } })).toEqual({
+			blocked: false,
+			reason: null
+		});
 	});
 });
