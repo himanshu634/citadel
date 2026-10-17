@@ -362,6 +362,12 @@ const SAID: Record<string, (p: Record<string, unknown>) => Said> = {
 	people_activity: () => ['Listing people and their activity', 'Listed people and their activity'],
 	graph_stats: () => ['Counting what the graph holds', 'Counted what the graph holds'],
 	submit_answer: () => ['Checking the answer against what was found', 'Checked the answer against what was found'],
+	// Ask interviewing the person about the brain's gaps.
+	open_gaps: () => ['Reading what the brain could not answer', 'Read what the brain could not answer'],
+	record_testimony: (p) => [
+		`Filing what you said about ${shortUid(str(p.subject_uid))}`,
+		`Filed what you said about ${shortUid(str(p.subject_uid))} for a lead to approve`
+	],
 	// The Keeper review's tools and the submits of its pm, qa and keeper jobs.
 	keeper_notes: (p) => [`Reading the Keeper's notes on ${shortUid(str(p.uid))}`, `Read the Keeper's notes on ${shortUid(str(p.uid))}`],
 	submit_consult: (p) => [

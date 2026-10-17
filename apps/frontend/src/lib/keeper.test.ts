@@ -47,6 +47,7 @@ describe('critical reasons', () => {
 		expect(reasonWords('replaces_claim')).toBe('it replaces an earlier Keeper update');
 		expect(reasonWords('high_impact_system')).toBe('it touches a high-impact system');
 		expect(reasonWords('no_source_evidence')).toBe('no commit, PR, ticket or doc is behind it');
+		expect(reasonWords('from_person')).toBe('a person told it in Ask');
 		expect(reasonWords('something_new')).toBe('something new');
 	});
 	it('joins them into one line', () => {
@@ -66,6 +67,7 @@ describe('who', () => {
 		expect(whoName('Dana Lee')).toBe('Dana Lee');
 		expect(whoName('agent:pm')).toBe('pm');
 		expect(whoName('agent:keeper')).toBe('Keeper');
+		expect(whoName('ask')).toBe('Ask');
 	});
 });
 

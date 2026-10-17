@@ -9,6 +9,7 @@ import pytest
 from agents.evals import cases, run
 from agents.evals.cases import Case, Expect, Gold, GoldResolver
 from agents.evals.graders import grade
+from agents.keeper import interview
 from agents.testing import FakeClient, reply, submit, tool_use
 from agents.traces import step_summary
 from brain import tools
@@ -30,7 +31,7 @@ def test_case_files_name_real_tools_and_row_fields(slug):
         for turn in case.turns:
             e = turn.expect
             for name in [*e.tools_any, *e.tools_all, *e.tools_none]:
-                assert name in tools.TOOLS, f"{case.id}: unknown tool {name}"
+                assert name in tools.TOOLS or name in interview.TOOLS, f"{case.id}: unknown {name}"
             for ref in _refs(e):
                 if isinstance(ref, Gold):
                     tool = tools.TOOLS.get(ref.tool)

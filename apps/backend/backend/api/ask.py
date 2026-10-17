@@ -39,7 +39,7 @@ from agents.ask import Answer, answer_out, run_events
 from agents.history import ChatStore, GraphChatStore, Recorder
 from agents.keeper import gaps
 from agents.keeper.store import KeeperStore
-from agents.toolset import Toolset, graph_toolset
+from agents.toolset import Toolset, ask_toolset
 from agents.traces import Trace, TraceStore, new_trace
 from agents.work.store import WorkStore
 from brain import db
@@ -78,7 +78,7 @@ class Asker:
     """What a run needs, on app.state so tests can hand in a scripted Claude and fake tools."""
 
     client: Callable[[], Any] = llm.client
-    toolset: Callable[[], Toolset] = graph_toolset
+    toolset: Callable[[], Toolset] = ask_toolset
     checkpointer: Callable[[str], Any] = checkpoint.checkpointer
     graph_exists: Callable[[str], bool] = db.graph_exists
     traces: Callable[[str], TraceStore] = TraceStore

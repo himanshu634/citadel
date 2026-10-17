@@ -12,7 +12,8 @@ import type { ActivityRun, ClaimKind, ClaimStatus, FieldError, LogEntry, Review 
 const REASONS: Record<string, string> = {
 	replaces_claim: 'it replaces an earlier Keeper update',
 	high_impact_system: 'it touches a high-impact system',
-	no_source_evidence: 'no commit, PR, ticket or doc is behind it'
+	no_source_evidence: 'no commit, PR, ticket or doc is behind it',
+	from_person: 'a person told it in Ask'
 };
 
 const words = (code: string) => code.replaceAll('_', ' ');
@@ -42,10 +43,11 @@ export const CLAIM_KINDS: Record<ClaimKind, string> = {
 
 /**
  * Who wrote a log line: the Keeper for itself and its auto-accepts, a role for its agent
- * (`agent:pm` -> pm), else the name as logged.
+ * (`agent:pm` -> pm), Ask for a reply a person gave there, else the name as logged.
  */
 export function whoName(actor: string): string {
 	const who = actor.startsWith('agent:') ? actor.slice('agent:'.length) : actor;
+	if (who === 'ask') return 'Ask';
 	return who === 'auto' || who === 'keeper' ? 'Keeper' : who;
 }
 

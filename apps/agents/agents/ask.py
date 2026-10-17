@@ -25,7 +25,7 @@ from agents import llm
 from agents.graph import build_graph
 from agents.loop import SUBMIT, result_block
 from agents.mcp import Connector
-from agents.toolset import Toolset, graph_toolset
+from agents.toolset import Toolset, ask_toolset
 
 _KEPT_STOPS = ("refusal", "max_tokens", "step_limit", "stopped")
 RECURSION_LIMIT = 40  # graph steps per question (each tool round trip is two)
@@ -160,7 +160,7 @@ def _run(slug, question, thread_id, client, toolset, checkpointer, stop, model) 
     thread_id = thread_id or uuid.uuid4().hex[:12]
     cfg = load_company(slug)
     mcp = Connector.from_config(cfg.mcp_servers)  # the company's MCP servers, if any
-    graph = build_graph(client or llm.client(), toolset or graph_toolset(), checkpointer, mcp)
+    graph = build_graph(client or llm.client(), toolset or ask_toolset(), checkpointer, mcp)
     company = cfg.name
     first = {
         "role": "user",

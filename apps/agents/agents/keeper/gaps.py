@@ -6,6 +6,7 @@ Both open a gap, or bump the open one for the same question (the ledger dedupes 
 normalised text, per kind), and cite the turn's trace:
 
     note_trace(store, trace, now)          # failed_question, when text is None or sources == 0
+                                           # (not an answered interview turn: it read open_gaps)
     note_feedback(store, trace, "down", now)  # thumbs_down
 
 Best effort: a gap is a side record of an answer, so every failure is caught, written to stderr
@@ -23,6 +24,7 @@ from agents.traces import Rating, Trace
 from agents.work.store import WorkStore
 
 WRITER = "citadel_brain"  # the database user the Ask path writes as
+INTERVIEW_TOOL = "open_gaps"  # a turn that ran it asked the person, it did not answer
 
 
 def utc_now() -> str:
@@ -32,8 +34,10 @@ def utc_now() -> str:
 
 def note_trace(store: WorkStore, trace: Trace, now: str) -> str | None:
     """Open or bump a `failed_question` gap when the turn had no answer or cited no source.
-    Returns the gap uid, or None when the turn was fine (or the write failed)."""
-    if trace.text is not None and trace.sources > 0:
+    Returns the gap uid, or None when the turn was fine (or the write failed). An answered turn
+    that read `open_gaps` was Ask interviewing the person (`keeper/interview.py`): with no gap
+    to ask about it cites nothing, and is not a question the brain failed."""
+    if trace.text is not None and (trace.sources > 0 or INTERVIEW_TOOL in trace.tools):
         return None
     return _open(store, "failed_question", trace, now)
 
