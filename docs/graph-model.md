@@ -112,7 +112,7 @@ overwrite any edit to a loader-owned node, and the sources stay the record of wh
   (`keeper/project_claim`), after every accept and after every build, so a rebuild (which deletes
   `brain_<slug>`) gets them back. A claim whose subject or every evidence uid is gone is not
   projected: it goes `stale` in the ledger and its gap reopens.
-- **Retiring.** A claim that is superseded, goes stale or is rejected later keeps its node with
+- **Retiring.** A claim that is superseded or goes stale keeps its node with
   the new `status` and a `valid_to` (`keeper/retire_claim`); nothing is deleted. `keeper_notes`
   and `get_entity` show only current claims (`status = 'accepted'`, no `valid_to`).
 - **Reading.** Ask uses claims only for what the sources don't say, cites their uids and says that

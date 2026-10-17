@@ -1,4 +1,4 @@
-// purpose: Take a projected claim out of use (superseded, stale, rejected) without deleting it:
+// purpose: Take a projected claim out of use (superseded or stale) without deleting it:
 //          keeper_notes reads only accepted claims with no valid_to.
 // params:  $uid, $status (the claim's new status), $valid_to (ISO-8601 UTC)
 // returns: uid. No row: no projected claim has this uid.
