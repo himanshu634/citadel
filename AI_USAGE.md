@@ -1,13 +1,17 @@
 # AI usage
 
-An AI coding assistant (Claude Code) was used to build this project. Parts it helped with:
+I used Claude Code to write the code: the Python packages, the Cypher queries, the tests, the
+Svelte app and most of the docs. The design is mine. I decided the architecture and the rules
+the agents follow, and I picked every screen from mockups before it was built. I reviewed and
+merged every change.
 
-- Project skeleton: uv workspace, Docker Compose, config models, CLI.
-- FalkorDB connection layer and schema (index) setup, checked against the running engine.
-- Ingestion: canonical models, normalize, loader and load queries, the synthetic company, the
-  GitHub adapter (GraphQL fetch, git partial clone, transform) and their tests.
-- Named query tools (`queries/tools/*.cypher`, `brain/tools.py`), the `brain query` CLI and the
-  graph tests; the README and the docs in `docs/` (canonical-format.md is generated from the
-  pydantic models).
-- Frontend: design directions, the design system (tokens, components, `design-system.md`) and the
-  dashboard layout in `apps/frontend`.
+## How I used it
+
+- **Building.** I describe a part and the rules it must follow. Claude writes the code and its
+  tests on a branch, and I review it before it is merged.
+- **Trade-offs.** When a choice has more than one reasonable answer, I ask Claude to lay out the
+  options and what each one costs. I make the call.
+- **Mockups.** For each screen, Claude draws a few directions from my brief. I pick one, often
+  with changes, and the screen is built from it.
+- **Testing.** Claude runs the test suites and the app against a local FalkorDB, and fixes what
+  fails before I review.
