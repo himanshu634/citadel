@@ -6,6 +6,7 @@
  * streams (SSE) are separate and not here.
  */
 import type {
+	Activity,
 	BuildSnapshot,
 	Company,
 	CompanyConfig,
@@ -84,6 +85,8 @@ export const api = {
 	/** Delete a chat and its checkpoints. 409 while it is answering. */
 	deleteThread: (slug: string, id: string) =>
 		request<void>('DELETE', `${company(slug)}/threads/${encodeURIComponent(id)}`),
+	/** The agents' latest runs with their steps on the graph, newest first (the Systems page). */
+	activity: (slug: string, limit = 6) => request<Activity>('GET', `${company(slug)}/activity?limit=${limit}`),
 	/** The chats that touched or cited one node of the company graph. */
 	refThreads: (slug: string, uid: string) =>
 		request<ThreadSummary[]>('GET', `${company(slug)}/refs/${encodeURIComponent(uid)}/threads`),
