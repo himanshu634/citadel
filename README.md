@@ -279,5 +279,6 @@ Dependencies run one way: backend, then agents, then brain (checked by
 
 ## AI usage
 
-An AI coding assistant was used to build this project; what it did is listed in
-[AI_USAGE.md](AI_USAGE.md).
+Claude Code wrote most of the code, tests, queries and docs, one PR at a time. The humans set the
+rules and picked every design direction. [AI_USAGE.md](AI_USAGE.md) lists what the assistant
+built, what we designed, and what was and was not verified.
