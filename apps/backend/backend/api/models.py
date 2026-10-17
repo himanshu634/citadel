@@ -8,10 +8,10 @@ then false); it is never guessed as `empty`.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from brain.tools import PersonActivity, RecentWorkItem, Stat, SystemSummary
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from backend.config_diff import ConfigDiff
 from backend.jobs import BuildSnapshot, BuildSummary
@@ -240,10 +240,11 @@ class FeedbackOut(BaseModel):
 
 
 class ApprovalIn(BaseModel):
-    """A lead's approve or reject of a pending claim. `by` is the name they type (no sign-in)."""
+    """A lead's approve or reject of a pending claim. `by` is the name they type (no sign-in);
+    both are stripped, so a name of only spaces is refused."""
 
-    by: str = Field(min_length=1, max_length=80)
-    why: str = Field("", max_length=500)
+    by: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
+    why: Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] = ""
 
 
 class KeeperEvent(BaseModel):

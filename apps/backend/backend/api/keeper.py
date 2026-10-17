@@ -119,7 +119,7 @@ def approve(slug: Slug, uid: str, body: ApprovalIn, runs: Keeper) -> Claim:
             "Build the company, then approve again.",
         ) from exc
     try:
-        runs.start(slug, "approval", 0)
+        runs.start_soon(slug, "approval", 0)  # the response does not wait for it
     except Exception:  # the approval stands; the next review writes the follow-up
         log.exception("could not start the review after approving %s", uid)
     return claim

@@ -3,7 +3,8 @@
 //          time, returning uids so the Keeper can open a gap about the system and the person.
 // params:  $limit (int)
 // returns: subject (system uid), system (name), declared_owners ([name]), members_known,
-//          person_uid, login, changes (theirs), total_changes; most active systems first
+//          person_uid, login, changes (theirs), total_changes (both integers); most active
+//          systems first
 // example: keeper.notice("synthetic", "stale_owner", 10)
 MATCH (o)-[:OWNS]->(s:System)
 WITH s, collect(DISTINCT o) AS owners
@@ -22,7 +23,7 @@ WITH s, declared_owners, owner_people, members_known,
      collect({uid: p.uid, login: p.login, changes: n}) AS ranked, sum(n) AS total_changes
 WHERE NOT ranked[0].login IN owner_people
 RETURN s.uid AS subject, s.name AS system, declared_owners, members_known,
-       ranked[0].uid AS person_uid, ranked[0].login AS login, ranked[0].changes AS changes,
-       total_changes
+       ranked[0].uid AS person_uid, ranked[0].login AS login,
+       toInteger(ranked[0].changes) AS changes, toInteger(total_changes) AS total_changes
 ORDER BY total_changes DESC, subject
 LIMIT $limit

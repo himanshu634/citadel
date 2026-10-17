@@ -134,33 +134,43 @@ class KeeperRuns:
     # --- public API ----------------------------------------------------------------------------
 
     def start(self, slug: str, trigger: Trigger, budget: int) -> Review:
-        """The slug's running review, else a new one (see the module doc). Raises
-        ReviewNotStarted when the ledger has not recorded it after `start_wait` seconds."""
-        with self._lock:
-            run = self._runs.get(slug)
-            if run is None or run.ended:
-                run = _Run(slug)
-                self._runs[slug] = run
-                worker = threading.Thread(
-                    target=self._work,
-                    args=(run, trigger, budget),
-                    name=f"keeper-{slug}",
-                    daemon=True,
-                )
-                try:
-                    worker.start()
-                except BaseException:
-                    run.ended = True
-                    run.done.set()
-                    run.started.set()
-                    raise
+        """The slug's running review, else a new one (see the module doc), once the ledger has
+        recorded it. Raises ReviewNotStarted when, after `start_wait` seconds, the run has not
+        ended and the ledger's latest review is not a running one (an older review is never
+        returned as the new one)."""
+        run = self._launch(slug, trigger, budget)
         run.started.wait(self.start_wait)
-        if run.result is not None and run.result.state == "running":
-            return run.result  # another process's review: ours never started
+        if run.ended and run.result is not None:
+            return run.result  # as it ended; or another process's running review
         current = self.current(slug)
-        if current is None:
+        if current is None or not (run.ended or current.state == "running"):
             raise ReviewNotStarted(f"The review of {slug} did not start in time.")
         return current
+
+    def start_soon(self, slug: str, trigger: Trigger, budget: int) -> None:
+        """`start` without waiting for the ledger (after an approval, whose response must not
+        wait). Raises only when the worker thread cannot start; the run logs its own errors."""
+        self._launch(slug, trigger, budget)
+
+    def _launch(self, slug: str, trigger: Trigger, budget: int) -> _Run:
+        """The slug's live run in this process, else a new one in a worker thread."""
+        with self._lock:
+            run = self._runs.get(slug)
+            if run is not None and not run.ended:
+                return run
+            run = _Run(slug)
+            self._runs[slug] = run
+            worker = threading.Thread(
+                target=self._work, args=(run, trigger, budget), name=f"keeper-{slug}", daemon=True
+            )
+            try:
+                worker.start()
+            except BaseException:
+                run.ended = True
+                run.done.set()
+                run.started.set()
+                raise
+            return run
 
     def stop(self, slug: str) -> bool:
         """Ask the slug's running review to stop at its next job. False when none runs here."""

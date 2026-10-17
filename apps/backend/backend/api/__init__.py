@@ -57,6 +57,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(
     runner: JobRunner | None = None, asker: Asker | None = None, keeper: KeeperRuns | None = None
 ) -> FastAPI:
+    """The app. A `runner` handed in without an `on_done` gets one here: after each build that
+    ends `done`, `keeper` (default: a new KeeperRuns) starts a review of that company."""
     app = FastAPI(title="Company Brain", lifespan=lifespan)
     runs = keeper or KeeperRuns()
 

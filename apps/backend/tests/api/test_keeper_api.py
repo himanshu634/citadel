@@ -15,7 +15,7 @@ from agents.keeper.model import gap_uid
 from agents.policies import offline_client
 from agents.testing import FakeBrainFacts, fake_brain
 from backend.api import create_app
-from backend.keeper_runs import KeeperRuns
+from backend.keeper_runs import KeeperRuns, ReviewNotStarted
 from fastapi.testclient import TestClient
 
 from .conftest import write
@@ -299,3 +299,65 @@ def test_default_seams_are_fixed_when_the_app_is_made(runner, ledger, company, m
     assert app.state.keeper.wait(SLUG, 5)
     [review] = ledger.reviews
     assert review.state == "skipped"
+
+
+class SlowStart:
+    """The ledger, except that `ledger/review_start` waits for `gate`: a review that has not
+    recorded itself yet."""
+
+    def __init__(self, store, gate: threading.Event):
+        self._store, self._gate = store, gate
+
+    def write(self, name, db_user, params):
+        if name == "ledger/review_start":
+            assert self._gate.wait(5), "test never opened the gate"
+        return self._store.write(name, db_user, params)
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+
+@pytest.fixture
+def slow_gate():
+    g = threading.Event()
+    yield g
+    g.set()
+
+
+def test_start_never_returns_an_older_review_as_the_new_one(ledger, brain, slow_gate):
+    old = {"uid": "review:old", "trigger": "build", "budget": 3, "now": "2026-10-17T08:00:00Z"}
+    ledger.write("ledger/review_start", KEEPER, old)
+    ledger.write("ledger/review_finish", KEEPER, {"uid": "review:old", "state": "done",
+                                                  "now": "2026-10-17T08:01:00Z"})  # fmt: skip
+    slow = SlowStart(ledger, slow_gate)
+    runs = KeeperRuns(store_for=lambda slug: slow, client_for=offline_client,
+                      has_key=lambda: True, brain=brain, graph_run=fake_brain,
+                      start_wait=0.05)  # fmt: skip
+    with pytest.raises(ReviewNotStarted):
+        runs.start(SLUG, "manual", 0)
+    slow_gate.set()
+    assert runs.wait(SLUG, 5)
+    assert [r.uid == "review:old" for r in ledger.reviews] == [True, False]
+
+
+def test_approve_does_not_wait_for_its_review(runner, ledger, brain, company, slow_gate):
+    slow = SlowStart(ledger, slow_gate)
+    runs = KeeperRuns(store_for=lambda slug: slow, client_for=offline_client,
+                      has_key=lambda: True, brain=brain, graph_run=fake_brain)  # fmt: skip
+    client = TestClient(create_app(runner, keeper=runs))
+    uid = seed_claim(ledger, seed_gap(ledger, status="in_review"))
+    began = time.monotonic()
+    r = client.post(f"{BASE}/claims/{uid}/approve", json={"by": "Dana"})
+    assert r.status_code == 200 and r.json()["status"] == "accepted"
+    assert time.monotonic() - began < 1  # start_wait is 10 s: approve did not wait for it
+    slow_gate.set()
+    assert wait_review(ledger).trigger == "approval"
+
+
+def test_blank_names_are_refused_and_text_is_stripped(kclient, company, ledger):
+    uid = seed_claim(ledger, seed_gap(ledger, status="in_review"))
+    blank = kclient.post(f"{BASE}/claims/{uid}/reject", json={"by": "   "})
+    assert blank.status_code == 422
+    r = kclient.post(f"{BASE}/claims/{uid}/reject", json={"by": "  Dana ", "why": " Gone. "})
+    assert r.status_code == 200
+    assert (r.json()["approved_by"], r.json()["why"]) == ("Dana", "Gone.")

@@ -8,6 +8,7 @@ module ends, so the other tests in the session see the graph as ingest left it.
 from __future__ import annotations
 
 import math
+import re
 import time
 
 import pytest
@@ -121,6 +122,7 @@ def test_notice_rows_shape(brain):
         ("system:Web app", ["system:Web app", "person:erin"])
     ]
     assert "erin" in stale[0]["text"] and "Web app" in stale[0]["text"]
+    assert re.search(r"\(\d+ of \d+\)\.$", stale[0]["text"]), stale[0]["text"]  # counts, not floats
     assert keeper.notice(brain, "unowned_hot_system", limit=10) == []  # every system is owned
     with pytest.raises(ValueError):
         keeper.notice(brain, "nonsense", limit=10)
