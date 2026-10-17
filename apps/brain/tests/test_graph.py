@@ -192,6 +192,94 @@ def test_issues_by_system_ranks_mentions_and_leaves_out_bot_issues():
         db.delete_graph(slug)
 
 
+def test_central_nodes_rank_by_pagerank(synthetic_graph):
+    systems = tools.central_nodes(synthetic_graph)
+    # Infra has the most changes, docs and owners pointing at it
+    assert [r.uid for r in systems] == [
+        "system:Infra",
+        "system:Billing",
+        "system:Web app",
+        "system:Auth",
+    ]
+    assert all(r.label == "System" and r.kind == "system" for r in systems)
+    assert [r.score for r in systems] == sorted((r.score for r in systems), reverse=True)
+
+    items = tools.central_nodes(synthetic_graph, label="WorkItem", limit=2)
+    assert [(r.uid, r.kind, r.number) for r in items] == [
+        ("synthetic:issue:11", "issue", 11),
+        ("synthetic:issue:12", "issue", 12),
+    ]
+    assert items[0].url and items[0].name == "Session table causes DB load spikes"
+
+    docs = tools.central_nodes(synthetic_graph, label="Document")
+    assert len(docs) == 3 and all(r.kind == "document" and r.url for r in docs)
+    with pytest.raises(ValueError):
+        tools.call(synthetic_graph, "central_nodes", label="Person")  # flat for people
+
+
+def test_bottlenecks_on_the_synthetic_tickets(ticket_graph):
+    rows = tools.bottlenecks(ticket_graph)
+    # PAY-3 -MENTIONS-> pr:9 -MENTIONS-> pr:3 -CLOSES-> issue:12: pr:9 and pr:3 each sit on two
+    # shortest paths; pr:1 (pr:6 -> pr:1 -> issue:11) and PAY-2 (PAY-3 -> PAY-2 -> IDN-2) on one
+    assert [(r.uid, r.score) for r in rows] == [
+        ("synthetic:pr:3", 16.0),  # 8 seeded runs x 2 paths; ties by uid
+        ("synthetic:pr:9", 16.0),
+        ("synthetic:pr:1", 8.0),
+        ("synthetic:ticket:PAY-2", 8.0),
+    ]
+    assert rows[3].key == "PAY-2" and rows[3].url
+    assert [r.uid for r in tools.bottlenecks(ticket_graph, open_only=True)] == [
+        "synthetic:pr:9",
+        "synthetic:ticket:PAY-2",  # In Progress: open by status_category
+    ]
+    assert len(tools.bottlenecks(ticket_graph, limit=1)) == 1
+
+
+def test_bottlenecks_leave_out_bots_and_closed_work():
+    slug = "test_bottlenecks"
+    db.delete_graph(slug)
+    try:
+        assert tools.bottlenecks(slug) == []  # no graph at all
+
+        def item(n: int, kind: str = "issue", author: str = "erin", **kw) -> WorkItem:
+            kw.setdefault("state", "open")
+            return WorkItem(uid=f"t:{kind}:{n}", source="t", kind=kind, number=n,
+                            title=f"{kind} {n}", author_login=author,
+                            created_at=f"2026-05-0{n}T00:00:00Z", **kw)  # fmt: skip
+
+        def link(rel: str, a: str, b: str) -> Link:
+            return Link(rel=rel, from_uid=a, from_label="WorkItem", to_uid=b,
+                        to_label="WorkItem", source="t")  # fmt: skip
+
+        loader.load(slug, [Person(login="erin"), System(name="Auth")])
+        assert tools.bottlenecks(slug) == []  # no work items, no links: no rows, no error
+
+        records = [
+            Person(login="erin"), Person(login="dep-bot", is_bot=True),
+            # an open ticket in the middle of a BLOCKS chain
+            item(1, "ticket", status_category="todo", state="Todo"),
+            item(2, "ticket", status_category="in_progress", state="In Progress"),
+            item(3, "ticket", status_category="todo", state="Todo"),
+            link("BLOCKS", "t:ticket:1", "t:ticket:2"), link("BLOCKS", "t:ticket:2", "t:ticket:3"),
+            # a closed issue in the middle of a MENTIONS chain
+            item(4), item(5, state="closed"), item(6),
+            link("MENTIONS", "t:issue:4", "t:issue:5"), link("MENTIONS", "t:issue:5", "t:issue:6"),
+            # a bot's PR in the middle of a CLOSES chain
+            item(7, "pull_request", author="dep-bot"), item(8),
+            link("MENTIONS", "t:issue:6", "t:pull_request:7"),
+            link("CLOSES", "t:pull_request:7", "t:issue:8"),
+        ]  # fmt: skip
+        loader.load(slug, records)
+        rows = tools.bottlenecks(slug)
+        assert "t:pull_request:7" not in {r.uid for r in rows}
+        assert {r.uid for r in rows} == {"t:issue:5", "t:issue:6", "t:ticket:2"}
+        assert all(r.score > 0 for r in rows)
+        open_rows = tools.bottlenecks(slug, open_only=True)
+        assert {r.uid for r in open_rows} == {"t:issue:6", "t:ticket:2"}
+    finally:
+        db.delete_graph(slug)
+
+
 def test_unknown_tool_and_bad_params(synthetic_graph):
     with pytest.raises(KeyError):
         tools.call(synthetic_graph, "drop_everything")

@@ -48,7 +48,7 @@ How a gap becomes a claim: [The self-healing loop](#the-self-healing-loop).
 | Part | What it does | Status |
 |---|---|---|
 | **The Brain** | One FalkorDB graph per company (`brain_<slug>`), built from GitHub, Linear, docs and chat exports: people, teams, systems, changes, work items, documents | Built |
-| **Named graph tools** | 18 read queries, each a reviewed `.cypher` file with typed params. Agents pick a tool and fill its params; no LLM ever writes Cypher | Built |
+| **Named graph tools** | 22 read queries, each a reviewed `.cypher` file with typed params. Agents pick a tool and fill its params; no LLM ever writes Cypher | Built |
 | **Ask** (`brain` agent) | A Claude agent that answers from the tools and may cite only the nodes it has seen. Every turn is traced (no-answer, zero-source, thumbs). It answers from the sources first and says when a part comes from the Keeper | Built |
 | **Keeper** (`keeper` agent) | Turns failed questions, thumbs-down answers and what it notices after a build into gaps, consults `pm` and `qa`, checks their claims against the sources and a fixed critical rule, asks a lead to approve the critical ones, writes the rest into the brain, and logs every step | Built: HTTP API and app |
 | **`pm` and `qa` agents** | Answer the Keeper's consults with draft claims that cite real nodes; `pm` opens a follow-up for each new owner, expert or decision claim, and for each claim the sources contradict. They never message each other: the Keeper's ledger graph is the only channel ([spec](docs/agents.md)) | Built |
@@ -109,7 +109,7 @@ Built in `apps/agents/agents/keeper/` (spec: ["The Keeper" in docs/agents.md](do
    rejections the gap needs a person). A claim the sources contradict becomes
    `conflicts_with_source`: never written into the brain, and `pm` opens a follow-up to fix the
    source. A claim is critical when it replaces an earlier claim, touches a high-impact system (top
-   quarter by co-change coupling) or rests on no commit, work item or document.
+   quarter by PageRank over the whole graph) or rests on no commit, work item or document.
 4. **Approve or write.** A critical claim waits for a lead (the approvals card on the Systems page, or the
    API). Any other is accepted at once. An accepted claim supersedes the earlier one (`valid_to`
    set) and is projected into the brain. Nothing is deleted.
@@ -138,7 +138,7 @@ ledger, which survives a rebuild of the brain).
 | **Episodic memory** | Every Ask turn as a graph in `agent_<slug>`: `Thread → Turn → LLMCall → ToolCall → Ref`, beside the LangGraph checkpoints that resume a thread. Every Keeper review as `Review` + `ReviewStep`s, and an append-only log (who, what, why, who approved) in `keeper_<slug>`. Plus one trace line per turn in `data/traces/<slug>.jsonl` (tools, stop, tokens, thumbs) | `agents/history.py`, `agents/checkpoint.py`, `agents/keeper/store.py`, `agents/traces.py` | `test_history_graph.py`, `test_keeper_store.py`, `test_traces.py` |
 | **Semantic memory** | Accepted claims projected into `brain_<slug>` as `Claim` nodes with `ABOUT` and `EVIDENCE` edges. Ask reads them through `keeper_notes` and `get_entity`, cites them and says they come from the Keeper | `agents/keeper/project.py`, `brain/keeper.py`, `queries/keeper/project_claim.cypher` | `test_keeper_decide.py` |
 | **Memory that changes** | A claim has `valid_from` / `valid_to`. A new claim supersedes the old one, nothing is deleted. After every build each accepted claim is checked again: one the sources now contradict is superseded, one whose evidence is gone goes stale and reopens its gap | `agents/keeper/decide.py`, `agents/keeper/review.py` | `test_supersedes_earlier_claim`, `test_stale_on_projection_missing` |
-| **Procedural memory** | How the agents act is fixed in reviewed files, not learned or improvised: 18 named Cypher tools with typed params (no LLM-written Cypher), the Keeper's fixed rules (evidence must exist, sources win, the critical rule), one prompt per role | `brain/tools.py`, `queries/tools/`, `agents/keeper/rules.py`, `agents/prompts/` | `test_keeper_rules.py` |
+| **Procedural memory** | How the agents act is fixed in reviewed files, not learned or improvised: 22 named Cypher tools with typed params (no LLM-written Cypher), the Keeper's fixed rules (evidence must exist, sources win, the critical rule), one prompt per role | `brain/tools.py`, `queries/tools/`, `agents/keeper/rules.py`, `agents/prompts/` | `test_keeper_rules.py` |
 | **Shared state and handoffs** | Agents never message each other: the ledger is the only channel. The Keeper posts a `Consult` per gap for `pm` and `qa` (idempotent per gap, role and attempt). Each role reads its own queue and answers once with a draft claim citing real uids. The Keeper reads the answers and decides | `queries/ledger/post_consult.cypher`, `queue_consult.cypher`, `answer_consult.cypher` | `test_keeper_review.py`, `test_keeper_jobs.py` |
 | **Concurrency** | Every status move is guarded in its Cypher (`WHERE c.status IN $from`), so of two racing approvals, or an approve and a reject, one wins and the other changes nothing (HTTP 409). One review per company at a time; nothing reviews or decides while the company rebuilds | `queries/ledger/set_claim_status.cypher`, `agents/keeper/decide.py` (`ClaimNotPending`), `backend/keeper_runs.py` | `test_claim_status_guard` (memory store and real FalkorDB), `test_approve_twice` |
 | **Isolation** | One graph per company; `brain/db.py` is the only place that opens a connection and picks the graph, and the API resolves the slug in one place. A permission table says which database user (`citadel_brain`, `citadel_keeper`, `citadel_pm`, `citadel_qa`, ...) may read or write which graph; the ledger store checks it on every read and write. The same table renders `ACL SETUSER` lines for FalkorDB, not yet applied: today all users share one connection | `brain/db.py`, `backend/api/deps.py`, `agents/acl.py` | `apps/backend/tests/api/test_isolation.py`, `test_acl_refused`, `test_keeper_acl.py` |
@@ -176,6 +176,7 @@ purpose, parameters, returns, example.
 | `tools/path_between.cypher` | Shortest relationship paths between two nodes, either direction (`algo.SPpaths`) |
 | `tools/related_work_items.cypher` | Full-text search over PRs/issues/threads, expanded to authors, systems and closing links |
 | `tools/related_documents.cypher` | Full-text search over docs/ADRs, with the systems and work items they mention |
+| `tools/semantic_search.cypher` | Vector search over chunk embeddings (`Chunk` HNSW index): the best chunk per work item or document, bot text left out |
 | `tools/person_profile.cypher` | One person's teams, systems, recent PRs, reviews and declared ownership |
 | `tools/open_work_for.cypher` | A person's open tickets |
 | `tools/blocked_on.cypher` | What a person's tickets are waiting on |
@@ -187,6 +188,8 @@ purpose, parameters, returns, example.
 | `tools/collaborators.cypher` | Pairs of people ranked by PRs one reviewed of the other's, with shared issue threads, bots excluded |
 | `tools/issues_by_system.cypher` | Issues and tickets per system (text names it, or closed by a PR that changed it), open/closed, ranked |
 | `tools/people_activity.cypher` | People with how many PRs they authored and reviewed, bots excluded (dashboard overview) |
+| `tools/central_nodes.cypher` | The most central systems, work items or documents: PageRank over the whole graph (`algo.pageRank`), bot work left out |
+| `tools/bottlenecks.cypher` | Work items on the most dependency chains between other work: betweenness over `BLOCKS`/`CLOSES`/`MENTIONS` (`algo.betweenness`, 8 seeded samples summed) |
 | `tools/graph_stats.cypher` | Node and relationship counts per type |
 
 ### Schema
