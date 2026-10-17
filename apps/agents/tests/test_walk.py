@@ -128,6 +128,35 @@ def test_unknown_tools_and_stats_draw_nothing():
     assert walk.subgraph("no_such_tool", {}, [{"uid": "x"}]) == ([], [])
 
 
+def test_semantic_search_draws_each_hit_with_its_label_and_inferred_system_links():
+    rows = [
+        {"uid": "synthetic:pr:1", "label": "WorkItem", "kind": "pull_request", "number": 1,
+         "title": "feat(auth): switch sessions to JWT", "url": "https://x/pull/1",
+         "systems": ["Auth", "Web app"], "author": "alice", "similarity": 0.8},
+        {"uid": "synthetic:doc:docs/auth-design.md", "label": "Document", "kind": "document",
+         "number": None, "title": "Auth design", "url": None, "systems": ["Auth"],
+         "author": "alice", "similarity": 0.7},
+    ]  # fmt: skip
+    nodes, rs = walk.subgraph("semantic_search", {"text": "why sessions"}, rows)
+    assert {n["uid"]: n["label"] for n in nodes} == {
+        "synthetic:pr:1": "WorkItem",
+        "synthetic:doc:docs/auth-design.md": "Document",
+        "system:Auth": "System",
+        "system:Web app": "System",
+        "person:alice": "Person",
+    }
+    titles = {n["uid"]: n["title"] for n in nodes}
+    assert titles["synthetic:pr:1"] == "#1 feat(auth): switch sessions to JWT"
+    assert titles["synthetic:doc:docs/auth-design.md"] == "Auth design"
+    assert rels(rs) == {
+        ("person:alice", "AUTHORED", "synthetic:pr:1", False),
+        ("person:alice", "AUTHORED", "synthetic:doc:docs/auth-design.md", False),
+        ("synthetic:pr:1", "touches", "system:Auth", True),
+        ("synthetic:pr:1", "touches", "system:Web app", True),
+        ("synthetic:doc:docs/auth-design.md", "about", "system:Auth", True),
+    }
+
+
 def test_preview_rows_cuts_rows_and_long_text():
     rows = [{"body": "x" * 500, "nested": [{"snippet": "y" * 300}]}] * 30
     out = walk.preview_rows(rows)

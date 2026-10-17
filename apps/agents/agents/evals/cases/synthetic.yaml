@@ -160,3 +160,40 @@
         tools_any: [person_profile, related_work_items, recent_work_items, get_entity, work_history]
         text_none: [alice wrote, bob wrote]
         max_steps: 6
+
+# --- semantic search ------------------------------------------------------------------------
+# Questions worded so they share no key words with the text that answers them, so full-text
+# search can't find it. Needs embeddings on (EMBEDDING_PROVIDER=fastembed) when the graph is built.
+
+- id: semantic-login-state
+  tags: [semantic]
+  why: the question never says session, JWT or database; PR #1 and issue #11 say why sessions moved to JWTs.
+  turns:
+    - question: What drove the move away from keeping login state on the server?
+      expect:
+        cite_any: [synthetic:pr:1, synthetic:issue:11, "synthetic:doc:docs/auth-design.md"]
+        tools_any: [semantic_search]
+        text_any: [jwt, load]
+        max_steps: 5
+
+- id: semantic-overcharge
+  tags: [semantic]
+  why: the question never says month, upgrade, customers or overcharged; issue #12 and PR #3 (proration) explain it.
+  turns:
+    - question: What was behind clients paying too much after moving to a pricier tier partway through a billing cycle?
+      expect:
+        cite_any: [synthetic:issue:12, synthetic:pr:3]
+        tools_any: [semantic_search]
+        text_any: [prorat, full month]
+        max_steps: 5
+
+- id: semantic-own-database
+  tags: [semantic]
+  why: the question never says Postgres, managed or backups; PR #8 and ADR-001 give the reason.
+  turns:
+    - question: What went wrong that made us outsource running our relational data store to a vendor?
+      expect:
+        cite_any: [synthetic:pr:8, "synthetic:doc:docs/adr/001-managed-postgres.md"]
+        tools_any: [semantic_search]
+        text_any: [backup]
+        max_steps: 5
