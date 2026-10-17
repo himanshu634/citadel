@@ -218,6 +218,45 @@ def test_failed_step_records_error(runner_failing):
     assert snap.events[-1].message == "boom"
 
 
+def wait_calls(calls: list[str], n: int, timeout: float = 5) -> list[str]:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and len(calls) < n:
+        time.sleep(0.01)
+    return calls
+
+
+def test_build_done_starts_review(tmp_path):
+    """`on_done` (the app starts a Keeper review with it) runs once, with the slug, after a
+    build that finished."""
+    calls: list[str] = []
+    r = JobRunner(steps=FakeSteps(), jobs_dir=tmp_path, on_done=calls.append)
+    r.start("a")
+    assert wait_done(r, "a").state == "done"
+    assert wait_calls(calls, 1) == ["a"]
+    time.sleep(0.05)
+    assert calls == ["a"]
+
+
+def test_on_done_is_not_called_for_a_failed_build(tmp_path):
+    calls: list[str] = []
+    r = JobRunner(steps=FakeSteps(fail_on="ingest"), jobs_dir=tmp_path, on_done=calls.append)
+    r.start("a")
+    assert wait_done(r, "a").state == "failed"
+    time.sleep(0.05)
+    assert calls == []
+
+
+def test_a_failing_on_done_leaves_the_build_done(tmp_path):
+    def boom(slug: str) -> None:
+        raise RuntimeError("no keeper")
+
+    r = JobRunner(steps=FakeSteps(), jobs_dir=tmp_path, on_done=boom)
+    r.start("a")
+    assert wait_done(r, "a").state == "done"
+    time.sleep(0.05)
+    assert r.current("a").state == "done"
+
+
 def test_failure_before_a_step_emits_lands_on_its_first_stage(tmp_path):
     r = JobRunner(steps=FakeSteps(fail_on="ingest", fail_after=0), jobs_dir=tmp_path)
     r.start("a")

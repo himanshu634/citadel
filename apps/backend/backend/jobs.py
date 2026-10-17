@@ -15,6 +15,10 @@ place in `stages` goes backwards on the second source. Before it runs, a job lis
 (stage, source) it will go through (its trail, from the company's sources); `steps` is its
 length and `step` only moves forward along it. Every event carries the step it happened at, so
 a live stream keeps the count without reading the snapshot again.
+
+`on_done(slug)` (the app starts a Keeper review with it) runs in its own daemon thread after a
+build ends `done`, never after a failed or stopped one; its errors are logged, and the build stays
+done.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ import os
 import re
 import tempfile
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -235,9 +240,14 @@ def _closing_event(
 
 class JobRunner:
     def __init__(
-        self, max_parallel: int = 2, steps: Steps | None = None, jobs_dir: Path | None = None
+        self,
+        max_parallel: int = 2,
+        steps: Steps | None = None,
+        jobs_dir: Path | None = None,
+        on_done: Callable[[str], None] | None = None,
     ):
         self.steps: Steps = steps or PipelineSteps()
+        self.on_done = on_done  # called with the slug after a build ends `done` (module doc)
         self._jobs_dir = jobs_dir
         self._slots = threading.Semaphore(max_parallel)
         # One lock for the job table, every snapshot change, its file and the subscriber set.
@@ -435,6 +445,7 @@ class JobRunner:
             report = self.steps.ingest(slug, job.full or snap.kind == "rebuild", on_event)
             totals = {"written": dict(report.load.written), "dropped": dict(report.load.dropped)}
             self._finish(job, "done", BuildEvent(slug, "done", "done", totals=totals))
+            self._after_done(slug)
         except BuildStopped:
             with self._lock:
                 self._finish(job, "stopped", _closing_event(snap, "stopped", job.plan))
@@ -444,6 +455,23 @@ class JobRunner:
             with self._lock:
                 event = _closing_event(snap, "failed", job.plan, job.step, error)
                 self._finish(job, "failed", event, error)
+
+    def _after_done(self, slug: str) -> None:
+        """Run `on_done(slug)` in a daemon thread. Never raises: the build is already done."""
+        hook = self.on_done
+        if hook is None:
+            return
+
+        def call() -> None:
+            try:
+                hook(slug)
+            except Exception:
+                log.exception("on_done after the build of %s failed", slug)
+
+        try:
+            threading.Thread(target=call, name=f"after-build-{slug}", daemon=True).start()
+        except Exception:
+            log.exception("could not start on_done after the build of %s", slug)
 
     # --- snapshot and delivery (callers may or may not hold the lock; it is reentrant) --------
 

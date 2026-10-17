@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from agents import checkpoint, graphs
+from agents.keeper.store import delete_keeper_graph
 from backend import cli
 from brain import config, db
 from brain.testing import needs_graph
@@ -38,3 +39,17 @@ def test_reset_deletes_both_graphs_and_the_build_history_but_keeps_the_raw_cache
     finally:
         db.delete_graph(SLUG)
         checkpoint.delete_agent_graph(SLUG)
+
+
+def test_reset_deletes_keeper_graph(tmp_path, monkeypatch):
+    """A throwaway keeper_test_reset (never a company's real ledger)."""
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    keeper = graphs.keeper_graph_name(SLUG)
+    db.client().select_graph(keeper).query("CREATE (:Probe)")
+    try:
+        done = CliRunner().invoke(cli.app, ["reset", SLUG, "--yes"])
+        assert done.exit_code == 0, done.output
+        assert keeper in done.output
+        assert keeper not in db.client().list_graphs()
+    finally:
+        delete_keeper_graph(SLUG)

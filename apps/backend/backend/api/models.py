@@ -232,3 +232,25 @@ class FeedbackOut(BaseModel):
     trace_id: str
     rating: Literal["up", "down"] | None
     note: str | None = None
+
+
+# --- Keeper (/api/companies/{slug}/keeper/...) -------------------------------------------------
+# Gaps, claims, log entries, follow-ups and reviews are the ledger's own models
+# (agents.keeper.model); only what the API adds is here.
+
+
+class ApprovalIn(BaseModel):
+    """A lead's approve or reject of a pending claim. `by` is the name they type (no sign-in)."""
+
+    by: str = Field(min_length=1, max_length=80)
+    why: str = Field("", max_length=500)
+
+
+class KeeperEvent(BaseModel):
+    """One review event on the review stream (agents.keeper.review.ReviewEvent)."""
+
+    kind: Literal["start", "step", "done", "stopped", "failed", "skipped"]
+    step: str | None = None  # reproject, notice, pick, consult, pm.consult, keeper.decide, ...
+    gap: str | None = None
+    claim: str | None = None
+    message: str = ""
