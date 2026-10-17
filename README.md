@@ -279,6 +279,5 @@ Dependencies run one way: backend, then agents, then brain (checked by
 
 ## AI usage
 
-Claude Code wrote most of the code, tests, queries and docs, one PR at a time. The humans set the
-rules and picked every design direction. [AI_USAGE.md](AI_USAGE.md) lists what the assistant
-built, what we designed, and what was and was not verified.
+I used Claude Code to write the code; the design and the decisions are mine.
+[AI_USAGE.md](AI_USAGE.md) says where I took its help on trade-offs and what I checked.
