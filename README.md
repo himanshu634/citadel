@@ -50,7 +50,7 @@ How a gap becomes a claim: [The self-healing loop](#the-self-healing-loop).
 | **The Brain** | One FalkorDB graph per company (`brain_<slug>`), built from GitHub, Linear, docs and chat exports: people, teams, systems, changes, work items, documents | Built |
 | **Named graph tools** | 17 read queries, each a reviewed `.cypher` file with typed params. Agents pick a tool and fill its params; no LLM ever writes Cypher | Built |
 | **Ask** (`brain` agent) | A Claude agent that answers from the tools and may cite only the nodes it has seen. Every turn is traced (no-answer, zero-source, thumbs). It answers from the sources first and says when a part comes from the Keeper | Built |
-| **Keeper** (`keeper` agent) | Turns failed questions, thumbs-down answers and what it notices after a build into gaps, consults `pm` and `qa`, checks their claims against the sources and a fixed critical rule, asks a lead to approve the critical ones, writes the rest into the brain, and logs every step | Built: CLI, HTTP API and app |
+| **Keeper** (`keeper` agent) | Turns failed questions, thumbs-down answers and what it notices after a build into gaps, consults `pm` and `qa`, checks their claims against the sources and a fixed critical rule, asks a lead to approve the critical ones, writes the rest into the brain, and logs every step | Built: HTTP API and app |
 | **`pm` and `qa` agents** | Answer the Keeper's consults with draft claims that cite real nodes; `pm` opens a follow-up for each new owner, expert or decision claim, and for each claim the sources contradict. They never message each other: the Keeper's ledger graph is the only channel ([spec](docs/agents.md)) | Built |
 | **Keeper in the app** | Keeper reviews as steps on the Systems page's agent trail, with Review now, the approvals card and the log in its rail | Built |
 | **MCP server** | The same named tools for any outside agent (Claude, an IDE, a Slack bot), read-only, plus one gated `propose_claim` write | Planned |
@@ -110,7 +110,7 @@ Built in `apps/agents/agents/keeper/` (spec: ["The Keeper" in docs/agents.md](do
    `conflicts_with_source`: never written into the brain, and `pm` opens a follow-up to fix the
    source. A claim is critical when it replaces an earlier claim, touches a high-impact system (top
    quarter by co-change coupling) or rests on no commit, work item or document.
-4. **Approve or write.** A critical claim waits for a lead (`agents keeper approve|reject`, or the
+4. **Approve or write.** A critical claim waits for a lead (the approvals card on the Systems page, or the
    API). Any other is accepted at once. An accepted claim supersedes the earlier one (`valid_to`
    set) and is projected into the brain. Nothing is deleted.
 5. **Ask again.** Ask reads accepted claims through `keeper_notes` and `get_entity`, cites them,

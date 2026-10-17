@@ -1,7 +1,7 @@
 // purpose: Mark every running review whose heartbeat (else its start) is older than
 //          $stale_before `stopped` (stop 'restart'), as builds are after a server restart: the
 //          run that was cut off can never finish. A review still beating (another process runs
-//          it, e.g. `agents keeper review`) is left alone.
+//          it) is left alone.
 // params:  $now (ISO), $stale_before (ISO)
 // returns: uid (one row per review stopped)
 // notes:   The store fills $stale_before from $now (model.REVIEW_STALE_SECONDS). Timestamps

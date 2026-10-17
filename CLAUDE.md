@@ -38,10 +38,6 @@ make eval                      # agent evals on brain_synthetic (calls the API):
 make traces SLUG=x DAYS=7      # live Ask traffic: no-answer/step-limit/nudge/... rates, p50/p95 latency and tokens, thumbs
 make eval-drafts SLUG=x        # thumbs-down answers as draft eval cases (WRITE=1 appends to evals/cases/x.yaml)
 make chats-backfill SLUG=x     # chat history for threads asked before it existed (checkpoints + traces; ALL=1 adds untraced)
-make keeper-review SLUG=synthetic OFFLINE=1   # one Keeper review (scripted jobs, no key, synthetic companies only; BUDGET=n gaps)
-make keeper-notice SLUG=x      # open gaps for what brain_x shows on its own (stale owners, unowned busy systems)
-make keeper-gaps SLUG=x STATUS=open   # the Keeper's gaps;  make keeper-log SLUG=x LIMIT=20: its log
-# also `agents keeper claims|approve|reject SLUG [CLAIM --by NAME --why ...]` (uv run agents keeper --help)
 make agents                    # list the agent roles, their jobs and read tools
 make sim SLUG=synthetic SCENARIO=sprint OFFLINE=1   # run the simulation (sprint, race, regression); not the product story
 make reset SLUG=x CONFIRM=1    # delete brain_x, agent_x, keeper_x, its build history and Ask traces (frees the slug)
@@ -282,8 +278,8 @@ demo's agents are `brain`, `keeper`, `pm` and `qa`. Pieces:
   and its submit are written as `ReviewStep`s as they run (best effort), so the review appears
   step by step on `/activity`. Releases gaps it did not
   decide; stops with `brain_unavailable` when brain_<slug> is gone. No API key: `skip_review`
-  (re-project + notice only, recorded `skipped`); `--offline` plays the policies (refused unless
-  the company's `data_permission` is `synthetic`: they accept their own claims). pm's follow-up job is tried once per claim: a run
+  (re-project + notice only, recorded `skipped`); tests play the policies
+  (`policies.offline_client`). pm's follow-up job is tried once per claim: a run
   that opens no task is recorded (`ledger/follow_up_tried`, logged `follow_up_skipped`).
 - Fixed rules (`keeper/rules.py`, `keeper/decide.py`), never the model: evidence uids must exist;
   sources win (`conflicts_with_source`, never projected, pm follow-up); critical =
@@ -303,11 +299,10 @@ demo's agents are `brain`, `keeper`, `pm` and `qa`. Pieces:
   empty until ingest ends, so Review now / approve / reject are 409 (`decide.BUILDING`), reviews
   see the brain as missing, and a rebuild stops the running review before its reset
   (`JobRunner.before_reset`), marking it `rebuilt`: that run's brain reads as missing until it
-  ends, so a job whose tool loop spanned the rebuild writes nothing. The CLI's `agents keeper
-  review/approve/reject` refuse when `data/jobs/<slug>.json` shows a build running. A running
-  Review carries `heartbeat_at` (start, every step write/end, each job's start); `recover` and
-  `review_start` treat it as stale only after `REVIEW_STALE_SECONDS` (120) without a beat, so a
-  CLI review survives a server (re)start. No Keeper page: reviews show on the
+  ends, so a job whose tool loop spanned the rebuild writes nothing. A running Review carries
+  `heartbeat_at` (start, every step write/end, each job's start); `recover` and `review_start`
+  treat it as stale only after `REVIEW_STALE_SECONDS` (120) without a beat. There is no Keeper
+  CLI: the app and the API are its only surfaces. No Keeper page: reviews show on the
   Systems page's activity trail (`GET .../activity`), its controls in that page's rail.
 - Frontend: Review now in the Systems page's bar; in its rail the claims waiting for a lead
   (`ClaimApproval`: typed name, optional why) and the log (`KeeperLog`), read again when a Keeper

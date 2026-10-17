@@ -13,7 +13,7 @@ AGENTS := uv run agents
 BACKEND := uv run backend
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs ps browser init schema fetch ingest embed sync stats query tools ask chat eval eval-drafts traces reset keeper-notice keeper-review keeper-gaps keeper-log linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
+.PHONY: help setup up down logs ps browser init schema fetch ingest embed sync stats query tools ask chat eval eval-drafts traces reset linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
@@ -105,18 +105,6 @@ traces: ## How the brain did on live questions (CLI + Ask page) for $(SLUG): rat
 eval-drafts: ## Thumbs-down answers of $(SLUG) as draft eval cases (printed; WRITE=1 appends to the case file) DAYS=..
 	uv run python -m agents.evals.drafts --slug $(SLUG) $(if $(DAYS),--days $(DAYS)) \
 		$(if $(filter 1 yes,$(WRITE)),--write)
-
-keeper-notice: ## Open gaps for what brain_$(SLUG) shows on its own (unowned hot systems, stale owners) and print them
-	$(AGENTS) keeper notice $(SLUG)
-
-keeper-review: ## One Keeper review of $(SLUG) (OFFLINE=1: scripted jobs, no API key; BUDGET=n gaps to decide)
-	$(AGENTS) keeper review $(SLUG) $(if $(filter 1 yes,$(OFFLINE)),--offline) $(if $(BUDGET),--budget $(BUDGET))
-
-keeper-gaps: ## The Keeper's gaps for $(SLUG): make keeper-gaps SLUG=synthetic STATUS=open
-	$(AGENTS) keeper gaps $(SLUG) $(if $(STATUS),--status $(STATUS))
-
-keeper-log: ## The Keeper's log for $(SLUG), newest first (LIMIT=20)
-	$(AGENTS) keeper log $(SLUG) $(if $(LIMIT),--limit $(LIMIT))
 
 reset: ## Delete graphs brain_/agent_/keeper_$(SLUG), its build history and Ask traces; needs CONFIRM=1
 	$(BACKEND) reset $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)

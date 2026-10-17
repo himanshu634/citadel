@@ -27,8 +27,8 @@ on "Review now" (`keeper_budget`) and after an approval (budget 0, so pm's follo
   live, then ends; so a page that opens the stream after a quick run still sees all of it.
 - `recover` (at startup) marks a review a previous server process left `running` as stopped
   (`ledger/review_stop_running`), only once its heartbeat is `REVIEW_STALE_SECONDS` old: a
-  review another process runs (`agents keeper review`) keeps beating, so neither a (re)start
-  nor a new start (`ledger/review_start` stops only a stale one) overlaps it. It only writes
+  review another process runs keeps beating, so neither a (re)start nor a new start
+  (`ledger/review_start` stops only a stale one) overlaps it. It only writes
   for a company whose latest review is running, so it never creates keeper_<slug>.
 
 Every seam (`store_for`, `client_for`, `has_key`, `brain`, `graph_run`) defaults to a module
@@ -77,7 +77,7 @@ def keeper_store(slug: str) -> WorkStore:
 
 
 def has_api_key() -> bool:
-    """A key in .env (Settings) or in the environment, as `agents keeper review` checks."""
+    """A key in .env (Settings) or in the environment (`llm.has_api_key`)."""
     return llm.has_api_key()
 
 

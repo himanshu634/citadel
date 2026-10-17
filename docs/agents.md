@@ -86,7 +86,7 @@ when any of these hold; the reasons are stored in `critical_reasons`:
    `accepted` at once (approver `auto`), projected into the brain, the gap resolved, and the
    earlier accepted claim of the same kind and subject `superseded` (`valid_to` set).
 
-A lead approves or rejects with `agents keeper approve|reject SLUG CLAIM --by NAME` or the API.
+A lead approves or rejects in the Systems page's rail or through the API.
 Approval re-checks the sources first. Each status move is guarded on the current status, so of
 two racing approvals one wins and the other is told the claim was decided (HTTP 409). A rejected
 claim sends its gap back to `open` with one more attempt. Nothing is deleted.
@@ -99,7 +99,7 @@ One bounded pass, at most one per company at a time (a second start returns the 
 2. Re-project every accepted claim (superseded by the sources, stale when its subject or every
    evidence uid is gone, else written back into the brain), then notice.
 3. Pick the budget's gaps (asked gaps first, then most seen, then oldest): `KEEPER_BUDGET` (5) on
-   Review now or `agents keeper review`, `KEEPER_BUILD_BUDGET` (3) after a build, 0 after an
+   Review now, `KEEPER_BUILD_BUDGET` (3) after a build, 0 after an
    approval (so pm's follow-up shows).
 4. Post a pm and a qa consult per gap, run their consult jobs, then the Keeper's decide job.
 5. Run pm's follow-up job for each claim that needs one: an accepted owner, expert or decision
@@ -108,13 +108,11 @@ One bounded pass, at most one per company at a time (a second start returns the 
 It stops between jobs when asked, and stops safely (`brain_unavailable`) when `brain_<slug>` is
 gone, writing nothing an empty brain would make wrong. Gaps it picked and did not decide go back to
 `open` without using an attempt. Without an API key a review only re-projects and notices, and is
-recorded `skipped`; `--offline` runs the scripted policies instead. A server restart marks a
+recorded `skipped`. A server restart marks a
 running review `stopped`. Every step is a `LogEntry` and a progress event.
 
 ### Surfaces
 
-- **CLI:** `agents keeper notice|review|gaps|claims|log|approve|reject SLUG`; `make keeper-notice`,
-  `keeper-review` (`OFFLINE=1`, `BUDGET=n`), `keeper-gaps` (`STATUS=`), `keeper-log` (`LIMIT=`).
 - **API** under `/api/companies/{slug}/keeper/`: `GET gaps`, `GET claims`, `GET log`,
   `GET followups`, `POST claims/{uid}/approve` and `/reject` (body: `by`, `why`; 409 when the
   claim was already decided), `POST review` (Review now; returns the running review if there is

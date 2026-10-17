@@ -35,9 +35,8 @@ wrote nothing. The pick records the picked gaps and the first one's text on the 
 (`ledger/review_picked`). Step writes are best effort: a ledger hiccup never changes a job.
 
 Heartbeat: every step write and end, and each job's start (`ledger/review_heartbeat`, best
-effort), refresh the Review's `heartbeat_at`, so another process (the API's start or restart
-recovery, while this run is the CLI's) takes it for stale only after `REVIEW_STALE_SECONDS`
-without one.
+effort), refresh the Review's `heartbeat_at`, so another process (an API start or restart recovery)
+takes it for stale only after `REVIEW_STALE_SECONDS` without one.
 
 Whatever the end, the gaps this run moved to in_review and left undecided (still in_review, no
 claim waiting for a lead) go back to `open` without using an attempt, so the next review can

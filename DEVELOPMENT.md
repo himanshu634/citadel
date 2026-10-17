@@ -122,26 +122,18 @@ curl http://127.0.0.1:8000/api/companies
 
 The Keeper reviews what the brain could not answer and updates it
 ([docs/agents.md](docs/agents.md#the-keeper)). Its records live in the graph
-`keeper_synthetic`. With the synthetic company built:
+`keeper_synthetic`. It runs its jobs on Claude, so set `ANTHROPIC_API_KEY` first (without one a
+review only re-projects claims and notices gaps, and is recorded as skipped). With the synthetic
+company built and `make dev` running, open its Systems page and click **Review now**.
 
-```bash
-make keeper-review SLUG=synthetic OFFLINE=1   # one review; pm, qa and the Keeper play scripted policies
-make keeper-gaps SLUG=synthetic               # what it found: a stale owner of the Web app
-uv run agents keeper claims synthetic --status pending_approval
-uv run agents keeper approve synthetic <claim uid> --by "Your Name"   # or: reject
-make keeper-log SLUG=synthetic                # who did what, and why
-```
-
-The first review notices gaps on its own (here a system whose declared owner is not the person
-doing most of its work), consults `pm` and `qa`, and lets the Keeper decide. A claim that
-touches a high-impact system is critical, so it waits for your approval. With
-`ANTHROPIC_API_KEY` set, drop `OFFLINE=1` to run the jobs on Claude. `OFFLINE=1` works only
-for a synthetic company (`data_permission: synthetic`): the scripted policies accept their own
-claims into the brain. While a company builds, `review`, `approve` and `reject` are refused (a
-rebuild's brain is empty until its ingest ends); try again when the build finishes. Failed questions and
-thumbs-down answers on the Ask page become gaps too, and the app runs a review after every
-build. The app has no Keeper screens yet: they land with the Systems page. Until then use the
-CLI or the API under `/api/companies/<slug>/keeper/`.
+The review shows step by step on the page's agent trail. It notices gaps on its own (here a
+system whose declared owner is not the person doing most of its work), consults `pm` and `qa`,
+and lets the Keeper decide. A claim that touches a high-impact system is critical, so it waits
+for your approval in the rail: type your name, optionally say why, and approve or reject. The
+rail's log says who did what, and why. Failed questions and thumbs-down answers on the Ask page
+become gaps too, and the app runs a review after every build. While a company builds, Review now,
+approve and reject are refused (a rebuild's brain is empty until its ingest ends); try again when
+the build finishes. The same actions are in the API under `/api/companies/<slug>/keeper/`.
 
 ## 9. The agent simulation (optional)
 
@@ -188,6 +180,5 @@ instance uses TLS. Skip `make up`; everything else is the same.
 | The app loads but shows no companies or errors | `make api` is not running, or it is on another port: start it with the same `API_PORT` |
 | Vector index dimension warning | `EMBEDDING_DIM` changed after the index was created: `make reset SLUG=<slug> CONFIRM=1`, then rebuild |
 | Start a company over | `make reset SLUG=<slug> CONFIRM=1` deletes its graphs (`brain_`, `agent_`, `keeper_`), build history and traces; the config and raw cache are kept |
-| `agents keeper review` says "review skipped: no API key" | Set `ANTHROPIC_API_KEY`, or, for a synthetic company, add `--offline` (`make keeper-review OFFLINE=1`) for the scripted policies |
-| `agents keeper review/approve/reject` says "The brain is being rebuilt" | `data/jobs/<slug>.json` shows a build running: wait for it. If no server is building, starting the API (`make api`) marks that build stopped |
+| A Keeper review is recorded as skipped | `ANTHROPIC_API_KEY` is missing: set it and restart `make dev` |
 | Wipe all local graphs | `docker compose down -v` deletes the FalkorDB volume |
