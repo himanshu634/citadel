@@ -638,8 +638,8 @@ apps/agents/agents/
   acl.py         the permission table, checks, and ACL SETUSER lines for FalkorDB users
 ```
 
-`agents/graph.py` keeps the router for human chat. The empty `builder` and `critic` nodes
-there are replaced by the roles above.
+`agents/graph.py` runs human chat: every turn goes straight to the brain loop. The Builder and
+Critic jobs are the roles above, not nodes in that graph.
 
 ## Simulations (one button each in the UI)
 

@@ -91,11 +91,10 @@ class AgentState(TypedDict, total=False):
     model: str | None  # the model that served the last call (differs after a fallback)
     ask_model: str | None  # the model this turn asked for (Ask page); None: ANTHROPIC_MODEL
     nudges: int
-    route: str | None  # set by the router: which part of the graph handles this turn
     trace: Annotated[list[dict[str, Any]], operator.add]  # one entry per tool call (run_tools)
 
 
-ENTRY = "call_claude"  # where the router hands a turn to this loop
+ENTRY = "call_claude"  # where a turn enters this loop
 
 
 Check = Callable[[dict[str, Any], dict[str, Any]], str | None]  # (input, seen) -> problem

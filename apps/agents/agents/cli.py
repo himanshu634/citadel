@@ -100,7 +100,7 @@ def chat(
         False,
         "--offline",
         help="One scripted turn (a list_systems call) instead of Claude: no API key needed. "
-        "Checks the router, the graph tools and the checkpointer end to end.",
+        "Checks the agent graph, the graph tools and the checkpointer end to end.",
     ),
 ) -> None:
     """Talk to brain_<slug> in one thread. An empty line or Ctrl-D ends the chat."""

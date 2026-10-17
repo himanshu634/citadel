@@ -249,7 +249,7 @@ def test_out_of_range_citation_marker_is_rejected():
 
 
 def test_step_limit_closes_open_tool_calls_so_the_thread_stays_valid(monkeypatch):
-    monkeypatch.setattr(agent, "RECURSION_LIMIT", 4)  # router, call, tools, call -> stops
+    monkeypatch.setattr(agent, "RECURSION_LIMIT", 3)  # call, tools, call -> stops
     saver = InMemorySaver()
     turns = [reply(tool_use(f"t{i}", "related_work_items", {"text": "jwt"})) for i in range(2)]
     client = FakeClient(*turns, reply(submit("t9", "Load [1].", ["pr:1"])))
@@ -270,21 +270,9 @@ def test_step_limit_closes_open_tool_calls_so_the_thread_stays_valid(monkeypatch
     assert any("step limit" in str(b.get("content")) for b in blocks)  # the closing path ran
 
 
-def test_router_sends_questions_to_the_brain_loop():
-    from agents import graph
-
-    assert graph.router({}) == {"route": "brain"}
+def test_a_question_goes_straight_to_the_brain_loop():
     client = FakeClient(reply(submit("t1", "Nothing found.", [])))
     assert ask(client).text == "Nothing found." and len(client.requests) == 1
-
-
-def test_build_route_runs_the_placeholders_without_calling_claude(monkeypatch):
-    from agents import graph
-
-    monkeypatch.setattr(graph, "router", lambda state: {"route": "build"})
-    client = FakeClient()
-    a = ask(client)
-    assert client.requests == [] and a.text is None and a.stop == "no_answer"
 
 
 def test_offline_client_runs_a_scripted_turn_through_the_real_loop():

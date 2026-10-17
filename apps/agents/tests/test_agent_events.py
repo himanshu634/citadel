@@ -103,7 +103,7 @@ def test_stop_ends_the_run_and_leaves_the_thread_valid():
 
 
 def test_step_limit_ends_every_asked_step_then_answers(monkeypatch):
-    monkeypatch.setattr(agent, "RECURSION_LIMIT", 4)
+    monkeypatch.setattr(agent, "RECURSION_LIMIT", 3)  # call, tools, call -> stops
     turns = [reply(tool_use(f"t{i}", "related_work_items", {"text": "jwt"})) for i in range(3)]
     out = events(FakeClient(*turns), checkpointer=InMemorySaver())
     assert out[-1]["kind"] == "answer" and out[-1]["stop"] == "step_limit"

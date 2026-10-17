@@ -1,6 +1,6 @@
 """A scripted stand-in for Claude, for `agents chat --offline`.
 
-Why: anyone can check the wiring without an API key. The real router, toolset, graph tools and
+Why: anyone can check the wiring without an API key. The real agent graph, toolset, graph tools and
 FalkorDB checkpointer all run; only the model is replaced by two fixed replies:
 1. call `list_systems`;
 2. submit an answer that names the systems and cites the first one.

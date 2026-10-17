@@ -159,7 +159,6 @@ def run_job(
         "stop": None,
         "stop_details": None,
         "nudges": 0,
-        "route": "brain",
     }
     try:
         _think_and_write(g, inputs, store, job, subject, ctx, result)

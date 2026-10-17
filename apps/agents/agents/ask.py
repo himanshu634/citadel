@@ -1,7 +1,7 @@
 """Ask a company graph a question; Claude answers with cited sources.
 
 Why: the product promise is "sources and graph paths behind every answer". `ask` runs one turn
-of the agent graph (`graph.py`: router -> brain loop in `loop.py`) and turns the final state
+of the agent graph (`graph.py`: the brain loop in `loop.py`) and turns the final state
 into an `Answer` with numbered sources. With a checkpointer, a `thread_id` turns follow-up
 questions into one conversation. `ask_events` is the same run as a stream of events (each tool
 call as it is asked for and as it finishes, with the subgraph it touched), which the Ask page
@@ -181,7 +181,6 @@ def _run(slug, question, thread_id, client, toolset, checkpointer, stop, model) 
         "stop": None,
         "stop_details": None,
         "nudges": 0,
-        "route": None,
         "ask_model": model,
     }
     yield {"kind": "start", "thread_id": thread_id}
