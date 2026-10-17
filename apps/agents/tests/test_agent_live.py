@@ -1,6 +1,6 @@
 """One real question against brain_synthetic. Costs a few cents; runs only with a key set.
 
-ANTHROPIC_API_KEY=... make test ARGS="apps/brain/tests/test_agent_live.py"
+ANTHROPIC_API_KEY=... make test ARGS="apps/agents/tests/test_agent_live.py"
 """
 
 from __future__ import annotations

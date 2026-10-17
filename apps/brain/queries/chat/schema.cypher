@@ -4,7 +4,7 @@
 // params:  none
 // returns: nothing
 // notes:   One statement per line. Applied once per process per company by
-//          brain.agents.history; "already indexed" errors are skipped.
+//          agents.history; "already indexed" errors are skipped.
 // example: GraphChatStore("synthetic").list_threads()
 CREATE INDEX FOR (n:Thread) ON (n.id);
 CREATE INDEX FOR (n:Thread) ON (n.updated_at);

@@ -399,12 +399,14 @@ company can't lose, systems only one person understands, owners who no longer do
 - **Tier:** done. Extend in Tier 2 with the new read tools.
 - **DB user:** `citadel_brain`, read-only on `brain_<slug>`, read-write on `agent_<slug>`
   (checkpoints).
-- **Changes:** add tools that read the work layer:
+- **Changes (not built):** add tools that read the work layer:
   - `task_timeline` (the full `Action` trail of a task);
   - `decisions_for_system` and `decisions_as_of`;
   - `release_contents`.
   Questions like "why was #412 sent back?", "what did we believe about Auth on Oct 10?" and
-  "who was told about release 3?" then all work.
+  "who was told about release 3?" then all work. Today Ask gets only the graph tools from
+  `brain.tools` (`agents/toolset.py`, `graph_toolset`) plus the company's MCP servers; the
+  work-layer tools go only to the role jobs.
 
 ---
 
@@ -436,8 +438,8 @@ would be the one agent that is pure role-play.
 
 - **Tick loop:**
   1. Expire leases (a `lease_expired` Action is logged).
-  2. Run each role in a fixed order: PM → developers → QA → PM acceptance → DevOps → Builder →
-     Critic → Risk (every N ticks).
+  2. Run each role in a fixed order (`STEPS`): PM triage → developers → QA → PM acceptance →
+     DevOps → Builder → Critic → Risk (every N ticks) → Reviewer.
   3. Each role handles at most one task per tick.
   4. Emit the tick's actions as events for the UI.
 - **Concurrency mode:** for the race simulation, run all developer instances in parallel
@@ -470,8 +472,10 @@ would be the one agent that is pure role-play.
 | `citadel_critic` | RW | RW | | |
 | `citadel_risk` | **R** | **R** | RW own | |
 | `citadel_brain` | **R** | **R** | | RW |
+| `citadel_reviewer` | RW | RW | | |
 
-Created by `agents agents users <slug>` with `ACL SETUSER`, for example:
+The table lives in `agents/acl.py` (`PERMISSIONS`). `acl.setuser_commands(slug, passwords)`
+renders it as `ACL SETUSER` lines; no CLI command runs them yet (phase 2). For example:
 
 ```text
 ACL SETUSER citadel_risk on >${PW} +@all %R~brain_falkordb %R~sim_falkordb_* %RW~mem_falkordb_risk
@@ -501,13 +505,13 @@ Existing tools that respect people leaving (`experts_for_system`, `person_profil
 apps/agents/agents/
   roles/         base.py, pm.py, developer.py, qa.py, devops.py, builder.py, critic.py,
                  risk.py, reviewer.py
-  prompts/       pm.md, developer.md, qa.md, devops.md, builder.md, critic.md, risk.md
+  prompts/       _shared.md, pm.md, developer.md, qa.md, devops.md, builder.md, critic.md,
+                 risk.md, reviewer.md
   policies/      offline deterministic policy per role (tests and --offline)
   work/          records, legal task moves, submit models, WorkStore
-  sim/           orchestrator.py, scenarios.py, events.py
+  sim/           orchestrator.py, scenarios.py
   graphs.py      names of the agent_<slug>, mem_<slug>_<role> and sim_<slug> graphs
-  memory.py      per-agent memory graph access (mem_<slug>_<role>), phase 2
-  acl.py         create and check FalkorDB users
+  acl.py         the permission table, checks, and ACL SETUSER lines for FalkorDB users
 ```
 
 `agents/graph.py` keeps the router for human chat. The empty `builder` and `critic` nodes
@@ -550,8 +554,8 @@ Built in two phases. **Phase 1 (agents)** is done; **phase 2 (connect to the bra
 - `work/model.py`: Task, Action, Episode, Decision, Release, Finding, Lesson records and the
   status, gate and action-kind enums.
 - `work/moves.py`: every legal task move (who may make it, what state it requires, what it
-  sets) in one table. The in-memory store enforces it, and each `queries/work/*.cypher` guard
-  must match it.
+  sets) in one table. The in-memory store enforces it, and phase 2's `queries/work/*.cypher`
+  guards must match it.
 - `work/submits.py`: one pydantic model per `submit_*` tool. These are the parameter models
   of the phase 2 write queries.
 - `work/store.py`: the `WorkStore` protocol: `read(name, params)` and
