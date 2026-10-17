@@ -4,7 +4,7 @@
 agent that repairs it.**
 
 Citadel is our entry for *Graph Hacks: Context for AI Agents* (FalkorDB × WeMakeDevs, Oct 15–18 2026).
-Tracks: **Company Brain** and **Agent Memory & Coordination**.
+Tracks: **Company Brain** and **Agent Memory & Coordination** ([how Citadel covers Track 02](#agent-memory--coordination-track-02)).
 
 ## The problem
 
@@ -48,7 +48,7 @@ How a gap becomes a claim: [The self-healing loop](#the-self-healing-loop).
 | Part | What it does | Status |
 |---|---|---|
 | **The Brain** | One FalkorDB graph per company (`brain_<slug>`), built from GitHub, Linear, docs and chat exports: people, teams, systems, changes, work items, documents | Built |
-| **Named graph tools** | 17 read queries, each a reviewed `.cypher` file with typed params. Agents pick a tool and fill its params; no LLM ever writes Cypher | Built |
+| **Named graph tools** | 18 read queries, each a reviewed `.cypher` file with typed params. Agents pick a tool and fill its params; no LLM ever writes Cypher | Built |
 | **Ask** (`brain` agent) | A Claude agent that answers from the tools and may cite only the nodes it has seen. Every turn is traced (no-answer, zero-source, thumbs). It answers from the sources first and says when a part comes from the Keeper | Built |
 | **Keeper** (`keeper` agent) | Turns failed questions, thumbs-down answers and what it notices after a build into gaps, consults `pm` and `qa`, checks their claims against the sources and a fixed critical rule, asks a lead to approve the critical ones, writes the rest into the brain, and logs every step | Built: HTTP API and app |
 | **`pm` and `qa` agents** | Answer the Keeper's consults with draft claims that cite real nodes; `pm` opens a follow-up for each new owner, expert or decision claim, and for each claim the sources contradict. They never message each other: the Keeper's ledger graph is the only channel ([spec](docs/agents.md)) | Built |
@@ -126,6 +126,22 @@ The diagrams are Excalidraw scenes: open the `.excalidraw` files in
 [docs/architecture/](docs/architecture/) at [excalidraw.com](https://excalidraw.com) (File → Open)
 to edit them, then export SVG over the old one. The `.mmd` files are the Mermaid sources the
 scenes were first generated from.
+
+## Agent Memory & Coordination (Track 02)
+
+Where each part of the track lives. Each company has three graphs in one FalkorDB: `brain_<slug>`
+(what the company knows), `agent_<slug>` (the agents' chats) and `keeper_<slug>` (the Keeper's
+ledger, which survives a rebuild of the brain).
+
+| Track 02 asks for | In Citadel | Code | Proof (test) |
+|---|---|---|---|
+| **Episodic memory** | Every Ask turn as a graph in `agent_<slug>`: `Thread → Turn → LLMCall → ToolCall → Ref`, beside the LangGraph checkpoints that resume a thread. Every Keeper review as `Review` + `ReviewStep`s, and an append-only log (who, what, why, who approved) in `keeper_<slug>`. Plus one trace line per turn in `data/traces/<slug>.jsonl` (tools, stop, tokens, thumbs) | `agents/history.py`, `agents/checkpoint.py`, `agents/keeper/store.py`, `agents/traces.py` | `test_history_graph.py`, `test_keeper_store.py`, `test_traces.py` |
+| **Semantic memory** | Accepted claims projected into `brain_<slug>` as `Claim` nodes with `ABOUT` and `EVIDENCE` edges. Ask reads them through `keeper_notes` and `get_entity`, cites them and says they come from the Keeper | `agents/keeper/project.py`, `brain/keeper.py`, `queries/keeper/project_claim.cypher` | `test_keeper_decide.py` |
+| **Memory that changes** | A claim has `valid_from` / `valid_to`. A new claim supersedes the old one, nothing is deleted. After every build each accepted claim is checked again: one the sources now contradict is superseded, one whose evidence is gone goes stale and reopens its gap | `agents/keeper/decide.py`, `agents/keeper/review.py` | `test_supersedes_earlier_claim`, `test_stale_on_projection_missing` |
+| **Procedural memory** | How the agents act is fixed in reviewed files, not learned or improvised: 18 named Cypher tools with typed params (no LLM-written Cypher), the Keeper's fixed rules (evidence must exist, sources win, the critical rule), one prompt per role | `brain/tools.py`, `queries/tools/`, `agents/keeper/rules.py`, `agents/prompts/` | `test_keeper_rules.py` |
+| **Shared state and handoffs** | Agents never message each other: the ledger is the only channel. The Keeper posts a `Consult` per gap for `pm` and `qa` (idempotent per gap, role and attempt). Each role reads its own queue and answers once with a draft claim citing real uids. The Keeper reads the answers and decides | `queries/ledger/post_consult.cypher`, `queue_consult.cypher`, `answer_consult.cypher` | `test_keeper_review.py`, `test_keeper_jobs.py` |
+| **Concurrency** | Every status move is guarded in its Cypher (`WHERE c.status IN $from`), so of two racing approvals, or an approve and a reject, one wins and the other changes nothing (HTTP 409). One review per company at a time; nothing reviews or decides while the company rebuilds | `queries/ledger/set_claim_status.cypher`, `agents/keeper/decide.py` (`ClaimNotPending`), `backend/keeper_runs.py` | `test_claim_status_guard` (memory store and real FalkorDB), `test_approve_twice` |
+| **Isolation** | One graph per company; `brain/db.py` is the only place that opens a connection and picks the graph, and the API resolves the slug in one place. A permission table says which database user (`citadel_brain`, `citadel_keeper`, `citadel_pm`, `citadel_qa`, ...) may read or write which graph; the ledger store checks it on every read and write. The same table renders `ACL SETUSER` lines for FalkorDB, not yet applied: today all users share one connection | `brain/db.py`, `backend/api/deps.py`, `agents/acl.py` | `apps/backend/tests/api/test_isolation.py`, `test_acl_refused`, `test_keeper_acl.py` |
 
 ## Running it
 
