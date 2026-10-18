@@ -399,6 +399,24 @@ export interface GraphEdge {
 	target: string;
 }
 
+/** Everything one graph node stores (`GET .../graph/node`), for the map's hover card. */
+export interface NodeDetails {
+	uid: string;
+	label: GraphLabel;
+	props: Record<string, unknown>;
+}
+
+/** One relationship between two nodes and what it stores (`GET .../graph/link`). */
+export interface LinkDetails extends GraphEdge {
+	props: Record<string, unknown>;
+}
+
+/** Reads what the map's hover card shows: a node's properties, or every link between a pair. */
+export interface MapDetails {
+	node: (uid: string) => Promise<NodeDetails>;
+	link: (a: string, b: string) => Promise<LinkDetails[]>;
+}
+
 export interface Territory {
 	/** The system's uid, `other` (the smaller systems) or `none` (not linked to code). */
 	id: string;

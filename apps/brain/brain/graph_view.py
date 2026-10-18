@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Iterable
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -50,6 +51,20 @@ class GraphEdge(BaseModel):
     source: str
     rel: str
     target: str
+
+
+class NodeDetails(BaseModel):
+    """Everything one node stores, for the hover card."""
+
+    uid: str
+    label: str
+    props: dict[str, Any]
+
+
+class LinkDetails(GraphEdge):
+    """One relationship between two nodes and what it stores (source, count, pattern, ...)."""
+
+    props: dict[str, Any]
 
 
 class Territory(BaseModel):
@@ -198,3 +213,26 @@ def load(slug: str, bots: bool = False) -> GraphView:
     node_rows = db.run(slug, "graph/nodes", params, read_only=True)
     edge_rows = db.run(slug, "graph/edges", params, read_only=True)
     return build(slug, node_rows, edge_rows, bots=bots)
+
+
+# Vectors are numbers for the search index, not something a person reads.
+HIDDEN_PROPS = frozenset({"embedding"})
+
+
+def node_details(slug: str, uid: str) -> NodeDetails | None:
+    """Every property one node stores, or None when the graph has no such node."""
+    rows = db.run(slug, "graph/node", {"uid": uid}, read_only=True)
+    if not rows:
+        return None
+    row = rows[0]
+    props = {k: v for k, v in (row["props"] or {}).items() if k not in HIDDEN_PROPS}
+    return NodeDetails(uid=row["uid"], label=row["label"], props=props)
+
+
+def link_details(slug: str, a: str, b: str) -> list[LinkDetails]:
+    """Every relationship between nodes `a` and `b`, either way round; empty when not linked."""
+    rows = db.run(slug, "graph/link", {"a": a, "b": b}, read_only=True)
+    return [
+        LinkDetails(source=r["source"], rel=r["rel"], target=r["target"], props=r["props"] or {})
+        for r in rows
+    ]

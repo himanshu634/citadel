@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	edgesAt,
 	hull,
 	kept,
 	layoutMap,
@@ -7,6 +8,7 @@ import {
 	nodeName,
 	nodeRadius,
 	outline,
+	propRows,
 	ROUTE_MIN,
 	routes,
 	search,
@@ -192,5 +194,68 @@ describe('filters and search', () => {
 		const t = tally(view);
 		expect(t.kinds[0]).toEqual(['WorkItem', 3]);
 		expect(t.rels.find(([r]) => r === 'MENTIONS')).toEqual(['MENTIONS', 2]);
+	});
+});
+
+describe('edgesAt', () => {
+	const at = (uid: string) =>
+		({ a: { x: 0, y: 0 }, b: { x: 10, y: 0 }, c: { x: 0, y: 10 } })[uid as 'a' | 'b' | 'c'];
+	const edges = [
+		{ source: 'a', target: 'b' },
+		{ source: 'a', target: 'c' },
+		{ source: 'b', target: 'a' }
+	];
+	const all = () => true;
+
+	it('finds every link between the nearest pair, either way round', () => {
+		expect(edgesAt(edges, all, at, 5, 0.5, 2)).toEqual([0, 2]);
+		expect(edgesAt(edges, all, at, 0.5, 6, 2)).toEqual([1]);
+	});
+
+	it('finds nothing beyond the tolerance or past a line end', () => {
+		expect(edgesAt(edges, all, at, 5, 4, 2)).toEqual([]);
+		expect(edgesAt(edges, all, at, 14, 0, 2)).toEqual([]);
+	});
+
+	it('looks only at drawn links', () => {
+		expect(edgesAt(edges, (i) => i === 1, at, 5, 0.5, 2)).toEqual([]);
+		expect(edgesAt(edges, (i) => i !== 2, at, 5, 0.5, 2)).toEqual([0]);
+	});
+});
+
+describe('propRows', () => {
+	it('puts uid first, then sorts by name', () => {
+		expect(propRows({ title: 't', body: 'b', uid: 'u' }).map((r) => r.key)).toEqual([
+			'uid',
+			'body',
+			'title'
+		]);
+	});
+
+	it('writes out dates, epochs, booleans, lists and empty values', () => {
+		const rows = Object.fromEntries(
+			propRows({
+				created_at: '2026-04-14T12:00:00Z',
+				created_ts: 1776168000,
+				is_bot: false,
+				files: ['a.py', 'b.py'],
+				labels: [],
+				count: 1200,
+				state: null
+			}).map((r) => [r.key, r.value])
+		);
+		expect(rows.created_at).toBe(rows.created_ts);
+		expect(rows.created_at).toContain('2026');
+		expect(rows.is_bot).toBe('no');
+		expect(rows.files).toBe('a.py, b.py');
+		expect(rows.labels).toBe('—');
+		expect(rows.count).toBe('1200');
+		expect(rows.state).toBe('—');
+	});
+
+	it('cuts long text at a word and folds whitespace', () => {
+		const [row] = propRows({ body: 'word '.repeat(100) + '\n\nend' }, 22);
+		expect(row.value).toBe('word word word word …');
+		expect(propRows(undefined)).toEqual([]);
 	});
 });

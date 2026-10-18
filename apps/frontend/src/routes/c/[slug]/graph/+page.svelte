@@ -27,7 +27,8 @@ overview (`viewOf`). The layout runs in a worker (`graphLayout.ts`), because it 
 		NODE_LABELS,
 		type Entity,
 		type GraphLabel,
-		type GraphView
+		type GraphView,
+		type MapDetails
 	} from '$lib/types';
 
 	let { data } = $props();
@@ -114,6 +115,15 @@ overview (`viewOf`). The layout runs in a worker (`graphLayout.ts`), because it 
 			: null
 	);
 	const territory = $derived(node ? (graph?.territories.find((t) => t.id === node.territory) ?? null) : null);
+
+	/** What the map's hover card reads, with the API's errors said in words. */
+	const details: MapDetails = {
+		node: (uid) => api.graphNode(data.slug, uid).catch(fail),
+		link: (a, b) => api.graphLink(data.slug, a, b).catch(fail)
+	};
+	function fail(e: unknown): never {
+		throw new Error(describeError(e));
+	}
 
 	let entity = $state.raw<{ uid: string; value: Entity | null; error: string | null } | null>(null);
 	$effect(() => {
@@ -383,7 +393,14 @@ overview (`viewOf`). The layout runs in a worker (`graphLayout.ts`), because it 
 							{/if}
 						</div>
 					{:else}
-						<TerritoryMap view={graph} {layout} {selected} {keep} onselect={select} />
+						<TerritoryMap
+							view={graph}
+							{layout}
+							{selected}
+							{keep}
+							onselect={select}
+							{details}
+						/>
 					{/if}
 				</div>
 				{#if node && hood}
