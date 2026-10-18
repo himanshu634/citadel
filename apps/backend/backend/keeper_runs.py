@@ -3,7 +3,9 @@ its progress for the Keeper page.
 
 Why: a review (`agents.keeper.review`) runs LLM jobs for minutes, so a request only starts,
 follows or stops it. The app runs one after each finished build (budget `keeper_build_budget`),
-on "Review now" (`keeper_budget`) and after an approval (budget 0, so pm's follow-up shows).
+on "Review now" (`keeper_budget`), after an approval (budget 0, so pm's follow-up shows) and
+after a review whose Archivist runs sent gaps back to open (trigger "archive", budget: that many
+gaps, so they are consulted again with what the Archivist found).
 
 - One API process per FalkorDB runs every review (no CLI runs one; `make api`'s `--reload`
   ends the old worker before it starts the new one; review threads are daemons). So a review
@@ -13,7 +15,10 @@ on "Review now" (`keeper_budget`) and after an approval (budget 0, so pm's follo
   `running` in the ledger is stopped (`ledger/review_stop_running`, stop "restart"): a restart
   cut it off and `recover` could not stop it (FalkorDB was down at startup). A "build" start
   that finds this process's review running is kept pending and starts (with its budget) when
-  that review ends, so a finished build is always reviewed.
+  that review ends, so a finished build is always reviewed. A run that ends with
+  `archive_reopened` keeps its follow-on review pending the same way (not when it was asked to
+  stop), and picks the reopened gaps first; when a build review is pending too, the one review
+  that runs is the build's, with the larger budget, still picking those gaps first.
 - While the company builds (`building`, the app's `JobRunner.building`) nothing starts:
   `start` and `start_soon` raise `BrainBuilding`, and the brain the reviews see reads as
   missing (`graph_exists` False), so a running review stops `brain_unavailable` instead of
@@ -48,13 +53,13 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 from agents import llm
 from agents.keeper import decide
 from agents.keeper.decide import DB_USER, BrainFacts
 from agents.keeper.gaps import utc_now
-from agents.keeper.model import Review, review_uid
+from agents.keeper.model import Review, ReviewTrigger, review_uid
 from agents.keeper.review import ReviewEvent, review, skip_review
 from agents.keeper.store import KeeperStore
 from agents.toolset import Runner
@@ -65,7 +70,7 @@ from backend.fanout import Subscriber, Subscription, deliver
 
 log = logging.getLogger(__name__)
 
-Trigger = Literal["build", "manual", "approval"]
+Trigger = ReviewTrigger
 ENDS: tuple[str, ...] = ("done", "stopped", "failed", "skipped")  # the kinds that end a run
 START_WAIT_SECONDS = 10.0  # how long `start` waits for the ledger to record the review
 REBUILD_WAIT_SECONDS = 10.0  # how long a rebuild waits for the review it stopped to end
@@ -172,7 +177,9 @@ class KeeperRuns:
         self.start_wait = start_wait
         self._lock = threading.RLock()  # the run table, each run's events and the subscribers
         self._runs: dict[str, _Run] = {}  # the latest run per slug started by this process
-        self._pending: dict[str, int] = {}  # slug -> budget of a build review to run next
+        # slug -> (trigger, budget, gaps to pick first) of the review to run when the slug's run
+        # ends: a build's, or the follow-on of a run whose Archivist runs reopened gaps
+        self._pending: dict[str, tuple[Trigger, int, list[str]]] = {}
         self._subscribers: set[Subscriber[ReviewEvent]] = set()  # None on a queue: the run is over
 
     @property
@@ -213,7 +220,9 @@ class KeeperRuns:
         start; the run logs its own errors."""
         self._launch(slug, trigger, budget)
 
-    def _launch(self, slug: str, trigger: Trigger, budget: int) -> _Run:
+    def _launch(
+        self, slug: str, trigger: Trigger, budget: int, pick_first: list[str] | None = None
+    ) -> _Run:
         """The slug's live run in this process (a "build" start is kept pending until it ends),
         else a new one in a worker thread. The building check is under the lock, so a rebuild
         that begins after it finds this run when it stops the slug's review."""
@@ -223,12 +232,15 @@ class KeeperRuns:
             run = self._live(slug)
             if run is not None:
                 if trigger == "build":
-                    self._pending[slug] = budget
+                    self._keep_pending(slug, "build", budget, [])
                 return run
             run = _Run(slug)
             self._runs[slug] = run
             worker = threading.Thread(
-                target=self._work, args=(run, trigger, budget), name=f"keeper-{slug}", daemon=True
+                target=self._work,
+                args=(run, trigger, budget, pick_first or []),
+                name=f"keeper-{slug}",
+                daemon=True,
             )
             try:
                 worker.start()
@@ -317,7 +329,7 @@ class KeeperRuns:
 
     # --- worker --------------------------------------------------------------------------------
 
-    def _work(self, run: _Run, trigger: Trigger, budget: int) -> None:
+    def _work(self, run: _Run, trigger: Trigger, budget: int, pick_first: list[str]) -> None:
         def on_event(event: ReviewEvent) -> None:
             self._emit(run, event)
             run.started.set()
@@ -340,6 +352,7 @@ class KeeperRuns:
                     client_for=self.client_for,
                     graph_run=self.graph_run,
                     should_stop=run.stop.is_set,
+                    pick_first=pick_first,
                     **common,
                 )
             else:
@@ -358,21 +371,38 @@ class KeeperRuns:
                         self._subscribers.discard(sub)
                 run.done.set()
             run.started.set()
+        reopened = run.result.archive_reopened if run.result is not None else []
+        if reopened and not run.stop.is_set():  # a stopped run's gaps wait for the next review
+            with self._lock:
+                self._keep_pending(run.slug, "archive", len(reopened), list(reopened))
         self._start_pending(run.slug)
 
+    def _keep_pending(self, slug: str, trigger: Trigger, budget: int, first: list[str]) -> None:
+        """Keep a review to run when the slug's run ends. One slot: a build's review wins over
+        an archive follow-on, the larger budget is kept, and so are the reopened gaps it picks
+        first. Call it holding the lock."""
+        held = self._pending.get(slug)
+        if held is not None:
+            trigger = "build" if "build" in (trigger, held[0]) else trigger
+            budget = max(budget, held[1])
+            first = list(dict.fromkeys([*held[2], *first]))
+        self._pending[slug] = (trigger, budget, first)
+
     def _start_pending(self, slug: str) -> None:
-        """The build review a finished build asked for while this one ran. Dropped while the
-        slug builds again: that build's own hook reviews after it."""
+        """The review kept for when this one ended: a finished build's, or the follow-on of a
+        run whose Archivist runs reopened gaps. Dropped while the slug builds again: that
+        build's own hook reviews after it."""
         with self._lock:
-            budget = self._pending.pop(slug, None)
-        if budget is None:
+            pending = self._pending.pop(slug, None)
+        if pending is None:
             return
+        trigger, budget, first = pending
         try:
-            self._launch(slug, "build", budget)
+            self._launch(slug, trigger, budget, first)
         except BrainBuilding:
             pass
         except Exception:
-            log.exception("could not start the pending build review of %s", slug)
+            log.exception("could not start the pending %s review of %s", trigger, slug)
 
     def _emit(self, run: _Run, event: ReviewEvent) -> None:
         with self._lock:

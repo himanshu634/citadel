@@ -10,7 +10,8 @@ graph. Agent jobs reach them through the `WorkStore` protocol (`agents/work/stor
 Two implementations with the same behaviour:
 - `KeeperStore` runs `apps/brain/queries/ledger/<name>.cypher` on keeper_<slug>. Dedupe and
   guards (one live gap per question, one consult per role per gap, one follow-up per claim,
-  guarded gap and claim status moves, one running review, a step finished once) are in the
+  guarded gap and claim status moves, a gap asks the Archivist once, one running review, a step
+  finished once) are in the
   Cypher: `review_start` starts nothing while a review is running, `review_stop_running`
   stops every running one (`backend.keeper_runs`: their run is gone). A review's steps
   (`ledger/write_step`, `finish_step`, `review_steps`) are the activity trail's; a step's
@@ -40,7 +41,10 @@ from agents import acl
 from agents.graphs import keeper_graph_name
 from agents.keeper.model import (
     LIVE_GAP,
+    LIVE_REQUEST,
     NOTICING_KINDS,
+    ArchiveFind,
+    ArchiveRequest,
     Claim,
     ClaimStatus,
     Consult,
@@ -48,6 +52,8 @@ from agents.keeper.model import (
     Gap,
     GapStatus,
     LogEntry,
+    RequestOutcome,
+    RequestStatus,
     Review,
     ReviewStep,
     consult_uid,
@@ -75,6 +81,12 @@ READS: tuple[str, ...] = (
     "ledger/claims_for_gap",
     "ledger/queue_follow_up",
     "ledger/followups",
+    "ledger/archive_get_request",
+    "ledger/archive_queue",
+    "ledger/archive_finds",
+    "ledger/archive_recall",
+    "ledger/archive_requests",
+    "ledger/archive_requests_for_gap",
 )
 
 EPISODES: tuple[str, ...] = ("ledger/write_episode",)  # from runner.run_job
@@ -82,6 +94,7 @@ EPISODES: tuple[str, ...] = ("ledger/write_episode",)  # from runner.run_job
 WRITES: tuple[str, ...] = (
     "ledger/open_gap",
     "ledger/set_gap_status",
+    "ledger/gap_archive_asked",
     "ledger/log",
     "ledger/review_start",
     "ledger/review_finish",
@@ -95,6 +108,9 @@ WRITES: tuple[str, ...] = (
     "ledger/set_claim_status",
     "ledger/open_followup",
     "ledger/follow_up_tried",
+    "ledger/archive_open_request",
+    "ledger/archive_set_request",
+    "ledger/archive_write_find",
     *EPISODES,
 )
 
@@ -105,7 +121,8 @@ OPTIONAL: dict[str, dict[str, Any]] = {
     "ledger/set_gap_status": {"reason": None, "attempts_inc": 0},
     "ledger/log": {"why": None, "gap": None, "claim": None, "evidence": []},
     "ledger/read_log": {"gap": None, "claim": None},
-    "ledger/review_finish": {"stop": None},
+    "ledger/review_finish": {"stop": None, "archive_reopened": []},
+    "ledger/post_consult": {"archive": False},
     "ledger/review_picked": {"gap_text": None},
     "ledger/write_step": {
         "kind": "graph",
@@ -126,6 +143,25 @@ OPTIONAL: dict[str, dict[str, Any]] = {
     "ledger/set_claim_status": {"by": None, "why": None, "valid_to": None, "conflict": None},
     "ledger/open_followup": {"body": "", "by": "pm"},
     "ledger/followups": {"status": None},
+    "ledger/archive_open_request": {
+        "refs": [],
+        "from_uid": None,
+        "gap": None,
+        "thread": None,
+    },
+    "ledger/archive_set_request": {
+        "outcome": None,
+        "summary": None,
+        "reason": None,
+        "partial": False,
+        "calls": 0,
+    },
+    "ledger/archive_write_find": {
+        "url": None,
+        "date": None,
+        "evidence": [],
+        "superseded_by": None,
+    },
 }
 
 # Params that hold a timestamp. Each is stored as ISO text (`model.iso`).
@@ -157,6 +193,12 @@ RECORDS: dict[str, type[BaseModel]] = {
     "ledger/claims_for_gap": Claim,
     "ledger/queue_follow_up": Claim,
     "ledger/followups": FollowUp,
+    "ledger/archive_get_request": ArchiveRequest,
+    "ledger/archive_queue": ArchiveRequest,
+    "ledger/archive_recall": ArchiveRequest,
+    "ledger/archive_requests": ArchiveRequest,
+    "ledger/archive_requests_for_gap": ArchiveRequest,
+    "ledger/archive_finds": ArchiveFind,
 }
 
 
@@ -165,6 +207,7 @@ _UID = re.compile(r"[a-z_]+:\S+")  # a uid, e.g. claim:1a2b3c4d5e6f (not an acti
 _STATUS: dict[str, tuple[str, ...]] = {
     "ledger/set_gap_status": get_args(GapStatus),
     "ledger/set_claim_status": get_args(ClaimStatus),
+    "ledger/archive_set_request": get_args(RequestStatus),
     "ledger/write_step": ("running", "done", "failed"),
     "ledger/finish_step": ("done", "failed"),
 }
@@ -198,6 +241,16 @@ def _validate(name: str, p: dict[str, Any]) -> None:
             created_at=p.get("now"),
             updated_at=p.get("now"),
         )
+    if name == "ledger/archive_open_request":
+        if not str(p.get("norm") or "").strip():
+            raise ValueError(f"{name}: norm is empty")
+        fields = {k: p[k] for k in ArchiveRequest.model_fields if k in p}
+        ArchiveRequest(**fields, created_at=p.get("now"), updated_at=p.get("now"))
+    outcomes = (None, *get_args(RequestOutcome))
+    if name == "ledger/archive_set_request" and p.get("outcome") not in outcomes:
+        raise ValueError(f"{name}: unknown outcome {p['outcome']!r}")
+    if name == "ledger/archive_write_find":
+        ArchiveFind(**{k: p[k] for k in ArchiveFind.model_fields if k in p})
     if name == "ledger/write_claim":
         for key in ("created_at", "updated_at"):
             if p.get(key) is None:
@@ -345,6 +398,8 @@ class MemoryKeeperStore(_LedgerStore):
         self.consults: dict[str, Consult] = {}
         self.claims: dict[str, Claim] = {}
         self.followups: dict[str, FollowUp] = {}
+        self.requests: dict[str, ArchiveRequest] = {}
+        self.finds: dict[tuple[str, str], ArchiveFind] = {}  # (request, item uid)
         self._lock = threading.RLock()
 
     def _read(self, name: str, params: dict[str, Any]) -> list[Row]:
@@ -418,6 +473,13 @@ class MemoryKeeperStore(_LedgerStore):
         g.attempts += p["attempts_inc"]
         return [{"uid": g.uid, "status": g.status}]
 
+    def _w_gap_archive_asked(self, p: Mapping[str, Any]) -> list[Row]:
+        g = self.gaps.get(p["uid"])
+        if g is None or g.archive_asked:
+            return []
+        g.archive_asked = True
+        return [{"uid": g.uid}]
+
     # --- log ----------------------------------------------------------------------------------
 
     def _w_log(self, p: Mapping[str, Any]) -> list[Row]:
@@ -453,6 +515,7 @@ class MemoryKeeperStore(_LedgerStore):
         for r in self.reviews:
             if r.uid == p["uid"] and r.state == "running":
                 r.state, r.stop, r.ended_at = p["state"], p["stop"], p["now"]
+                r.archive_reopened = list(p["archive_reopened"])
                 return [{"uid": r.uid, "state": r.state}]
         return []
 
@@ -484,8 +547,8 @@ class MemoryKeeperStore(_LedgerStore):
     # --- review steps -------------------------------------------------------------------------
 
     def _w_write_step(self, p: Mapping[str, Any]) -> list[Row]:
-        if not any(r.uid == p["review"] for r in self.reviews):
-            return []
+        if p["review"] not in self.requests and not any(r.uid == p["review"] for r in self.reviews):
+            return []  # steps hang off a review or an archive request
         keys = ("review", "n", "actor", "tool", "kind", "input", "status", "count", "error")
         self.steps[(p["review"], p["n"])] = {
             **{k: p[k] for k in keys},
@@ -512,12 +575,12 @@ class MemoryKeeperStore(_LedgerStore):
     # --- consults -----------------------------------------------------------------------------
 
     def _w_post_consult(self, p: Mapping[str, Any]) -> list[Row]:
-        uid = consult_uid(p["gap"], p["role"], p["attempt"])
+        uid = consult_uid(p["gap"], p["role"], p["attempt"], p["archive"])
         created = uid not in self.consults
         if created:
-            self.consults[uid] = Consult(
-                uid=uid, gap=p["gap"], role=p["role"], attempt=p["attempt"], created_at=p["now"]
-            )
+            self.consults[uid] = Consult(uid=uid, gap=p["gap"], role=p["role"],
+                                         attempt=p["attempt"], archive=p["archive"],
+                                         created_at=p["now"])  # fmt: skip
         return [{"uid": uid, "created": created}]
 
     def _r_queue_consult(self, p: Mapping[str, Any]) -> list[Row]:
@@ -546,7 +609,11 @@ class MemoryKeeperStore(_LedgerStore):
         if gap is None:
             return []
         rows = sorted(
-            (c for c in self.consults.values() if c.gap == gap.uid and c.attempt == gap.attempts),
+            (
+                c
+                for c in self.consults.values()
+                if c.gap == gap.uid and c.attempt == gap.attempts and c.archive == gap.archive_asked
+            ),
             key=lambda c: c.role,
         )
         return [c.model_dump() for c in rows]
@@ -651,3 +718,84 @@ class MemoryKeeperStore(_LedgerStore):
         rows = [f for f in self.followups.values() if p["status"] in (None, f.status)]
         rows.sort(key=lambda f: (f.created_at, f.uid), reverse=True)
         return [f.model_dump() for f in rows[: p["limit"]]]
+
+    # --- archive requests ---------------------------------------------------------------------
+
+    def _w_archive_open_request(self, p: Mapping[str, Any]) -> list[Row]:
+        live = sorted(
+            (r for r in self.requests.values() if r.norm == p["norm"] and r.status in LIVE_REQUEST),
+            key=lambda r: (r.created_at, r.uid),
+        )
+        if live:
+            return [{"uid": live[0].uid, "created": False, "status": live[0].status}]
+        r = ArchiveRequest(
+            uid=p["uid"],
+            kind=p["kind"],
+            text=p["text"],
+            refs=list(p["refs"]),
+            from_uid=p["from_uid"],
+            asked_by=p["asked_by"],
+            gap=p["gap"],
+            thread=p["thread"],
+            norm=p["norm"],
+            created_at=p["now"],
+            updated_at=p["now"],
+        )
+        self.requests[r.uid] = r
+        return [{"uid": r.uid, "created": True, "status": r.status}]
+
+    def _r_archive_get_request(self, p: Mapping[str, Any]) -> list[Row]:
+        r = self.requests.get(p["uid"])
+        return [r.model_dump()] if r else []
+
+    def _r_archive_queue(self, p: Mapping[str, Any]) -> list[Row]:
+        rows = sorted(
+            (r for r in self.requests.values() if r.status == "open"),
+            key=lambda r: (r.created_at, r.uid),
+        )
+        return [r.model_dump() for r in rows[: p["limit"]]]
+
+    def _w_archive_set_request(self, p: Mapping[str, Any]) -> list[Row]:
+        r = self.requests.get(p["uid"])
+        if r is None or r.status not in p["from"]:
+            return []
+        r.status = p["to"]
+        r.outcome, r.summary, r.reason = p["outcome"], p["summary"], p["reason"]
+        r.partial, r.calls, r.updated_at = p["partial"], p["calls"], p["now"]
+        return [{"uid": r.uid, "status": r.status}]
+
+    def _w_archive_write_find(self, p: Mapping[str, Any]) -> list[Row]:
+        if p["request"] not in self.requests:
+            return []
+        f = ArchiveFind(**{k: p[k] for k in ArchiveFind.model_fields})
+        self.finds[(f.request, f.uid)] = f
+        return [{"request": f.request, "uid": f.uid}]
+
+    def _r_archive_finds(self, p: Mapping[str, Any]) -> list[Row]:
+        keys = sorted(k for k in self.finds if k[0] in p["requests"])
+        return [self.finds[k].model_dump() for k in keys]
+
+    def _r_archive_recall(self, p: Mapping[str, Any]) -> list[Row]:
+        rows = [
+            r
+            for r in self.requests.values()
+            if r.norm == p["norm"]
+            and r.status == "answered"
+            and not r.partial
+            and r.updated_at >= p["since"]
+            and not (
+                p["asked_by"] == "keeper" and (r.asked_by, r.outcome) == ("ask", "nothing_found")
+            )
+        ]
+        rows.sort(key=lambda r: (r.updated_at, r.uid), reverse=True)
+        return [r.model_dump() for r in rows[:1]]
+
+    def _r_archive_requests(self, p: Mapping[str, Any]) -> list[Row]:
+        rows = [r for r in self.requests.values() if r.status in p["statuses"]]
+        rows.sort(key=lambda r: (r.updated_at, r.uid), reverse=True)
+        return [r.model_dump() for r in rows[: p["limit"]]]
+
+    def _r_archive_requests_for_gap(self, p: Mapping[str, Any]) -> list[Row]:
+        rows = [r for r in self.requests.values() if r.gap == p["gap"]]
+        rows.sort(key=lambda r: (r.updated_at, r.uid), reverse=True)
+        return [r.model_dump() for r in rows]

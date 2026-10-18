@@ -1,8 +1,9 @@
 """What one tool call touched in the graph, as a small subgraph the UI can draw.
 
 Why: the Ask page draws the agent's walk through the company graph, one tool call at a time.
-Only `path_between`, `get_entity` and `keeper_notes` return relationships; the other tools
-return rows whose fields name nodes (a person's teams, an expert's system). `subgraph` turns any
+Only `path_between`, `get_entity` and `keeper_notes` return relationships (`ask_archivist` its
+finds, each MENTIONed by the item that referred to it); the other tools return rows whose
+fields name nodes (a person's teams, an expert's system). `subgraph` turns any
 tool's rows into nodes and relationships with the graph's own uids, so the steps of one answer
 merge into one picture. A relationship the rows only imply (an expert "works on" a system, two
 systems change together) is marked `inferred`, and the UI draws it differently from a stored one.
@@ -256,7 +257,36 @@ def _keeper_notes(b: _Builder, params: Row, rows: list[Row]) -> None:
             b.rel(claim, ev, "EVIDENCE")
 
 
+def _label_of(uid: str) -> str:
+    """A node's label from its uid alone: system:, person:, team:, else the item kind."""
+    if label := _LABEL_BY_PREFIX.get(uid.split(":")[0]):
+        return label
+    return "Document" if ":doc:" in uid else "Change" if ":commit:" in uid else "WorkItem"
+
+
+def _named(find: Row, refs: list[str]) -> bool:
+    """A reference request's ref names this find: its uid or url, or "#<n>" for an item n."""
+    uid = str(find.get("uid"))
+    return any(r in (uid, find.get("url")) or (r.startswith("#") and uid.endswith(f":{r[1:]}"))
+               for r in refs)  # fmt: skip
+
+
+def _ask_archivist(b: _Builder, params: Row, rows: list[Row]) -> None:
+    """The items the Archivist loaded, each MENTIONed by the item the request came from
+    (`from_uid`): stored for a find a ref of the request names, only implied for the others
+    (a topic request's, or one found on the way)."""
+    finds = [f for r in rows for f in r.get("finds") or [] if f.get("uid")]
+    origin = params.get("from_uid")
+    asker = b.node(origin, _label_of(origin)) if origin and finds else None
+    refs = str(params.get("text") or "").replace(",", " ").split()
+    refs = refs if params.get("kind") == "reference" else []
+    for f in finds:
+        found = b.node(f["uid"], _label_of(f["uid"]), f.get("title"), f.get("url"))
+        b.rel(asker, found, "MENTIONS", inferred=not _named(f, refs))
+
+
 _BY_TOOL: dict[str, Callable[[_Builder, Row, list[Row]], None]] = {
+    "ask_archivist": _ask_archivist,
     "bottlenecks": _bottlenecks,
     "central_nodes": _central_nodes,
     "collaborators": _collaborators,

@@ -143,6 +143,56 @@ def test_codeowners_pattern_matching(pattern, path, hit):
     assert bool(codeowners.matching_files(pattern, [path])) is hit
 
 
+def test_records_unchanged_by_split(out):
+    """records() output equals a snapshot taken before pr_records/issue_records were split out
+    (the new `unresolved_refs` field is not part of the snapshot)."""
+    _, recs = out
+    got = []
+    for r in recs:
+        d = r.model_dump(mode="json")
+        d.pop("unresolved_refs", None)
+        got.append(json.dumps({"type": type(r).__name__, **d}, sort_keys=True))
+    snapshot = (FIXTURE.parent / "records_snapshot.jsonl").read_text().splitlines()
+    assert got == snapshot
+
+
+def test_unresolved_refs_for_uncached_numbers(company, tmp_path):
+    cache = tmp_path / "cache"
+    shutil.copytree(FIXTURE, cache)
+    pr_file = cache / "pull_requests" / "20261016T000000_0000.json"
+    prs = json.loads(pr_file.read_text())
+    pr = next(p for p in prs if p["number"] == PR)
+    pr["body"] = (
+        f"Refs #{ISSUE}, see #9999 and https://github.com/FalkorDB/FalkorDB/issues/9998, "
+        f"itself #{PR}"
+    )
+    pr["comments"]["nodes"] = [
+        {
+            "id": "c-1",
+            "url": "https://x/c-1",
+            "author": {"login": "a"},
+            "createdAt": "2026-04-20T00:00:00Z",
+            "body": "also #9997",
+        }
+    ]
+    pr["closingIssuesReferences"]["nodes"].append(
+        {"number": 7777, "repository": {"nameWithOwner": "FalkorDB/FalkorDB"}}
+    )
+    pr_file.write_text(json.dumps(prs))
+
+    recs = list(records(company, company.sources[0], cache))
+    item = next(r for r in recs if r.uid == f"{REPO}:pr:{PR}")
+    assert item.unresolved_refs == [
+        "github:FalkorDB/FalkorDB#7777",
+        "github:FalkorDB/FalkorDB#9997",
+        "github:FalkorDB/FalkorDB#9998",
+        "github:FalkorDB/FalkorDB#9999",
+    ]
+    assert not any(isinstance(r, Link) and "99" in r.to_uid for r in recs)  # no Link for them
+    other = next(r for r in recs if r.uid == f"{REPO}:pr:{BOT_PR}")
+    assert other.unresolved_refs == []  # cached numbers are links, not unresolved refs
+
+
 def test_git_error_never_carries_the_auth_header(tmp_path):
     """A failing git call run with `-c http.extraHeader=...` (private repos) names the git
     command, not the header: the message reaches build events and data/jobs/<slug>.json."""
@@ -231,6 +281,8 @@ def test_ingest_keeps_the_cursor_while_the_issue_run_is_unfinished(company, tmp_
     monkeypatch.setattr(loader, "get_cursor", lambda *a: old_cursor)
     monkeypatch.setattr(loader, "set_sync_state", lambda *a: written.append(a[3]))
     monkeypatch.setattr(loader, "load", fake_load)
+    monkeypatch.setattr(loader, "mark_archived", lambda *a: 0)  # no archive, no graph
+    monkeypatch.setattr(loader, "resolve_refs", lambda *a: 0)
     monkeypatch.setattr(pipeline, "embed", lambda slug, on_event=None: EmbedReport())
 
     report = pipeline.ingest(company.slug)

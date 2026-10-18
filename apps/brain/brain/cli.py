@@ -104,6 +104,27 @@ def linear_seed_cmd(
     typer.echo(f"Created {report.created}, skipped {report.skipped} already present.")
 
 
+@app.command("archive-clear")
+def archive_clear(
+    slug: str, yes: bool = typer.Option(False, "--yes", help="Confirm deletion.")
+) -> None:
+    """Delete the archive cache of a company (data/raw/<slug>/archive/), so a rebuild no longer
+    brings the archived items back. Nothing changes in the graph until the next rebuild."""
+    company(slug)
+    if not yes:
+        typer.secho(
+            f"This deletes the archive cache of {slug}. Re-run with --yes "
+            "(make archive-clear: CONFIRM=1).",
+            fg="yellow",
+        )
+        raise typer.Exit(1)
+    n = pipeline.clear_archive(slug)
+    typer.echo(
+        f"Removed {n} archived item file(s). Rebuild {slug} for the graph to drop the archived "
+        "items."
+    )
+
+
 SOURCE_OPT = typer.Option(None, "--source", help="Only this source type, e.g. github.")
 FETCH_FULL_OPT = typer.Option(
     False, "--full", help="Pull the whole window again, not only what changed since last time."

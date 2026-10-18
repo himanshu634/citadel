@@ -134,7 +134,8 @@ const review: Review = {
 	ended_at: at(7),
 	stop: null,
 	gaps: ['gap:refunds'],
-	gap_text: 'Who decides the refund rules?'
+	gap_text: 'Who decides the refund rules?',
+	archive_reopened: []
 };
 
 /** What pm, qa and the Keeper did on the way to `pendingClaim`. */

@@ -1,0 +1,6 @@
+# The Archivist's document search: full-text $term. First 10; no contact details.
+query ArchiveSearchDocuments($term: String!) {
+  searchDocuments(term: $term, first: 10) {
+    nodes { id slugId title url createdAt updatedAt content }
+  }
+}

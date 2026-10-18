@@ -3,7 +3,9 @@
 Why: the Ask page draws the agent's walk through the graph while it happens (design direction D,
 "Watch it walk"). POST /api/companies/{slug}/ask runs `agents.ask.ask_events` in a worker thread
 and forwards each event as it comes: `start`, then `step` / `step_done` per tool call, then
-`answer`, or `error` with a sentence when the run fails. Payloads are the Ask* models.
+`answer`, or `error` with a sentence when the run fails. While Ask's `ask_archivist` call runs,
+`archive_step` events carry the Archivist's own steps (`parent` is that call's id). An event
+of a kind not listed in `_MODELS` is logged and skipped. Payloads are the Ask* models.
 
 - The run is checkpointed per thread (graph agent_<slug>); `thread_id` in the body asks a
   follow-up. One run per thread at a time (409).
@@ -49,6 +51,7 @@ from pydantic import BaseModel
 from backend.api.deps import Slug, sse
 from backend.api.models import (
     AskAnswer,
+    AskArchiveStep,
     AskError,
     AskIn,
     AskLlm,
@@ -68,6 +71,7 @@ _MODELS: dict[str, type[BaseModel]] = {
     "llm": AskLlm,
     "step": AskStep,
     "step_done": AskStepDone,
+    "archive_step": AskArchiveStep,
     "answer": AskAnswer,
     "error": AskError,
 }
@@ -228,7 +232,11 @@ async def _events(
     try:
         while (event := await queue.get()) is not None:
             kind = event.pop("kind")
-            payload = _MODELS[kind].model_validate(event)
+            model_ = _MODELS.get(kind)
+            if model_ is None:  # a chunk kind this API does not know: skip it, keep the stream
+                log.warning("ask %s: skipped an event of unknown kind %r", slug, kind)
+                continue
+            payload = model_.model_validate(event)
             yield {"event": kind, "data": payload.model_dump_json()}
     finally:
         stop.set()  # the browser left or the run ended: either way, nothing more to do

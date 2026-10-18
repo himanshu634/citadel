@@ -4,7 +4,8 @@ Why: anyone can check the wiring without an API key. The real agent graph, tools
 FalkorDB checkpointer all run; only the model is replaced by two fixed replies:
 1. call `list_systems`;
 2. submit an answer that names the systems and cites the first one.
-It answers the same message shapes the Messages API returns, so the brain loop can't tell.
+It answers the same message shapes the Messages API returns, so the brain loop can't tell. The
+script never calls `ask_archivist` (in Ask's toolset), so no Archivist runs and no key is needed.
 """
 
 from __future__ import annotations

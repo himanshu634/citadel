@@ -24,6 +24,7 @@ The graph owns the loop (not the SDK tool runner), so every step is checkpointed
 
 from __future__ import annotations
 
+import contextvars
 import json
 import operator
 import re
@@ -85,7 +86,12 @@ SUBMIT_TOOL: dict[str, Any] = {
 
 
 def _merge(a: dict, b: dict) -> dict:
-    return {**a, **b}
+    """`seen` across steps: node by node, so what an earlier result said about a node (its
+    `archived` mark, a url) stays when a later one names it with fewer keys."""
+    out = dict(a)
+    for uid, node in b.items():
+        out[uid] = {**out.get(uid, {}), **node}
+    return out
 
 
 class AgentState(TypedDict, total=False):
@@ -104,6 +110,12 @@ class AgentState(TypedDict, total=False):
 
 
 ENTRY = "call_claude"  # where a turn enters this loop
+
+# The id of the tool call run_tools is running: a tool that streams steps of its own (Ask's
+# `ask_archivist`) hangs them off it.
+CURRENT_STEP: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "CURRENT_STEP", default=None
+)
 
 
 Check = Callable[[dict[str, Any], dict[str, Any]], str | None]  # (input, seen) -> problem
@@ -188,9 +200,13 @@ def add_brain_loop(
             if use["name"] == submit:
                 continue
             started = time.perf_counter()
-            out = toolset.call(state["slug"], use["name"], use.get("input"))
+            token = CURRENT_STEP.set(use["id"])
+            try:
+                out = toolset.call(state["slug"], use["name"], use.get("input"))
+            finally:
+                CURRENT_STEP.reset(token)
             ms = round((time.perf_counter() - started) * 1000)
-            new_seen.update(out.seen)
+            new_seen = _merge(new_seen, out.seen)
             results.append(result_block(use["id"], out.content, out.is_error))
             nodes, rels = subgraph(use["name"], out.params, out.rows)
             record(
@@ -207,7 +223,7 @@ def add_brain_loop(
                     "uids": sorted(out.seen),
                 }
             )
-        seen = {**(state.get("seen") or {}), **new_seen}
+        seen = _merge(state.get("seen") or {}, new_seen)
         answer = None
         refusals = state.get("refusals") or 0
         for use in submits:
@@ -220,7 +236,9 @@ def add_brain_loop(
             else:
                 answer = given
                 results.append(result_block(use["id"], "Answer recorded.", False))
-            record({"id": use["id"], "tool": SUBMIT, "input": {}, "error": problem})
+            # its input too, so the trail can say what was handed back (an outcome, a summary)
+            record({"id": use["id"], "tool": submit, "input": use.get("input") or {},
+                    "error": problem})  # fmt: skip
         return {
             "messages": [{"role": "user", "content": results}],
             "seen": new_seen,

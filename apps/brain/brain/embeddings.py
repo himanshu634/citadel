@@ -92,6 +92,11 @@ class FastEmbedEmbedder:
         self._clock = clock
         self._failed: tuple[float, str] | None = None  # when the last load failed, and why
 
+    @property
+    def loaded(self) -> bool:
+        """The model is in memory (a call now would not load or download it)."""
+        return self._engine is not None
+
     def check_dim(self, actual: int) -> None:
         _check_dim(self.model, self.dim, actual)
 
@@ -263,6 +268,18 @@ def get_embedder() -> Embedder | None:
         return _default
 
 
+def is_warm() -> bool:
+    """An embedder already exists in this process and its model is loaded, so embedding now
+    costs no model load. Never builds or loads one (the Archivist asks on the Ask path). An
+    embedder with no `loaded` flag (Gemini, test fakes) has nothing to load: warm once built."""
+    e = _override
+    if e is None:
+        if get_settings().embedding_provider == "none":
+            return False
+        e = _default
+    return e is not None and bool(getattr(e, "loaded", True))
+
+
 def set_embedder(e: Embedder | None) -> None:
     """Override the embedder (tests, callers with their own). None restores the settings-based
     default and forgets the instance built from the old settings."""
@@ -301,12 +318,14 @@ def embed_pending(
     batch: int = 64,
     on_event: OnEvent | None = None,
     everything: bool = False,
+    sources: list[str] | None = None,
 ) -> EmbedReport:
     """Embed every chunk of brain_<slug> whose text or model changed since it was embedded.
 
     `embedder` None means `get_embedder()`. With no embedder, or a model that cannot run, the
     stage is skipped with the reason (vectors written before the failure stay). `everything`
-    marks every chunk pending first, so each is embedded exactly once more.
+    marks every chunk pending first, so each is embedded exactly once more. `sources` limits
+    the stage to the chunks of those work items or documents (what the Archivist just loaded).
     """
     emit = on_event or noop
     report = EmbedReport()
@@ -318,7 +337,7 @@ def embed_pending(
         loader.clear_embedded(slug)
     done: set[str] = set()
     reported: float | None = None  # when the last progress event went out
-    while rows := loader.chunks_to_embed(slug, e.model, batch):
+    while rows := loader.chunks_to_embed(slug, e.model, batch, sources):
         uids = [r["uid"] for r in rows]
         if again := sorted(done.intersection(uids)):
             # stop rather than loop: the write did not make the chunk current

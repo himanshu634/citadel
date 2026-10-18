@@ -1,6 +1,6 @@
 """Generate the synthetic company's canonical JSONL files.
 
-Why: a tiny, fully made-up company (5 people + 1 bot, 2 teams, 4 systems, 15 work items) lets
+Why: a tiny, fully made-up company (5 people + 1 bot, 2 teams, 4 systems, 16 work items) lets
 the pipeline be demoed and tested offline. The data is shaped so each named query has a known
 answer:
 - Auth: alice is the expert and her team (identity) owns it -> owners and experts agree.
@@ -14,6 +14,11 @@ answer:
   - blocked_on(carol): IDN-2 <- IDN-1 (alice, depth 1), IDN-2 <- PAY-2 (bob, depth 1),
     IDN-2 <- PAY-3 (erin, depth 2, via PAY-2, PR #9 open).
   - blocked_on(alice) = none; waiting_on(alice) = IDN-2 (carol), PAY-4 (erin).
+
+- Archive (archive/, 6 items + 1 doc, all before the 2026 window): the Archivist's demo. #900
+  "Decision: replace sessions with JWT for Auth" (3 comments) is referenced by windowed issue
+  #15 ("decisive proof is in #900", `unresolved_refs`), which also overturns the archived #901
+  "Keep 24h session expiry". Only the Archivist loads these.
 
 The tickets also seed a real Linear workspace (`tickets/linear_seed.json` names its teams).
 
@@ -190,7 +195,21 @@ WORK_ITEMS = [
         None,
         "Seen twice this month; may be the batch job retrying.",
     ),
+    (
+        15,
+        "issue",
+        "Cut session expiry to 1h",
+        "alice",
+        "closed",
+        "2026-06-18",
+        "2026-06-20",
+        "Login tokens now expire after 1h instead of 24h; refresh tokens cover long sessions. "
+        "Why we can lean on JWTs at all: the decisive proof is in #900. The 24h expiry policy "
+        "(#901) no longer applies.",
+    ),
 ]
+# Refs to items older than the window: the Archivist loads them from archive/ and links them.
+UNRESOLVED_REFS = {15: ["synthetic:issue:900"]}
 THREAD = {
     "uid": "synthetic:slack:thread:eng-2026-07-15",
     "title": "#eng: should billing own the checkout page?",
@@ -538,6 +557,112 @@ DOC_MENTIONS = [  # (doc path, work item number or system name)
 ]
 
 
+# The archive: the same kinds of records, dated before the window (archive/*.jsonl). The
+# Archivist finds them on demand; the build never loads them. Numbers are 900+ so they never
+# collide with the windowed items.
+ARCHIVE_DIR = OUT / "archive"
+# number, kind, title, author, state, created, closed, body
+ARCHIVE_ITEMS = [
+    (
+        900,
+        "issue",
+        "Decision: replace sessions with JWT for Auth",
+        "alice",
+        "closed",
+        "2025-03-10",
+        "2025-03-24",
+        "Server-side sessions do not scale: the session table is read on every request. "
+        "Proposal: issue short-lived JWTs and keep refresh tokens server-side.",
+    ),
+    (
+        901,
+        "issue",
+        "Keep 24h session expiry",
+        "carol",
+        "closed",
+        "2025-05-12",
+        "2025-05-20",
+        "Policy: logins stay valid for 24h so support calls about forced logouts stay low. "
+        "Revisit only if security asks.",
+    ),
+    (
+        902,
+        "issue",
+        "Login latency doubled after the auth rewrite",
+        "carol",
+        "closed",
+        "2025-07-02",
+        "2025-07-15",
+        "p95 login time went from 180ms to 400ms; the password hash cost was raised.",
+    ),
+    (
+        903,
+        "pull_request",
+        "feat(billing): monthly invoice PDFs",
+        "bob",
+        "merged",
+        "2024-11-04",
+        "2024-11-12",
+        "Invoices are rendered as PDFs once a month and emailed from the billing service.",
+    ),
+    (
+        904,
+        "issue",
+        "Evaluate managed Postgres vendors",
+        "dave",
+        "closed",
+        "2025-01-20",
+        "2025-02-14",
+        "Compared three vendors on backup guarantees and price. Self-hosting stays for now.",
+    ),
+    (
+        905,
+        "issue",
+        "Abandoned carts on the first checkout page",
+        "erin",
+        "closed",
+        "2025-09-08",
+        "2025-10-01",
+        "Mobile users drop off at the address form; a rebuild of the page is proposed.",
+    ),
+]
+# number, author, date, body
+ARCHIVE_COMMENTS = [
+    (900, "dave", "2025-03-11", "Ops would love to drop the session table. What about revocation?"),
+    (900, "carol", "2025-03-12", "Refresh tokens stay server-side, so revoking one still works."),
+    (
+        900,
+        "alice",
+        "2025-03-24",
+        "Decision: we replace server-side sessions with JWTs. Access tokens are short-lived and "
+        "refresh tokens remain server-side. Closing.",
+    ),
+    (901, "bob", "2025-05-15", "Support agrees: 24h keeps forced logouts rare."),
+    (904, "bob", "2025-02-10", "Billing is fine on self-hosted for now."),
+]
+ARCHIVE_DOCUMENTS = [
+    (
+        "docs/old-auth-design.md",
+        "Old auth system design",
+        "carol",
+        "2024-06-01",
+        "# Old auth system design\n\nLogins create a row in the sessions table, valid for 24h. "
+        "Every request reads that row. Superseded in part by the JWT decision in #900.",
+    ),
+]
+ARCHIVE_MENTIONS = [(901, 900)]  # the 24h policy refers to the session design it was built on
+
+
+def archive_uid(number: int) -> str:
+    kind = next(k for n, k, *_ in ARCHIVE_ITEMS if n == number)
+    return f"synthetic:{'pr' if kind == 'pull_request' else 'issue'}:{number}"
+
+
+def archive_url(number: int) -> str:
+    kind = next(k for n, k, *_ in ARCHIVE_ITEMS if n == number)
+    return f"{WEB}/{'pull' if kind == 'pull_request' else 'issues'}/{number}"
+
+
 def wi_uid(number: int) -> str:
     kind = next(k for n, k, *_ in WORK_ITEMS if n == number)
     return f"synthetic:{'pr' if kind == 'pull_request' else 'issue'}:{number}"
@@ -614,6 +739,77 @@ def write_tickets() -> None:
     print("tickets/linear_seed.json")
 
 
+def write_archive() -> None:
+    ARCHIVE_DIR.mkdir(exist_ok=True)
+    write("people.jsonl", [{"login": lg, "display_name": dn} for lg, dn in PEOPLE], ARCHIVE_DIR)
+    write(
+        "work_items.jsonl",
+        [
+            {
+                "uid": archive_uid(n),
+                "kind": k,
+                "number": n,
+                "title": t,
+                "body": b,
+                "state": s,
+                "author_login": a,
+                "created_at": ts(c),
+                "closed_at": ts(cl) if cl else None,
+                "merged_at": ts(cl) if s == "merged" else None,
+                "container": REPO,
+                "url": archive_url(n),
+            }
+            for n, k, t, a, s, c, cl, b in ARCHIVE_ITEMS
+        ],
+        ARCHIVE_DIR,
+    )
+    write(
+        "comments.jsonl",
+        [
+            {
+                "uid": f"synthetic:comment:archive:{i}",
+                "work_item_uid": archive_uid(n),
+                "author_login": a,
+                "created_at": ts(d),
+                "body": b,
+                "url": f"{archive_url(n)}#comment-{i}",
+            }
+            for i, (n, a, d, b) in enumerate(ARCHIVE_COMMENTS, start=1)
+        ],
+        ARCHIVE_DIR,
+    )
+    write(
+        "documents.jsonl",
+        [
+            {
+                "uid": f"synthetic:doc:{p}",
+                "path": p,
+                "title": t,
+                "author_login": a,
+                "updated_at": ts(d),
+                "body": b,
+                "url": f"{WEB}/blob/main/{p}",
+            }
+            for p, t, a, d, b in ARCHIVE_DOCUMENTS
+        ],
+        ARCHIVE_DIR,
+    )
+    write(
+        "links.jsonl",
+        [
+            {
+                "rel": "MENTIONS",
+                "from_label": "WorkItem",
+                "from_uid": archive_uid(a),
+                "to_label": "WorkItem",
+                "to_uid": archive_uid(b),
+            }
+            for a, b in ARCHIVE_MENTIONS
+        ],
+        ARCHIVE_DIR,
+    )
+
+
 def main() -> None:
     write("people.jsonl", [{"login": lg, "display_name": dn} for lg, dn in PEOPLE])
     write("teams.jsonl", [{"name": t} for t in TEAMS])
@@ -644,6 +840,7 @@ def main() -> None:
             "merged_at": ts(cl) if s == "merged" else None,
             "container": REPO,
             "url": wi_url(n),
+            **({"unresolved_refs": UNRESOLVED_REFS[n]} if n in UNRESOLVED_REFS else {}),
         }
         for n, k, t, a, s, c, cl, b in WORK_ITEMS
     ]
@@ -779,6 +976,7 @@ def main() -> None:
         )
     write("links.jsonl", links)
     write_tickets()
+    write_archive()
 
 
 if __name__ == "__main__":

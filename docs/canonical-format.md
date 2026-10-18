@@ -85,6 +85,7 @@ PRs, issues, tickets and chat threads share this shape; `kind` tells them apart.
 | `priority` | `urgent` / `high` / `medium` / `low` (optional) |  |
 | `due_date` | date, `2026-06-30` (optional) |  |
 | `assignees` | list[str] of logins (optional) |  |
+| `unresolved_refs` | list[str]: refs to items the ingest did not load, e.g. `github:acme/w#812` |  |
 
 `state` keeps the tracker's own word ("In Review"); `status_category` is the same status in
 one shared vocabulary. A work item with a `status_category` other than `done` / `canceled` is an
@@ -93,6 +94,10 @@ open ticket: normalize keeps it even when it is older than `window.since`.
 `assignees` tells "not tracked" from "nobody": leave it out (null) when the source has no
 assignees, use `[]` when the item is unassigned. Entries are logins, never emails, and go
 through `people.aliases` like every other login.
+
+`unresolved_refs` are references the adapter saw but could not link, mostly to items older than
+`window.since`. The Archivist loads such an item on demand and marks it archived with that `ref`;
+the loader then turns the matching ref into a `MENTIONS` edge and removes it from the list.
 
 ```json
 {"author_login": "alice", "body": "We decided to replace server-side sessions with short-lived JWTs because the session table was the main source of DB load. Refresh tokens stay server-side. Closes #11.", "closed_at": "2026-02-06T12:00:00Z", "container": "synthetic/app", "created_at": "2026-02-03T12:00:00Z", "kind": "pull_request", "merged_at": "2026-02-06T12:00:00Z", "number": 1, "state": "merged", "title": "feat(auth): switch sessions to JWT", "uid": "synthetic:pr:1", "url": "https://example.com/synthetic/app/pull/1"}

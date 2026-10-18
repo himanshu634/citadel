@@ -88,6 +88,7 @@ export const CLAIM_KINDS: Record<ClaimKind, string> = {
 export function whoName(actor: string): string {
 	const who = actor.startsWith('agent:') ? actor.slice('agent:'.length) : actor;
 	if (who === 'ask') return 'Ask';
+	if (who === 'archivist') return 'Archivist';
 	return who === 'auto' || who === 'keeper' ? 'Keeper' : who;
 }
 
@@ -121,7 +122,16 @@ const ACTIONS: Record<string, string> = {
 	review_done: 'finished a review',
 	review_stopped: 'stopped a review',
 	review_failed: 'saw a review fail',
-	review_skipped: 'skipped a review'
+	review_skipped: 'skipped a review',
+	archive_requested: 'asked the Archivist for older history',
+	archive_loaded: 'loaded older history into the brain',
+	archive_nothing: 'found nothing older',
+	archive_refused: 'was refused the archive',
+	archive_dropped: 'dropped an archive request',
+	archive_returned: "took the Archivist's finds back",
+	archive_conflict: 'found older history that conflicts with a claim',
+	archive_released: 'put a gap back after the Archivist',
+	archive_refs_ignored: 'set aside refs no source owns'
 };
 
 /** "pm opened a follow-up": who did what, without the why. */
@@ -139,6 +149,7 @@ const REVIEW_WORDS: Record<string, string> = {
 	manual: 'on request',
 	build: 'after a build',
 	approval: 'after an approval',
+	archive: 'after the Archivist found history',
 	no_api_key: 'no API key',
 	brain_unavailable: "the company's brain isn't there",
 	restart: 'the server restarted'
@@ -287,6 +298,13 @@ export function logTime(iso: string, now: number = Date.now()): string {
 	return at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year });
 }
 
+/** A gap's status as a person reads it. */
+const GAP_STATUS: Record<string, string> = { waiting_archive: 'Waiting for the Archivist' };
+
+export function gapStatusWords(status: string): string {
+	return GAP_STATUS[status] ?? words(status).replace(/^./, (c) => c.toUpperCase());
+}
+
 /** One piece of evidence behind a claim, named as well as the page knows it. */
 export interface EvidenceRef {
 	uid: string;
@@ -315,7 +333,8 @@ export function evidenceRefs(uids: string[], known: Known): EvidenceRef[] {
 const TRIGGERS: Record<Review['trigger'], string> = {
 	build: 'after a build',
 	manual: 'on request',
-	approval: 'after an approval'
+	approval: 'after an approval',
+	archive: 'after the Archivist found history'
 };
 
 /** "Keeper review after a build · 17 Oct": which review wrote the claim, and when. */

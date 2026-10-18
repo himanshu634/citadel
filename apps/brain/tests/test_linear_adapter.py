@@ -336,6 +336,13 @@ def test_removed_ticket_loses_assignee_and_blocks(tmp_path):
         db.delete_graph(slug)
 
 
+def test_relation_to_uncached_issue_is_unresolved_ref(recs):
+    items = tickets(recs)
+    blocker = next(r for r in recs if isinstance(r, WorkItem) and r.uid == "linear:issue:i-3")
+    assert blocker.unresolved_refs == ["linear:issue:i-9"]
+    assert all(w.unresolved_refs == [] for w in items.values() if w.uid != "linear:issue:i-3")
+
+
 def test_incomplete_while_the_issue_run_is_unfinished(tmp_path):
     cache = fixture_copy(tmp_path)
     adapter = REGISTRY["linear"]

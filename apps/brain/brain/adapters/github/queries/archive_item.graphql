@@ -1,0 +1,26 @@
+# One issue or PR by number, for the Archivist (an item older than the window). The fields match
+# issues.graphql / pull_requests.graphql, so transform.issue_records / pr_records read it as is.
+query ArchiveItem($owner: String!, $name: String!, $number: Int!) {
+  rateLimit { remaining resetAt cost }
+  repository(owner: $owner, name: $name) {
+    issueOrPullRequest(number: $number) {
+      __typename
+      ... on Issue {
+        number title body url state createdAt updatedAt closedAt
+        author { login __typename }
+        labels(first: 20) { nodes { name } }
+        comments(first: 50) { nodes { id author { login __typename } body createdAt url } }
+      }
+      ... on PullRequest {
+        number title body url state createdAt updatedAt closedAt mergedAt
+        author { login __typename }
+        labels(first: 20) { nodes { name } }
+        mergeCommit { oid }
+        closingIssuesReferences(first: 10) { nodes { number repository { nameWithOwner } } }
+        commits(first: 100) { nodes { commit { oid } } }
+        reviews(first: 50) { nodes { id author { login __typename } state submittedAt url } }
+        comments(first: 50) { nodes { id author { login __typename } body createdAt url } }
+      }
+    }
+  }
+}

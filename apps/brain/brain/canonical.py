@@ -177,6 +177,9 @@ class WorkItem(Record):
     priority: Priority | None = None
     due_date: date | None = None
     assignees: list[str] | None = None  # logins; None = source has no assignees, [] = unassigned
+    # Refs this item points at that ingest could not resolve (e.g. "github:acme/w#812", an
+    # older item outside the window). The Archivist loads the target, then resolve_refs links it.
+    unresolved_refs: list[str] = []
 
     @field_validator("assignees")
     @classmethod

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -119,6 +119,159 @@ class PathIndex:
         return found
 
 
+def github_ref(repo_name: str, n: int) -> str:
+    """A reference to a PR or issue by number, whichever it is: `github:<owner>/<repo>#<n>`."""
+    return f"github:{repo_name}#{n}"
+
+
+def _ref_numbers(repo: Repo, text: str | None) -> set[int]:
+    """Numbers of the `#n` and in-repo PR/issue URL references in `text`."""
+    url_ref_re = re.compile(rf"github\.com/{re.escape(repo.name)}/(?:pull|issues)/(\d+)")
+    return {int(m) for m in HASH_REF_RE.findall(text or "")} | {
+        int(m) for m in url_ref_re.findall(text or "")
+    }
+
+
+def _mentions(
+    repo: Repo,
+    number_uid: Callable[[int], str | None],
+    paths: PathIndex,
+    from_uid: str,
+    from_label: str,
+    text: str | None,
+    skip: set[str],
+) -> Iterator[Link]:
+    for n in sorted(_ref_numbers(repo, text)):
+        uid = number_uid(n)
+        if uid and uid != from_uid and uid not in skip:
+            yield Link(
+                rel="MENTIONS",
+                from_uid=from_uid,
+                from_label=from_label,
+                to_uid=uid,
+                to_label="WorkItem",
+                source=SOURCE,
+            )
+    for name in sorted(paths.systems_in(text or "")):
+        yield Link(
+            rel="MENTIONS",
+            from_uid=from_uid,
+            from_label=from_label,
+            to_uid=system_uid(name),
+            to_label="System",
+            source=SOURCE,
+        )
+
+
+def _unresolved(
+    repo: Repo,
+    number_uid: Callable[[int], str | None],
+    own: int,
+    texts: list[str | None],
+    closing: set[int] = frozenset(),
+) -> list[str]:
+    """Sorted refs to numbers the cache does not hold: from `texts` and from closing refs."""
+    numbers = {n for t in texts for n in _ref_numbers(repo, t)} | set(closing)
+    return sorted(github_ref(repo.name, n) for n in numbers if n != own and number_uid(n) is None)
+
+
+def pr_records(
+    repo: Repo,
+    pr: dict[str, Any],
+    include: set[str],
+    number_uid: Callable[[int], str | None],
+    paths: PathIndex,
+) -> Iterator[CanonicalRecord]:
+    """One PR's records: the WorkItem with its closes, mentions and comments (when
+    `pull_requests` is included), and its reviews (when `reviews` is)."""
+    n = pr["number"]
+    uid = repo.pr(n)
+    if "pull_requests" in include:
+        state = "merged" if pr["mergedAt"] else pr["state"].lower()
+        closing = [
+            ref["number"]
+            for ref in nodes(pr["closingIssuesReferences"])
+            if ref["repository"]["nameWithOwner"] == repo.name
+        ]
+        texts = [pr["body"]] + [c["body"] for c in nodes(pr["comments"])]
+        yield WorkItem(
+            uid=uid,
+            source=SOURCE,
+            url=pr["url"],
+            kind="pull_request",
+            number=n,
+            title=pr["title"],
+            body=(pr["body"] or "")[:MAX_BODY],
+            state=state,
+            created_at=pr["createdAt"],
+            updated_at=pr["updatedAt"],
+            closed_at=pr["closedAt"],
+            merged_at=pr["mergedAt"],
+            author_login=actor_login(pr["author"]),
+            labels=[lb["name"] for lb in nodes(pr["labels"])],
+            container=repo.name,
+            unresolved_refs=_unresolved(repo, number_uid, n, texts, set(closing)),
+        )
+        closes = set()
+        for number in closing:
+            if number_uid(number) == repo.issue(number):
+                closes.add(repo.issue(number))
+                yield Link(
+                    rel="CLOSES",
+                    from_uid=uid,
+                    from_label="WorkItem",
+                    to_uid=repo.issue(number),
+                    to_label="WorkItem",
+                    source=SOURCE,
+                )
+        yield from _mentions(repo, number_uid, paths, uid, "WorkItem", pr["body"], closes)
+        yield from _comments(repo, uid, pr["comments"])
+    if "reviews" in include:
+        for r in nodes(pr["reviews"]):
+            login = actor_login(r["author"])
+            if login and r["submittedAt"] and r["state"] != "PENDING":
+                yield Review(
+                    uid=f"github:{repo.name}:review:{r['id']}",
+                    source=SOURCE,
+                    url=r["url"],
+                    work_item_uid=uid,
+                    reviewer_login=login,
+                    state=r["state"],
+                    submitted_at=r["submittedAt"],
+                )
+
+
+def issue_records(
+    repo: Repo,
+    it: dict[str, Any],
+    number_uid: Callable[[int], str | None],
+    paths: PathIndex,
+) -> Iterator[CanonicalRecord]:
+    """One issue's records: the WorkItem, its mentions and comments."""
+    n = it["number"]
+    uid = repo.issue(n)
+    texts = [it["body"]] + [c["body"] for c in nodes(it["comments"])]
+    yield WorkItem(
+        uid=uid,
+        source=SOURCE,
+        url=it["url"],
+        kind="issue",
+        number=n,
+        title=it["title"],
+        body=(it["body"] or "")[:MAX_BODY],
+        state=it["state"].lower(),
+        created_at=it["createdAt"],
+        updated_at=it["updatedAt"],
+        closed_at=it["closedAt"],
+        author_login=actor_login(it["author"]),
+        labels=[lb["name"] for lb in nodes(it["labels"])],
+        container=repo.name,
+        unresolved_refs=_unresolved(repo, number_uid, n, texts),
+    )
+    yield from _mentions(repo, number_uid, paths, uid, "WorkItem", it["body"], set())
+    yield from _comments(repo, uid, it["comments"])
+
+
 def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRecord]:
     meta = read_json(cache / "meta.json")
     if meta is None:
@@ -134,108 +287,20 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
     prs = _latest_by_number(cache / "pull_requests") if want_prs else {}
     issues = _latest_by_number(cache / "issues") if "issues" in include else {}
     number_uid = {n: repo.issue(n) for n in issues} | {n: repo.pr(n) for n in prs}
-    url_ref_re = re.compile(rf"github\.com/{re.escape(repo.name)}/(?:pull|issues)/(\d+)")
-
-    def mentions(from_uid: str, from_label: str, text: str, skip: set[str]) -> Iterator[Link]:
-        targets = {int(m) for m in HASH_REF_RE.findall(text or "")}
-        targets |= {int(m) for m in url_ref_re.findall(text or "")}
-        for n in sorted(targets):
-            uid = number_uid.get(n)
-            if uid and uid != from_uid and uid not in skip:
-                yield Link(
-                    rel="MENTIONS",
-                    from_uid=from_uid,
-                    from_label=from_label,
-                    to_uid=uid,
-                    to_label="WorkItem",
-                    source=SOURCE,
-                )
-        for name in sorted(paths.systems_in(text)):
-            yield Link(
-                rel="MENTIONS",
-                from_uid=from_uid,
-                from_label=from_label,
-                to_uid=system_uid(name),
-                to_label="System",
-                source=SOURCE,
-            )
 
     # --- pull requests, their reviews, comments, closes and commits --------------------------
     commit_pr: dict[str, int] = {}  # commit sha -> PR number
     for n, pr in prs.items():
-        uid = repo.pr(n)
-        state = "merged" if pr["mergedAt"] else pr["state"].lower()
+        yield from pr_records(repo, pr, include, number_uid.get, paths)
         if "pull_requests" in include:
-            yield WorkItem(
-                uid=uid,
-                source=SOURCE,
-                url=pr["url"],
-                kind="pull_request",
-                number=n,
-                title=pr["title"],
-                body=(pr["body"] or "")[:MAX_BODY],
-                state=state,
-                created_at=pr["createdAt"],
-                updated_at=pr["updatedAt"],
-                closed_at=pr["closedAt"],
-                merged_at=pr["mergedAt"],
-                author_login=actor_login(pr["author"]),
-                labels=[lb["name"] for lb in nodes(pr["labels"])],
-                container=repo.name,
-            )
-            closes = set()
-            for ref in nodes(pr["closingIssuesReferences"]):
-                if ref["repository"]["nameWithOwner"] == repo.name and ref["number"] in issues:
-                    closes.add(repo.issue(ref["number"]))
-                    yield Link(
-                        rel="CLOSES",
-                        from_uid=uid,
-                        from_label="WorkItem",
-                        to_uid=repo.issue(ref["number"]),
-                        to_label="WorkItem",
-                        source=SOURCE,
-                    )
-            yield from mentions(uid, "WorkItem", pr["body"], skip=closes)
-            yield from _comments(repo, uid, pr["comments"])
             for node in nodes(pr["commits"]):
                 commit_pr.setdefault(node["commit"]["oid"], n)
             if pr["mergeCommit"]:
                 commit_pr[pr["mergeCommit"]["oid"]] = n
-        if "reviews" in include:
-            for r in nodes(pr["reviews"]):
-                login = actor_login(r["author"])
-                if login and r["submittedAt"] and r["state"] != "PENDING":
-                    yield Review(
-                        uid=f"github:{repo.name}:review:{r['id']}",
-                        source=SOURCE,
-                        url=r["url"],
-                        work_item_uid=uid,
-                        reviewer_login=login,
-                        state=r["state"],
-                        submitted_at=r["submittedAt"],
-                    )
 
     # --- issues -----------------------------------------------------------------------------
-    for n, it in issues.items():
-        uid = repo.issue(n)
-        yield WorkItem(
-            uid=uid,
-            source=SOURCE,
-            url=it["url"],
-            kind="issue",
-            number=n,
-            title=it["title"],
-            body=(it["body"] or "")[:MAX_BODY],
-            state=it["state"].lower(),
-            created_at=it["createdAt"],
-            updated_at=it["updatedAt"],
-            closed_at=it["closedAt"],
-            author_login=actor_login(it["author"]),
-            labels=[lb["name"] for lb in nodes(it["labels"])],
-            container=repo.name,
-        )
-        yield from mentions(uid, "WorkItem", it["body"], skip=set())
-        yield from _comments(repo, uid, it["comments"])
+    for it in issues.values():
+        yield from issue_records(repo, it, number_uid.get, paths)
 
     # --- commits ----------------------------------------------------------------------------
     commits_file = cache / "commits.jsonl"
@@ -295,7 +360,7 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
             body=text[:MAX_DOC],
             updated_at=blob["updated_at"],
         )
-        yield from mentions(uid, "Document", text, skip=set())
+        yield from _mentions(repo, number_uid.get, paths, uid, "Document", text, set())
 
 
 def _ownerships(

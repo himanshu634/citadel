@@ -1,0 +1,31 @@
+{
+  "data": {
+    "rateLimit": {"remaining": 4990, "resetAt": "2026-10-17T12:00:00Z", "cost": 1},
+    "repository": {
+      "issueOrPullRequest": {
+        "__typename": "Issue",
+        "number": 812,
+        "title": "Rotate auth tokens every 24 hours",
+        "body": "Tokens never expire today. Proposal: rotate every 24 hours, see #700 and the fix in #900.",
+        "url": "https://github.com/acme/widgets/issues/812",
+        "state": "CLOSED",
+        "createdAt": "2023-03-01T10:00:00Z",
+        "updatedAt": "2023-04-02T09:00:00Z",
+        "closedAt": "2023-04-02T09:00:00Z",
+        "author": {"login": "alice", "__typename": "User"},
+        "labels": {"nodes": [{"name": "security"}]},
+        "comments": {
+          "nodes": [
+            {"id": "IC_1", "author": {"login": "bob", "__typename": "User"},
+             "body": "We decided on 24 hours because the mobile app refreshes daily; see #650.",
+             "createdAt": "2023-03-02T10:00:00Z",
+             "url": "https://github.com/acme/widgets/issues/812#issuecomment-1"},
+            {"id": "IC_2", "author": null, "body": "deleted account",
+             "createdAt": "2023-03-03T10:00:00Z",
+             "url": "https://github.com/acme/widgets/issues/812#issuecomment-2"}
+          ]
+        }
+      }
+    }
+  }
+}

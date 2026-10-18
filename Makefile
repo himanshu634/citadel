@@ -16,7 +16,7 @@ AGENTS := uv run agents
 BACKEND := uv run backend
 
 .DEFAULT_GOAL := help
-.PHONY: help start setup up down logs ps browser init schema fetch ingest embed sync stats query tools ask chat eval eval-report eval-drafts traces reset linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
+.PHONY: help start setup up down logs ps browser init schema fetch ingest embed sync stats query tools ask chat eval eval-report eval-drafts traces reset archive-clear linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
@@ -114,6 +114,9 @@ eval-drafts: ## Thumbs-down answers of $(SLUG) as draft eval cases (printed; WRI
 
 reset: ## Delete graphs brain_/agent_/keeper_$(SLUG), its build history and Ask traces; needs CONFIRM=1
 	$(BACKEND) reset $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)
+
+archive-clear: ## Delete the archive cache of $(SLUG) (items older than the window); needs CONFIRM=1
+	$(BRAIN) archive-clear $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)
 
 linear-seed: ## Fill the Linear workspace of $(SLUG) with the synthetic tickets (CONFIRM=1)
 	$(BRAIN) linear-seed $(SLUG) $(if $(filter 1 yes,$(CONFIRM)),--yes)

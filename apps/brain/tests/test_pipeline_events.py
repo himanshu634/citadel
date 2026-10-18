@@ -198,7 +198,7 @@ def test_an_incremental_ingest_backfills_missing_body_chunks(events_company, emb
     the backfill can give them one."""
     pipeline.ingest(events_company, full=True)
     count = "MATCH (c:Chunk {kind: 'work_item'}) RETURN count(c)"
-    assert db.run_text(events_company, count).result_set[0][0] == 15
+    assert db.run_text(events_company, count).result_set[0][0] == 16
     db.run_text(events_company, "MATCH (c:Chunk {kind: 'work_item'}) DETACH DELETE c")
     pipeline.ingest(events_company)
-    assert db.run_text(events_company, count).result_set[0][0] == 15
+    assert db.run_text(events_company, count).result_set[0][0] == 16

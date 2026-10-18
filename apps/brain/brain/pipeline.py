@@ -21,12 +21,14 @@ into chunks, then the embed stage gives new or changed Chunk text its vectors (s
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from brain import adapters, embeddings, loader
-from brain.canonical import CanonicalRecord
+from brain.archive.cache import ArchiveEntry, archive_dir, read_entries
+from brain.canonical import CanonicalRecord, WorkItem
 from brain.config import CompanyConfig, SourceConfig, load_company, raw_dir
 from brain.embeddings import EmbedReport
 from brain.events import BuildEvent, OnEvent, noop
@@ -150,6 +152,50 @@ def fetch(
     return done
 
 
+def load_entries(slug: str, cfg: CompanyConfig, entries: list[ArchiveEntry]) -> loader.LoadReport:
+    """Load archived items into brain_<slug>: each entry normalized with its item kept past the
+    window, loaded under its own origin (`archive:<source>:<item>`, so a source's BLOCKS prune
+    and another entry's load never remove its edges), flagged archived, then every ref that
+    points at an archived node resolved and every supersession marked (`report.superseded`
+    holds the pairs whose newer item exists). No SyncState: the archive has no cursor."""
+    report = loader.LoadReport()
+    rows = []
+    for e in entries:
+        keep = frozenset({e.uid, *(r.uid for r in e.records if isinstance(r, WorkItem))})
+        records = list(normalize(e.records, cfg, keep=keep))
+        report.merge(loader.load(slug, records, origin=f"archive:{e.source_key}:{e.item_id}"))
+        rows.append(
+            {"uid": e.uid, "ref": e.ref, "archived_at": e.archived_at, "request": e.request}
+        )
+    loader.mark_archived(slug, rows)
+    loader.resolve_refs(slug)
+    report.superseded = supersede(slug, entries)
+    return report
+
+
+def supersede(slug: str, entries: list[ArchiveEntry]) -> dict[str, str]:
+    """Mark each entry's `superseded_by`; returns the pairs marked (both nodes exist)."""
+    return {
+        e.uid: e.superseded_by
+        for e in entries
+        if e.superseded_by and loader.mark_superseded(slug, e.uid, e.superseded_by)
+    }
+
+
+def load_archive(slug: str, cfg: CompanyConfig) -> loader.LoadReport:
+    """Load every item in the company's archive cache (what a rebuild brings back)."""
+    return load_entries(slug, cfg, read_entries(slug))
+
+
+def clear_archive(slug: str) -> int:
+    """Delete the archive cache; returns the files removed. The graph keeps the archived items
+    until the next rebuild."""
+    folder = archive_dir(slug)
+    count = sum(1 for _ in folder.glob("*/*.jsonl"))
+    shutil.rmtree(folder, ignore_errors=True)
+    return count
+
+
 def ingest(
     slug: str,
     full: bool = False,
@@ -162,6 +208,9 @@ def ingest(
     cfg = load_company(slug)
     window_since = cfg.window.since.isoformat()
     report = IngestReport()
+    entries = read_entries(slug)
+    archived = frozenset(e.uid for e in entries)
+    report.load.merge(load_entries(slug, cfg, entries))
     for source, adapter, key in _selected(cfg, only):
         if adapter is None:
             report.sources.append(SourceResult(key=key, skipped_reason=_NO_ADAPTER))
@@ -183,7 +232,7 @@ def ingest(
         emit(BuildEvent(slug, "records", "done", key, count=result.read, message=message))
 
         cursor = None if full else loader.get_cursor(slug, key, window_since)
-        records = list(normalize(select_new(records, cursor), cfg))
+        records = list(normalize(select_new(records, cursor), cfg, keep=archived))
         result.loaded = len(records)
         emit(BuildEvent(slug, "normalize", "done", key, count=result.loaded))
 
@@ -196,6 +245,8 @@ def ingest(
             latest = next_cursor(records, cursor, datetime.now(UTC))
         loader.set_sync_state(slug, adapter.name, key, latest, window_since, result.loaded)
         emit(BuildEvent(slug, "load", "done", key, count=sum(loaded.written.values())))
+    loader.resolve_refs(slug)  # items the sources just loaded may point at archived ones
+    report.load.superseded.update(supersede(slug, entries))  # their newer items exist now
     report.embed = embed(slug, on_event=emit)
     return report
 

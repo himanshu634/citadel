@@ -26,7 +26,7 @@ def test_ingesting_twice_gives_identical_counts(synthetic_graph):
     before = stats(synthetic_graph)
     load_company(synthetic_company(synthetic_graph))
     assert stats(synthetic_graph) == before
-    assert before["node:Change"] == 25 and before["node:WorkItem"] == 15
+    assert before["node:Change"] == 25 and before["node:WorkItem"] == 16
 
 
 def test_experts_rank_recent_humans_and_flag_owners(synthetic_graph):
@@ -514,6 +514,11 @@ UID_LOOKUPS = {
             }
         ]
     },  # fmt: skip
+    "load/archive_mark": {
+        "rows": [{"uid": "synthetic:pr:4", "ref": "r", "archived_at": "t", "request": "q"}]
+    },
+    "load/archive_supersede": {"uid": "synthetic:pr:4", "by_uid": "synthetic:pr:1"},
+    "load/chunks_to_embed_from": {"model": "m", "limit": 10, "sources": ["synthetic:pr:4"]},
 }
 
 
@@ -521,6 +526,14 @@ UID_LOOKUPS = {
 def test_uid_lookups_are_index_scans(synthetic_graph, name):
     plan = db.explain(synthetic_graph, name, UID_LOOKUPS[name])
     assert any("Index Scan" in op for op in plan), plan
+    assert not any("All Node Scan" in op for op in plan), plan
+
+
+def test_archive_resolve_never_scans_every_node(synthetic_graph):
+    """It runs after every ingest and has no uid to look up: it starts from the archived kinds'
+    labels, never from every node (chunks included)."""
+    plan = db.explain(synthetic_graph, "load/archive_resolve")
+    assert any("Label Scan" in op for op in plan), plan
     assert not any("All Node Scan" in op for op in plan), plan
 
 
@@ -577,6 +590,6 @@ def test_schema_backfills_the_node_label():
         assert schema.apply_schema(slug).backfilled == total
         assert tools.get_entity(slug, uid="synthetic:pr:4").label == "WorkItem"
         assert schema.apply_schema(slug).backfilled == 0  # idempotent
-        assert stats(slug)["node:WorkItem"] == 15  # the label is added, nothing is duplicated
+        assert stats(slug)["node:WorkItem"] == 16  # the label is added, nothing is duplicated
     finally:
         db.delete_graph(slug)

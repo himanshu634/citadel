@@ -45,7 +45,8 @@ folds under one summary line; it starts open while the answer runs.
 		graph: 'Graph tool',
 		submit: 'Answer check',
 		mcp: 'MCP',
-		server: 'Server tool'
+		server: 'Server tool',
+		archive: 'Archivist tool'
 	};
 
 	type State = { icon: 'run' | 'ok' | 'bad'; text: string };

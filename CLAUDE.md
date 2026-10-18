@@ -40,6 +40,7 @@ make eval-drafts SLUG=x        # thumbs-down answers as draft eval cases (WRITE=
 make chats-backfill SLUG=x     # chat history for threads asked before it existed (checkpoints + traces; ALL=1 adds untraced)
 make agents                    # list the agent roles, their jobs and read tools
 make reset SLUG=x CONFIRM=1    # delete brain_x, agent_x, keeper_x, its build history and Ask traces (frees the slug)
+make archive-clear SLUG=x CONFIRM=1   # delete the archive cache data/raw/x/archive (a rebuild then drops archived items)
 make linear-seed SLUG=synthetic_linear CONFIRM=1   # copy the synthetic tickets into a real Linear workspace
 make brain ARGS="..."          # any `brain` CLI command
 make api                       # HTTP API on 127.0.0.1:$API_PORT (default 8000), auto-reload
@@ -143,6 +144,18 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   load is remembered for 5 minutes; a question asked while the model loads is refused, not kept
   waiting. `semantic_search` uses only vectors from the current model and raises
   `EmbeddingUnavailable` (a sentence) when the graph has none.
+- **`archive/`** (the Archivist's side of `brain`; spec: docs/agents.md "The Archivist"): items older
+  than `window.since`, fetched on demand and kept. `cache.py` stores each as canonical records in
+  `data/raw/<slug>/archive/<source_key>/<item>.jsonl` (a `meta` line first; survives rebuilds and
+  `make reset`); `backends.py` has one backend per configured source (GitHub repo, Linear
+  workspace, `canonical_jsonl` folder with an `archive/` subfolder), each `search` / `fetch` a
+  named query, never model-written; `session.py` is one request's `ArchiveSession`: budgets
+  (calls, items, depth, daily cap), `lookup`, `fetch`, `load`. `pipeline.load_entries` /
+  `load_archive` load entries first on every ingest, with no `SyncState`; `normalize(keep=)`
+  exempts archived work items from the window; archived nodes carry `archived`, `archived_at`,
+  `archive_request`, `ref`, and `SUPERSEDED_BY` marks a replaced one. Ingest keeps unlinkable
+  refs in `WorkItem.unresolved_refs`; `resolve_refs` turns them into `MENTIONS` once the target is
+  archived. Archive loads embed only if the model is already loaded.
 - **`pipeline.py`** is the source-agnostic glue the CLI calls. Ingest is incremental: each source
   has a `SyncState` node holding a cursor (the latest `arrival_at`, a source-server time);
   records that arrived before it are skipped, records without an arrival time are always loaded:
@@ -185,14 +198,16 @@ including the embed stage's `chunks_to_embed`, `chunk_embedding`, `clear_embedde
 `brain/graph_view.py`), `chat/` (the agents' chat history in agent_<slug>, run by
 `agents.checkpoint.run`), `sources/` (the Sources page's node counts per `source` label),
 `keeper/` (the Keeper's reads and writes on brain_<slug>, run by `brain/keeper.py`), `ledger/`
-(the Keeper's ledger in keeper_<slug>, run by `agents.keeper.store`).
+(the Keeper's ledger in keeper_<slug>, run by `agents.keeper.store`; its `archive_*` queries hold
+the Archivist's requests and finds).
 
 FalkorDB range indexes are per label, so a label-less `MATCH (n {uid: $uid})` scans every node.
 Every node with a uid carries the label `Node` beside its kind (the loads `SET x:Node` as they
 MERGE on the kind label; `schema/node_label`, run by `brain schema` and every build's prepare
 stage, backfills a graph loaded before it existed), and a lookup that takes any kind of node is
 `MATCH (n:Node {uid: $uid})` (get_entity, path_between, the Keeper's evidence, source_facts and
-project_claim; `test_graph.py` checks their plans with `db.explain`). FalkorDB lists a node's
+project_claim, the Archivist's archive_mark, archive_supersede and chunks_to_embed_from;
+`test_graph.py` checks their plans with `db.explain`). FalkorDB lists a node's
 labels in the order the graph first saw them, so a query reads the kind as
 `head([l IN labels(n) WHERE l <> 'Node'])`, never `labels(n)[0]` (`test_queries.py` forbids it).
 
@@ -285,7 +300,10 @@ against an earlier file; `make eval-report FILES=...` (`evals/report.py`) turns 
 Markdown tables of docs/evals.md (published runs: `docs/evals/<slug>/`). The `[semantic]` cases ask in words with no full-text overlap (the
 graph must be embedded). The `[falkordb]` cases (`CASE=falkordb`) ask one question per graph algorithm or
 FalkorDB feature behind a tool (SPpaths, PageRank, betweenness, variable-length BLOCKS, full-text,
-vector), plus one thread that chains three of them. It calls the API, so it is not part of `make test`;
+vector), plus one thread that chains three of them. The `[archive]` cases make the Archivist load
+into the brain, so a plain run skips them (`CASE=archive` runs them); run them after `make
+archive-clear SLUG=synthetic CONFIRM=1` and `make synthetic`, with `REPEAT=1`. It calls the API, so
+it is not part of `make test`;
 `apps/agents/tests/test_evals.py` checks the case files and the harness with the scripted client.
 `evals/drafts.py` (`make eval-drafts`) turns thumbs-down traces into cases `fb-<trace id>`: the
 earlier turns of the thread, then the bad one expecting only an answer, with the bad answer in
@@ -295,7 +313,7 @@ real `expect` and drop the tag.
 ### The Keeper (`agents/keeper`, `roles/keeper.py`, `brain/keeper.py`)
 
 Reviews what the brain could not answer and updates it (spec: docs/agents.md "The Keeper"). The
-demo's agents are `brain`, `keeper`, `pm` and `qa`. Pieces:
+demo's agents are `brain`, `keeper`, `pm`, `qa` and `archivist` (below). Pieces:
 - Ledger graph `keeper_<slug>` (survives rebuilds; `make reset` deletes it): Gap, Consult, Claim,
   FollowUp, LogEntry, Review, ReviewStep (`keeper/model.py`), through the `WorkStore` protocol
   (`keeper/store.py`: `KeeperStore` runs `queries/ledger/*`, `MemoryKeeperStore` for tests).
@@ -352,9 +370,39 @@ demo's agents are `brain`, `keeper`, `pm` and `qa`. Pieces:
   from `src/lib/pendingClaims.svelte.ts`. Words for reasons, log actions, errors in `src/lib/keeper.ts`; Ask
   marks a cited `Claim` source "Keeper" (`WalkAnswer`).
 
+### The Archivist (`agents/archivist`, `roles/archivist.py`, `brain/archive/`)
+
+Goes back past the ingest window on demand and loads older items into brain_<slug> (spec:
+docs/agents.md "The Archivist"). One job, `answer_request`, on the Keeper's ledger
+(`ArchiveRequest`, `ArchiveFind`; `ledger/archive_*`). Pieces:
+- Tools (`archivist/tools.py`): `archive_lookup`, `archive_search`, `archive_fetch` over one
+  `brain.archive` `ArchiveSession`, plus the role's graph read tools. Submit:
+  `submit_archive_answer` (finds with why, quote, verdict `holds|superseded|conflicts`, evidence).
+- Fixed rules (`archivist/rules.py`, `brain.archive.session`, numbers in `Settings`
+  `archivist_*`): only the company's own sources; budgets per tier (Ask 6 calls / 3 items, Keeper
+  10 / 8, depth 2, 24 steps); 100 items per company per day; Ask run 45 s (soft stop at 70%);
+  a find must be fetched in this run, with a verbatim quote of 20+ chars (or an exact ref) and
+  evidence uids in the brain; requests answered in 30 days are remembered (never `partial`, and
+  not once a find has left the brain). A reference request is refused `out_of_scope` only when
+  no source claims any of its refs; unclaimed words beside a claimed ref are dropped from the run
+  and logged `archive_refs_ignored`. The JSONL archive reads a uid, a url or `#<n>`.
+- Run by `archivist/job.answer_request` (recall, refuse, run, apply, never raises); each tool
+  call is a `ReviewStep` under the request, so it shows on `/activity`.
+- Ask: `ask_archivist` (`archivist/live.py`, in `toolset.ask_toolset`) runs the job inline in the
+  worker thread and streams its steps to Ask as `archive_step` events; a failure or timeout is a
+  normal row with `reason`, never an error. Its loaded uids are citable in the same answer.
+- Keeper: `decide` may submit `ask_archivist` (gap `waiting_archive`, once per gap, ever); the
+  review's archive step runs at most `archivist_per_review` (2) requests, then `settle`: `found`
+  or `already_in_brain` reopens the gap without using an attempt, else `needs_person`. A review
+  whose Archivist reopened gaps gets one follow-on review (trigger `archive`) from the backend.
+  A conflicting find opens a gap of kind `archive_conflict`.
+- Synthetic company: `examples/synthetic_company/archive/` holds items older than the window
+  (issue 900, the JWT decision); eval cases tagged `archive` use it (skipped by a plain
+  `make eval`; see Evals).
+
 ### Agent roles (`agents/roles`, `agents/work`, `agents/policies`)
 
-The roles the Keeper's review runs (`pm`, `qa`, `keeper`) plus `brain` (Ask). Agents never
+The roles the Keeper's review runs (`pm`, `qa`, `keeper`, `archivist`) plus `brain` (Ask). Agents never
 message each other: each reads its queue on the Keeper's ledger, makes one decision and writes
 it; the next agent finds it through its own queue. Pieces:
 - `agents/work/`: the `WorkStore` protocol (`store.py`: `read`/`write` by query name, like
@@ -378,7 +426,7 @@ nothing; every role read tool is a `brain.tools` tool (`test_every_read_tool_is_
 HTTP for the frontend, `backend.api:app` (FastAPI, `make api`): its only way in. Company routes
 sit under `/api/companies/{slug}` (GET the company, PUT its YAML) and
 `/api/companies/{slug}/...` (overview, builds, sources, tools, ask, graph, threads,
-`refs/{uid}/threads`, traces, activity, keeper); the slug is resolved only by
+`refs/{uid}/threads`, traces, activity, keeper, `archive/requests`); the slug is resolved only by
 `deps.company_slug`, which 404s unless the slug matches `config.SLUG_RE` and
 `companies/<slug>.yaml` exists. Top-level routes: `/api/companies` (list, create),
 `/api/companies/validate`, `/api/events` (all builds as SSE), `/api/models` (Ask's model
@@ -403,6 +451,8 @@ Behind it:
   DELETE `.../sources/leftovers?key=` removes one (409 while configured or building). POST
   `.../builds` takes `sources` to download only those keys (loading still walks every source).
 - `keeper_runs.py` + `api/keeper.py`: Keeper reviews and approvals (see "The Keeper" above).
+- `api/archive.py`: GET `.../archive/requests?limit=` lists the Archivist's latest requests,
+  most recently updated first, each with its finds (see "The Archivist" above).
 - CLI `backend reset` (`make reset`) deletes a company's graphs (brain_, agent_, keeper_), build
   history and Ask traces.
 

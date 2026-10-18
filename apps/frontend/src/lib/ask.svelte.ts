@@ -16,9 +16,11 @@ import { api, describeError } from './api/client';
 import type {
 	AskAnswer,
 	AskCall,
+	AskArchiveStepEvent,
 	AskLlmEvent,
 	AskStepDoneEvent,
 	AskStepEvent,
+	ChatStep,
 	ChatTurn,
 	Rating,
 	WalkStep
@@ -57,7 +59,7 @@ export const NOT_RUN = 'Not run: the answer ended before this call.';
 
 /** A turn is over: any call still shown as running never will run. */
 function endSteps(turn: Turn): void {
-	for (const s of turn.steps) {
+	for (const s of turn.steps.flatMap((s) => [s, ...(s.children ?? [])])) {
 		if (s.status !== 'running') continue;
 		s.status = 'done';
 		s.error = NOT_RUN;
@@ -79,24 +81,30 @@ export function turnFromChat(t: ChatTurn): Turn {
 				error: s.error,
 				result: s.result
 			}));
+	const toWalk = (s: ChatStep, n: number | null): WalkStep => ({
+		id: s.id,
+		n,
+		tool: s.tool,
+		input: s.input,
+		call: s.call,
+		status: s.status === 'running' ? 'running' : 'done',
+		ms: s.ms,
+		count: s.count,
+		error: s.error,
+		rows: s.rows,
+		nodes: s.nodes,
+		rels: s.rels
+	});
 	const turn: Turn = {
 		question: t.question,
 		model: t.answer?.model ?? t.calls.at(-1)?.model ?? null,
 		calls: t.calls.map((c) => ({ ...c, calls: asked(c.seq) })),
-		steps: walk.map((s) => ({
-			id: s.id,
-			n: s.n,
-			tool: s.tool,
-			input: s.input,
-			call: s.call,
-			status: s.status === 'running' ? 'running' : 'done',
-			ms: s.ms,
-			count: s.count,
-			error: s.error,
-			rows: s.rows,
-			nodes: s.nodes,
-			rels: s.rels
-		})),
+		steps: walk.map((s) => {
+			const step = toWalk(s, s.n);
+			// The Archivist's own calls, under the ask_archivist call they ran in (as live).
+			if (s.steps?.length) step.children = s.steps.map((c) => toWalk(c, null));
+			return step;
+		}),
 		answer: t.answer,
 		error: t.error,
 		status: t.status,
@@ -108,7 +116,24 @@ export function turnFromChat(t: ChatTurn): Turn {
 	return turn;
 }
 
+/**
+ * Put an Archivist step under its parent. Done replaces running by id. Returns false when the
+ * parent has not arrived yet (the caller keeps the step until it does).
+ */
+function attachChild(turn: Turn, parent: string, child: WalkStep): boolean {
+	const outer = turn.steps.find((s) => s.id === parent);
+	if (!outer) return false;
+	const children = (outer.children ??= []);
+	const at = children.findIndex((c) => c.id === child.id);
+	if (at === -1) children.push(child);
+	else children[at] = child;
+	return true;
+}
+
 export class AskThread {
+	/** Archivist steps whose `ask_archivist` step has not arrived, by parent id. */
+	#orphans = new Map<string, WalkStep[]>();
+
 	turns = $state<Turn[]>([]);
 	threadId = $state<string | null>(null);
 	/** The newest asked or the replayed turn: `revealed` applies to it only. */
@@ -146,6 +171,7 @@ export class AskThread {
 		const text = question.trim();
 		if (!text || this.running) return;
 		this.#stopReplay();
+		this.#orphans.clear();
 		this.turns.push({
 			question: text,
 			model,
@@ -193,6 +219,12 @@ export class AskThread {
 		}
 	}
 
+	/** Attach the Archivist steps that came before step `id`. */
+	#adopt(turn: Turn, id: string): void {
+		for (const child of this.#orphans.get(id) ?? []) attachChild(turn, id, child);
+		this.#orphans.delete(id);
+	}
+
 	#apply(turn: Turn, event: string, data: unknown): void {
 		if (event === 'start') {
 			this.threadId = (data as { thread_id: string }).thread_id;
@@ -202,12 +234,30 @@ export class AskThread {
 			if (!turn.calls.some((c) => c.seq === call.seq)) turn.calls.push(call);
 		} else if (event === 'step') {
 			const step = data as AskStepEvent;
-			if (!turn.steps.some((s) => s.id === step.id)) turn.steps.push({ ...step, status: 'running' });
+			if (!turn.steps.some((s) => s.id === step.id)) {
+				turn.steps.push({ ...step, status: 'running' });
+				this.#adopt(turn, step.id);
+			}
 		} else if (event === 'step_done') {
-			const done = { ...(data as AskStepDoneEvent), status: 'done' as const };
+			const done: WalkStep = { ...(data as AskStepDoneEvent), status: 'done' };
 			const at = turn.steps.findIndex((s) => s.id === done.id);
 			if (at === -1) turn.steps.push(done);
-			else turn.steps[at] = done;
+			else turn.steps[at] = { ...done, children: turn.steps[at].children };
+			this.#adopt(turn, done.id);
+		} else if (event === 'archive_step') {
+			const inner = data as AskArchiveStepEvent;
+			if (inner.event === 'llm') return;
+			const child: WalkStep =
+				inner.event === 'step'
+					? { id: inner.id, n: null, tool: inner.tool, input: inner.input, status: 'running' }
+					: { ...inner, n: null, status: 'done' };
+			if (!attachChild(turn, inner.parent, child)) {
+				const held = this.#orphans.get(inner.parent) ?? [];
+				const at = held.findIndex((c) => c.id === child.id);
+				if (at === -1) held.push(child);
+				else held[at] = child;
+				this.#orphans.set(inner.parent, held);
+			}
 		} else if (event === 'answer') {
 			const answer = data as AskAnswer;
 			turn.answer = answer;

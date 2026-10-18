@@ -1,6 +1,10 @@
 """Keeper agent: decides each gap under review from the pm and qa consults' answers: a claim,
+`ask_archivist` (nobody could ground it, and it is about history older than the brain holds),
 `needs_person` (nobody could ground it) or `dismiss` (noise). It is the only agent that writes
 knowledge (docs/superpowers/specs/2026-10-16-keeper-design.md, "The review run").
+
+A gap the Archivist answered carries what it found into its next round: the consult and decide
+contexts list each answered request's summary and finds (`archive`).
 
 Also the consult job pm and qa share: each answers the consults in its own queue with a draft
 claim citing uids it saw, or `can_ground: false`. All of these jobs run on the Keeper's ledger
@@ -21,6 +25,7 @@ QUEUE_LIMIT = 100  # gaps in review read per queue pass
 
 _GAP_KEYS = ("uid", "kind", "text", "count", "attempts", "about", "subject")
 _ANSWER_KEYS = ("role", "can_ground", "kind", "subject", "statement", "value", "cites")
+_FIND_KEYS = ("uid", "title", "date", "verdict")
 
 
 def log(store: WorkStore, ctx: Ctx, actor: str, action: str, **fields: Any) -> list[Row]:
@@ -38,6 +43,21 @@ def _gap(store: WorkStore, uid: str) -> dict[str, Any] | None:
 
 def _gap_view(gap: dict[str, Any]) -> dict[str, Any]:
     return {k: gap.get(k) for k in _GAP_KEYS if gap.get(k) not in (None, [], "")}
+
+
+def _archive(store: WorkStore, gap: str) -> dict[str, Any]:
+    """{"archive": [{summary, finds: [{uid, title, date, verdict}]}]} for the gap's answered
+    Archivist requests, newest first; {} when it has none (the context stays as it was)."""
+    answered = [r for r in store.read("ledger/archive_requests_for_gap", {"gap": gap})
+                if r["status"] == "answered"]  # fmt: skip
+    if not answered:
+        return {}
+    finds = store.read("ledger/archive_finds", {"requests": [r["uid"] for r in answered]})
+    return {"archive": [
+        {"summary": r["summary"],
+         "finds": [{k: f.get(k) for k in _FIND_KEYS} for f in finds if f["request"] == r["uid"]]}
+        for r in answered
+    ]}  # fmt: skip
 
 
 # --- consult (pm, qa) -------------------------------------------------------------------------
@@ -74,12 +94,13 @@ def consult_job(role: str) -> Job:
 
 
 def consult_context(store: WorkStore, ctx: Ctx, s: Subject) -> dict[str, Any]:
-    """The consult and the gap it asks about."""
+    """The consult, the gap it asks about, and what the Archivist found for the gap."""
     c = s.data
     gap = _gap(store, c.get("gap", "")) or {"uid": c.get("gap")}
     return {
         "consult": {k: c.get(k) for k in ("uid", "gap", "role", "attempt")},
         "gap": _gap_view(gap),
+        **_archive(store, gap["uid"] or ""),
     }
 
 
@@ -102,12 +123,13 @@ def queue_decide(store: WorkStore, ctx: Ctx) -> list[Subject]:
 
 
 def decide_context(store: WorkStore, ctx: Ctx, s: Subject) -> dict[str, Any]:
-    """The gap and its consults' answers."""
+    """The gap, its consults' answers, and what the Archivist found for it."""
     gap = _gap(store, s.uid) or dict(s.data)
     consults = store.read("ledger/consults_for_gap", {"gap": s.uid})
     return {
         "gap": _gap_view(gap),
         "consults": [{k: c.get(k) for k in _ANSWER_KEYS} for c in consults],
+        **_archive(store, s.uid),
     }
 
 
@@ -138,5 +160,6 @@ ROLE = Role(
         "work_history",
     ),
     jobs=(Job("decide", SubmitKeeperDecision, queue_decide, apply_decide, decide_context),),
-    summary="Decides gaps from the pm and qa consults: a claim, needs_person or dismiss.",
+    summary="Decides gaps from the pm and qa consults: a claim, ask_archivist, needs_person or "
+    "dismiss.",
 )

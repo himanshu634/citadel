@@ -3,8 +3,9 @@
 Why: a real company graph has no gold answers, so the offline evals (agents/evals) cannot
 grade live use. Instead each turn asked from the CLI or the Ask page is kept as one `Trace` with
 what needs no reference answer: the tools called, failed tool calls, rejected submit_answer
-calls, nudges, how the turn stopped, tokens, latency and how many sources it cited. `summarize`
-turns a window of traces into rates and percentiles (GET .../traces/summary). A thumbs up or
+calls, nudges, how the turn stopped, tokens, latency, how many sources it cited and the
+Archivist requests its `ask_archivist` calls made. `summarize` turns a window of traces into
+rates and percentiles (GET .../traces/summary). A thumbs up or
 down from the Ask page is stored on its trace, and `python -m agents.evals.drafts` turns thumbs-down
 turns into draft cases for evals/cases/<slug>.yaml.
 
@@ -56,6 +57,15 @@ class Feedback(BaseModel):
     at: datetime
 
 
+class ArchiveCall(BaseModel):
+    """One `ask_archivist` call of a turn: its request, how it ended and the external calls it
+    used (None: the call ended before a request opened)."""
+
+    request: str | None = None
+    outcome: str | None = None  # found | nothing_found | already_in_brain, or None
+    calls: int = 0
+
+
 class Trace(BaseModel):
     id: str
     at: datetime  # when the turn ended (UTC)
@@ -77,6 +87,7 @@ class Trace(BaseModel):
     text: str | None = None  # the answer (None: no answer)
     cited: list[str] = []  # source uids, in marker order
     path: list[str] = []
+    archive: list[ArchiveCall] = []  # one per ask_archivist call
     feedback: Feedback | None = None  # folded in when read; never written on the turn line
 
     @property
@@ -98,6 +109,18 @@ def step_summary(steps: list[dict[str, Any]], submit: str = SUBMIT) -> dict[str,
         "rejected": rejected,
         "tool_ms": sum(s.get("ms") or 0 for s in tools),
     }
+
+
+def archive_calls(steps: list[dict[str, Any]]) -> list[ArchiveCall]:
+    """The Archivist requests a turn's `ask_archivist` steps returned (their one row each)."""
+    out = []
+    for s in steps:
+        if s.get("tool") != "ask_archivist" or not s.get("rows"):
+            continue
+        row = s["rows"][0]
+        out.append(ArchiveCall(request=row.get("request"), outcome=row.get("outcome"),
+                               calls=row.get("calls") or 0))  # fmt: skip
+    return out
 
 
 def usage_of(usage: dict[str, int]) -> Usage:
@@ -141,6 +164,7 @@ def new_trace(
         "rejected": summary["rejected"],
         "effort": s.anthropic_effort,
         "ms": ms,
+        "archive": archive_calls(steps),
     }
     if answer is None:
         return Trace(**base, stop="error", error=error, model=model or s.anthropic_model)

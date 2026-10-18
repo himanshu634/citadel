@@ -39,6 +39,8 @@ export interface Source {
 	title: string;
 	meta: string;
 	url?: string;
+	/** An ISO date when the Archivist loaded it from before the window. */
+	archived?: string | null;
 }
 
 export interface CitedAnswer {
@@ -487,7 +489,8 @@ export interface AskStepEvent {
  * Where a tool call ran: `graph` (a named graph tool), `submit` (the answer check), `mcp` (a tool
  * on an MCP server, through the API's MCP connector) or `server` (an Anthropic server tool).
  */
-export type CallKind = 'graph' | 'submit' | 'mcp' | 'server';
+/** `archive`: a call the Archivist made inside an `ask_archivist` call (saved chats only). */
+export type CallKind = 'graph' | 'submit' | 'mcp' | 'server' | 'archive';
 
 /** A tool one Claude response used. MCP and server calls ran already and carry their result. */
 export interface AskCall {
@@ -520,6 +523,38 @@ export interface AskLlmEvent {
 	calls: AskCall[];
 }
 
+/**
+ * A step of the Archivist inside Ask's `ask_archivist` step (`archive_step` event). `parent` is
+ * the id of the outer step; it may arrive before that step does. `llm` events are not listed.
+ */
+export type AskArchiveStepEvent =
+	| { parent: string; event: 'llm' }
+	| ({ parent: string; event: 'step' } & Pick<AskStepEvent, 'id' | 'tool' | 'input'>)
+	| ({ parent: string; event: 'step_done' } & Omit<AskStepDoneEvent, 'n'>);
+
+/** A find the Archivist handed back (a row of `ask_archivist`'s result). */
+export interface ArchiveFind {
+	uid: string;
+	title: string;
+	url: string | null;
+	date: string | null;
+	verdict: 'holds' | 'superseded' | 'conflicts';
+	superseded_by: string | null;
+	archived: true;
+}
+
+/** The one row of a done `ask_archivist` step. */
+export interface ArchiveRequest {
+	request: string;
+	outcome: 'found' | 'nothing_found' | 'already_in_brain' | null;
+	status: string;
+	summary: string | null;
+	partial: boolean;
+	reason: string | null;
+	calls: number;
+	finds: ArchiveFind[];
+}
+
 export interface AskStepDoneEvent extends AskStepEvent {
 	ms: number | null;
 	/** Rows returned, all of them; `rows` holds the first few. */
@@ -537,6 +572,8 @@ export interface AskSource {
 	label: string | null;
 	/** The step that first returned it. */
 	step: number | null;
+	/** An ISO date when the Archivist loaded it from before the window; the badge shows the year. */
+	archived?: string | null;
 }
 
 export interface AskAnswer {
@@ -574,6 +611,8 @@ export interface ModelsOut {
 /** One tool call as the page shows it: asked for (running), then done. */
 export interface WalkStep extends AskStepEvent {
 	status: 'running' | 'done';
+	/** The Archivist's own steps, under its `ask_archivist` step. */
+	children?: WalkStep[];
 	ms?: number | null;
 	count?: number | null;
 	error?: string | null;
@@ -609,6 +648,10 @@ export interface ChatStep extends AskStepDoneEvent {
 	server: string | null;
 	status: string;
 	result: string | null;
+	/** An `ask_archivist` call's own calls (kind `archive`), in order; empty for other calls. */
+	steps?: ChatStep[];
+	/** For an Archivist call: the id of the `ask_archivist` call it ran in. */
+	parent?: string | null;
 }
 
 export interface ChatLlmCall {
@@ -662,7 +705,7 @@ export interface Feedback {
 export interface ActivityStep {
 	/** 1-based, in the order the agent ran them. */
 	n: number;
-	/** `brain` for Ask; `keeper`, `pm` or `qa` for a step of a Keeper review. */
+	/** `brain` for Ask; `keeper`, `pm` or `qa` for a step of a Keeper review; `archivist` for its own run. */
 	actor: string;
 	tool: string;
 	kind: CallKind;
@@ -678,7 +721,7 @@ export interface ActivityStep {
 export interface ActivityRun {
 	/** `ask:<thread id>:<turn n>` or `keeper:<review uid>`. */
 	id: string;
-	source: 'ask' | 'keeper';
+	source: 'ask' | 'keeper' | 'archive';
 	/** `brain` for Ask, `keeper` for a review (its steps name pm, qa or keeper). */
 	actor: string;
 	/** What the run was for: the question, or the review's first gap. */
@@ -701,8 +744,19 @@ export interface Activity {
 // --- The Keeper (/api/companies/{slug}/keeper/...; agents/keeper/model.py) ------------------
 // Timestamps are ISO-8601 UTC strings. Records point at brain_<slug> nodes by uid.
 
-export type GapKind = 'failed_question' | 'thumbs_down' | 'stale_owner' | 'unowned_hot_system';
-export type GapStatus = 'open' | 'in_review' | 'resolved' | 'needs_person' | 'dismissed';
+export type GapKind =
+	| 'failed_question'
+	| 'thumbs_down'
+	| 'stale_owner'
+	| 'unowned_hot_system'
+	| 'archive_conflict';
+export type GapStatus =
+	| 'open'
+	| 'in_review'
+	| 'waiting_archive'
+	| 'resolved'
+	| 'needs_person'
+	| 'dismissed';
 export type ClaimKind = 'owner' | 'expert' | 'decision' | 'fact' | 'link';
 export type ClaimStatus =
 	| 'pending_approval'
@@ -790,7 +844,7 @@ export interface FollowUp {
 export interface Review {
 	uid: string;
 	slug: string;
-	trigger: 'build' | 'manual' | 'approval';
+	trigger: 'build' | 'manual' | 'approval' | 'archive';
 	state: 'running' | 'done' | 'stopped' | 'failed' | 'skipped';
 	budget: number;
 	started_at: string;
@@ -800,6 +854,8 @@ export interface Review {
 	/** The gaps it picked, in pick order. */
 	gaps: string[];
 	gap_text: string | null;
+	/** The gaps its Archivist runs sent back to open (a follow-on review consults them). */
+	archive_reopened: string[];
 }
 
 /** One role's answer to one gap: a draft claim citing uids it saw, or `can_ground` false. */

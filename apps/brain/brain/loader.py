@@ -70,12 +70,14 @@ NO_PRIORITY_RANK = 5
 class LoadReport:
     written: dict[str, int] = field(default_factory=lambda: defaultdict(int))  # query -> rows
     dropped: dict[str, int] = field(default_factory=lambda: defaultdict(int))  # query -> rows
+    superseded: dict[str, str] = field(default_factory=dict)  # archived uid -> newer uid marked
 
     def merge(self, other: LoadReport) -> None:
         for k, v in other.written.items():
             self.written[k] += v
         for k, v in other.dropped.items():
             self.dropped[k] += v
+        self.superseded.update(other.superseded)
 
 
 # --- value helpers ----------------------------------------------------------------------------
@@ -199,6 +201,7 @@ def load(slug: str, records: Iterable[CanonicalRecord], origin: str | None = Non
                 "priority_rank": _priority_rank(w),
                 "due_date": w.due_date.isoformat() if w.due_date else None,
                 "due_ts": day_epoch(w.due_date),
+                "unresolved_refs": w.unresolved_refs,
             }
             for w in of(WorkItem)
         ],
@@ -478,10 +481,16 @@ def _load_ownership(slug: str, owns: list[Ownership], rep: LoadReport) -> None:
 # --- embeddings -------------------------------------------------------------------------------
 
 
-def chunks_to_embed(slug: str, model: str, limit: int) -> list[dict[str, Any]]:
+def chunks_to_embed(
+    slug: str, model: str, limit: int, sources: list[str] | None = None
+) -> list[dict[str, Any]]:
     """The next `limit` chunks (uid, text, text_hash) not yet embedded from their current text
-    by `model`, by uid. Chunks with no text are never returned."""
-    return db.run(slug, "load/chunks_to_embed", {"model": model, "limit": limit}, read_only=True)
+    by `model`, by uid. Chunks with no text are never returned. `sources` limits them to the
+    chunks of those work items or documents."""
+    params: dict[str, Any] = {"model": model, "limit": limit}
+    if sources is None:
+        return db.run(slug, "load/chunks_to_embed", params, read_only=True)
+    return db.run(slug, "load/chunks_to_embed_from", {**params, "sources": sources}, read_only=True)
 
 
 def set_embeddings(slug: str, rows: list[dict[str, Any]], model: str) -> int:
@@ -492,6 +501,27 @@ def set_embeddings(slug: str, rows: list[dict[str, Any]], model: str) -> int:
 def clear_embedded(slug: str) -> int:
     """Mark every chunk as pending for the embed stage. Returns the chunks marked."""
     return _n(db.run(slug, "load/clear_embedded"))
+
+
+# --- archive (items older than the ingest window, loaded on demand) -------------------------
+
+
+def mark_archived(slug: str, rows: list[dict[str, Any]]) -> int:
+    """Flag loaded nodes as archived: rows of {uid, ref, archived_at, request}. Returns the
+    nodes marked (WorkItem or Document; a uid that is not in the graph marks nothing)."""
+    return sum(n for _, n in _batches(slug, "load/archive_mark", rows, {}))
+
+
+def resolve_refs(slug: str) -> int:
+    """Link every item's unresolved ref to the archived node carrying that `ref` (MENTIONS) and
+    drop the ref from the item. Returns the edges made; a second call makes none."""
+    return sum(row["n"] for row in db.run(slug, "load/archive_resolve"))  # one row per kind
+
+
+def mark_superseded(slug: str, uid: str, by_uid: str) -> bool:
+    """Record that `by_uid` supersedes `uid` (SUPERSEDED_BY edge + `superseded_by` property).
+    False when either node is missing."""
+    return _n(db.run(slug, "load/archive_supersede", {"uid": uid, "by_uid": by_uid})) > 0
 
 
 # --- sync state -------------------------------------------------------------------------------

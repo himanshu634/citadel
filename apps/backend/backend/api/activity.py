@@ -2,11 +2,12 @@
 
 Why: the Systems page draws where an agent is working and the trail of nodes it touched. The
 runs are Ask turns, read from the chat history, and Keeper reviews, read from the ledger
-keeper_<slug> with their pm, qa and keeper steps (`agents/activity.py` has the shape and why).
+keeper_<slug> with their pm, qa and keeper steps, and Archivist requests with theirs
+(`agents/activity.py` has the shape and why).
 
-- GET .../activity?limit= : the latest `limit` runs of both kinds, newest first, and whether one
-  is still running. A turn or review left `running` by a server that went away is shown as
-  stopped, as in the chat routes, since no run can finish it (`Asker.busy`,
+- GET .../activity?limit= : the latest `limit` runs of the three kinds, newest first, and
+  whether one is still running. A turn, review or request left `running` by a server that
+  went away is shown as stopped, as in the chat routes, since no run can finish it (`Asker.busy`,
   `KeeperRuns.is_running` say what this process runs).
 """
 
@@ -14,9 +15,15 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from agents.activity import Activity, ActivityRun, runs_from_reviews, runs_from_thread
+from agents.activity import (
+    Activity,
+    ActivityRun,
+    runs_from_archive,
+    runs_from_reviews,
+    runs_from_thread,
+)
 from agents.history import NEVER
-from agents.keeper.model import Review, ReviewStep
+from agents.keeper.model import ArchiveRequest, Review, ReviewStep
 from fastapi import APIRouter, Query
 
 from backend.api.ask import Asker, AskerDep
@@ -34,7 +41,11 @@ def activity(
     keeper: Keeper,
     limit: Annotated[int, Query(ge=1, le=20)] = 6,
 ) -> Activity:
-    runs = _ask_runs(asker, slug, limit) + _review_runs(keeper, slug, limit)
+    runs = (
+        _ask_runs(asker, slug, limit)
+        + _review_runs(keeper, slug, limit)
+        + _archive_runs(asker, keeper, slug, limit)
+    )
     runs.sort(key=lambda r: r.started_at, reverse=True)
     runs = runs[:limit]
     return Activity(runs=runs, running=any(r.status == "running" for r in runs))
@@ -67,3 +78,25 @@ def _review_runs(keeper: KeeperRuns, slug: str, limit: int) -> list[ActivityRun]
             step = ReviewStep(**row)
             steps[step.review].append(step)
     return runs_from_reviews(reviews, steps, live=lambda uid: keeper.is_running(slug, uid))
+
+
+def _archive_runs(asker: Asker, keeper: KeeperRuns, slug: str, limit: int) -> list[ActivityRun]:
+    """The latest `limit` Archivist requests and their steps: two reads. One runs in this
+    process while its Ask thread is busy, or, if the Keeper asked, while the company's review
+    runs."""
+    store = keeper.store_for(slug)
+    statuses = ["open", "running", "answered", "failed", "refused"]
+    reqs = [ArchiveRequest(**r) for r in store.read(
+        "ledger/archive_requests", {"statuses": statuses, "limit": limit})]  # fmt: skip
+    steps: dict[str, list[ReviewStep]] = {r.uid: [] for r in reqs}
+    if reqs:
+        for row in store.read("ledger/review_steps", {"reviews": list(steps)}):
+            step = ReviewStep(**row)
+            steps[step.review].append(step)
+
+    def live(req: ArchiveRequest) -> bool:
+        if req.asked_by == "ask":
+            return bool(req.thread) and asker.busy(req.thread)
+        return keeper.running(slug)
+
+    return runs_from_archive(reqs, steps, live=live)

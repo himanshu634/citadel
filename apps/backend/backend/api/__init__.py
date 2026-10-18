@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import anyio
+from agents.archivist import live as archivist_live
 from brain.config import get_settings
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,8 +25,10 @@ from fastapi.responses import JSONResponse
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from backend import keeper_runs, registry
 from backend.api import (
     activity,
+    archive,
     ask,
     builds,
     checks,
@@ -55,7 +58,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await anyio.to_thread.run_sync(app.state.keeper.recover)
     except Exception:  # best effort: a review left `running` only blocks the next one
         log.warning("could not recover the Keeper reviews", exc_info=True)
+    await anyio.to_thread.run_sync(recover_archive_requests)
     yield
+
+
+def recover_archive_requests() -> None:
+    """Ask's archive requests a restart cut off become failed (`archivist.live.recover`). Best
+    effort per company: one without a ledger is skipped."""
+    for company in registry.list_companies():
+        try:
+            moved = archivist_live.recover(keeper_runs.keeper_store(company.slug))
+            if moved:
+                log.info("marked %d archive requests of %s failed (restart)", moved, company.slug)
+        except Exception:
+            log.warning("could not recover the archive requests of %s", company.slug,
+                        exc_info=True)  # fmt: skip
 
 
 def create_app(
@@ -77,6 +94,7 @@ def create_app(
     if runner.before_reset is None:
         runner.before_reset = runs.stop_for_rebuild
     runs.building = runner.building
+    archivist_live.set_building(runner.building)
     app.state.runner = runner
     app.state.keeper = runs
     app.state.start_lock = threading.Lock()
@@ -90,6 +108,7 @@ def create_app(
 
     app.include_router(companies.router, prefix="/api")
     app.include_router(activity.router, prefix="/api")
+    app.include_router(archive.router, prefix="/api")
     app.include_router(builds.router, prefix="/api")
     app.include_router(checks.router, prefix="/api")
     app.include_router(onboard.router, prefix="/api")

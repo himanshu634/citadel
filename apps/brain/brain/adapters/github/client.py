@@ -64,7 +64,9 @@ def graphql(name: str) -> str:
 class GithubClient:
     """`attempts` and `wait_for_rate_limit` default to what a fetch needs (retry, then wait out
     the budget); a quick check passes attempts=1, wait_for_rate_limit=False and a short timeout.
-    Close it (or use it in a `with`) when done."""
+    `max_wait` (seconds) caps a retry's wait: a longer one, or one after the last attempt,
+    fails at once (the Archivist's calls, inside an Ask answer). `transport` swaps the HTTP
+    transport (tests). Close it (or use it in a `with`) when done."""
 
     def __init__(
         self,
@@ -73,14 +75,18 @@ class GithubClient:
         timeout: float = 60,
         attempts: int = 5,
         wait_for_rate_limit: bool = True,
+        transport: httpx.BaseTransport | None = None,
+        max_wait: float | None = None,
     ) -> None:
         self._http = httpx.Client(
             timeout=timeout,
+            transport=transport,
             headers={"Authorization": f"Bearer {token()}", "User-Agent": "company-brain"},
         )
         self._log = log
         self._attempts = attempts
         self._wait_for_rate_limit = wait_for_rate_limit
+        self._max_wait = max_wait
 
     def close(self) -> None:
         self._http.close()
@@ -105,6 +111,10 @@ class GithubClient:
                 if self._attempts == 1:
                     break  # a single attempt (the API's check) never sleeps
                 wait = int(resp.headers.get("retry-after", 0)) or 2**attempt * 5
+                if self._max_wait is not None and (
+                    wait > self._max_wait or attempt + 1 == self._attempts
+                ):
+                    break  # a capped caller fails now rather than wait long or for nothing
                 self._log(f"  github {resp.status_code}; retrying in {wait}s")
                 time.sleep(wait)
                 continue

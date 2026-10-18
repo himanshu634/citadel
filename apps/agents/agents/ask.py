@@ -10,6 +10,7 @@ draws as the agent's walk through the graph; `ask` is that stream's last item.
 
 from __future__ import annotations
 
+import contextvars
 import threading
 import uuid
 from collections.abc import Iterator
@@ -30,6 +31,12 @@ from agents.toolset import Toolset, ask_toolset
 _KEPT_STOPS = ("refusal", "max_tokens", "step_limit", "stopped")
 RECURSION_LIMIT = 40  # graph steps per question (each tool round trip is two)
 
+# The run's stop event, for tools that run long enough to check it themselves (ask_archivist).
+# Set in the run's own context (see `_run`), never in the caller's; None: never stop.
+ASK_STOP: contextvars.ContextVar[threading.Event | None] = contextvars.ContextVar(
+    "ASK_STOP", default=None
+)
+
 
 @dataclass
 class Source:
@@ -38,6 +45,7 @@ class Source:
     url: str | None = None
     label: str | None = None
     step: int | None = None  # the step of this answer that first returned it (Ask page)
+    archived: str | None = None  # an archived item (the Archivist's): its date ("" if none)
 
 
 @dataclass
@@ -112,6 +120,8 @@ def ask_events(
     `start` {thread_id}; per tool call `step` {id, n, tool, input} when Claude asks for it and
     `step_done` {id, n, tool, input, ms, count, error, rows, nodes, rels} when it has run
     (submit_answer is a step without `n`: the answer check); last, `answer` (see `answer_out`).
+    While `ask_archivist` runs, the Archivist's own events arrive as `archive_step` {parent:
+    the ask_archivist call's id, event: llm | step | step_done, ...that event's fields}.
     Before its steps, each Claude response is an `llm` event {seq, text, thinking, model, stop,
     ms, usage, calls} (`loop.llm_event`); steps carry `call`, the seq of the response that
     asked for them.
@@ -190,9 +200,17 @@ def _run(slug, question, thread_id, client, toolset, checkpointer, stop, model) 
     seq = 0  # Claude responses in this answer
     state: dict[str, Any] = {}
     ended: str | None = None
+    # The stream runs in a context of its own holding the stop event (ASK_STOP): the graph's
+    # nodes inherit it, and setting it never leaks into the caller's context.
+    run_ctx = contextvars.copy_context()
+    run_ctx.run(ASK_STOP.set, stop)
     try:
-        for mode, chunk in graph.stream(inputs, config, stream_mode=["values", "custom"]):
+        stream = run_ctx.run(graph.stream, inputs, config, stream_mode=["values", "custom"])
+        for mode, chunk in _within(run_ctx, stream):
             if mode == "custom":
+                if chunk["kind"] == "archive_step":  # the Archivist's, under its Ask step
+                    yield chunk
+                    continue
                 if chunk["kind"] == "llm":
                     seq += 1
                     calls.update((c["id"], seq) for c in chunk["calls"])
@@ -226,6 +244,21 @@ def _run(slug, question, thread_id, client, toolset, checkpointer, stop, model) 
     trace = (state.get("trace") or [])[before["trace"] :]
     usage = (state.get("usage") or [])[before["usage"] :]
     yield _to_answer(question, thread_id, state, usage, trace)
+
+
+def _within(ctx: contextvars.Context, it: Iterator[Any]) -> Iterator[Any]:
+    """`it`, every step of it run inside `ctx`."""
+    try:
+        while True:
+            try:
+                item = ctx.run(next, it)
+            except StopIteration:
+                return
+            yield item
+    finally:
+        close = getattr(it, "close", None)
+        if close is not None:
+            ctx.run(close)
 
 
 _NOT_RUN = {
@@ -268,6 +301,7 @@ def _to_answer(
             url=node.get("url") or other.get("url"),
             label=node.get("label") or other.get("label"),
             step=step,
+            archived=node.get("archived"),
         )
 
     totals: dict[str, int] = {}

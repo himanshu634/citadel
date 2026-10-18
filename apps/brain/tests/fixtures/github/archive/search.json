@@ -1,0 +1,47 @@
+{
+  "data": {
+    "rateLimit": {
+      "remaining": 4980,
+      "resetAt": "2026-10-17T12:00:00Z",
+      "cost": 1
+    },
+    "search": {
+      "nodes": [
+        {
+          "__typename": "Issue",
+          "number": 812,
+          "title": "Rotate auth tokens every 24 hours",
+          "url": "https://github.com/acme/widgets/issues/812",
+          "createdAt": "2023-03-01T10:00:00Z",
+          "body": "Tokens never expire today. Proposal: rotate every 24 hours.",
+          "repository": {
+            "nameWithOwner": "acme/widgets"
+          }
+        },
+        {
+          "__typename": "PullRequest",
+          "number": 640,
+          "title": "Token rotation job",
+          "url": "https://github.com/acme/widgets/pull/640",
+          "createdAt": "2022-11-20T08:00:00Z",
+          "body": "Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. Adds a nightly job that rotates tokens. ",
+          "repository": {
+            "nameWithOwner": "acme/widgets"
+          }
+        },
+        {
+          "__typename": "Issue",
+          "number": 5,
+          "title": "Someone else's token rotation",
+          "url": "https://github.com/other/repo/issues/5",
+          "createdAt": "2023-01-01T00:00:00Z",
+          "body": "not ours",
+          "repository": {
+            "nameWithOwner": "other/repo"
+          }
+        },
+        {}
+      ]
+    }
+  }
+}

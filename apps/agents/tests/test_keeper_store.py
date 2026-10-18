@@ -195,6 +195,13 @@ def test_a_running_review_blocks_a_start_until_it_is_stopped(store):
     assert store.write("ledger/review_stop_running", KEEPER, {"now": T3}) == []  # none left
 
 
+def test_an_archive_review_starts(store):
+    uid = review_uid()
+    start = {"uid": uid, "trigger": "archive", "budget": 2, "now": T1}
+    assert store.write("ledger/review_start", KEEPER, start) == [{"uid": uid}]
+    assert store.read("ledger/review_current", {})[0]["trigger"] == "archive"
+
+
 def test_review_current_empty(store):
     assert store.read("ledger/review_current", {}) == []
 
@@ -419,6 +426,50 @@ def test_consults_per_attempt(store):
     [c] = store.read("ledger/consults_for_gap", {"gap": gap})
     assert (c["uid"], c["attempt"], c["status"]) == (f"consult:{gap}:pm:1", 1, "open")
     assert [r["uid"] for r in store.read("ledger/queue_consult", {"role": "pm"})] == [c["uid"]]
+
+
+def test_gap_archive_asked_once(store):
+    """A gap asks the Archivist once, ever: the flag is set by a guarded write."""
+    [g] = open_gap(store, "who decided the old auth system", "t1")
+    assert get_gap(store, g["uid"])["archive_asked"] is False
+    asked = {"uid": g["uid"]}
+    assert store.write("ledger/gap_archive_asked", KEEPER, asked) == [{"uid": g["uid"]}]
+    assert store.write("ledger/gap_archive_asked", KEEPER, asked) == []  # once
+    assert store.write("ledger/gap_archive_asked", KEEPER, {"uid": "gap:none"}) == []
+    assert get_gap(store, g["uid"])["archive_asked"] is True
+
+
+def test_consults_after_the_archive_are_a_fresh_round(store):
+    """Once a gap asked the Archivist, its consults are a new round of the same attempt (uid
+    suffix :archive), so a gap the Archivist sends back is consulted again with no attempt used;
+    the round before is history."""
+    [g] = open_gap(store, "who decided the old auth system", "t1")
+    gap = g["uid"]
+    store.write("ledger/post_consult", KEEPER, {"gap": gap, "role": "pm", "attempt": 0, "now": T1})
+    store.write("ledger/answer_consult", "citadel_pm",
+                {"consult": f"consult:{gap}:pm:0", "can_ground": False, "now": T1})  # fmt: skip
+    store.write("ledger/gap_archive_asked", KEEPER, {"uid": gap})
+
+    assert store.read("ledger/consults_for_gap", {"gap": gap}) == []  # the round before
+    post = {"gap": gap, "role": "pm", "attempt": 0, "archive": True, "now": T2}
+    assert store.write("ledger/post_consult", KEEPER, post) == [
+        {"uid": f"consult:{gap}:pm:0:archive", "created": True}]  # fmt: skip
+    assert store.write("ledger/post_consult", KEEPER, post)[0]["created"] is False
+    [c] = store.read("ledger/consults_for_gap", {"gap": gap})
+    assert (c["uid"], c["attempt"], c["archive"], c["status"]) == (
+        f"consult:{gap}:pm:0:archive", 0, True, "open")  # fmt: skip
+    assert [r["uid"] for r in store.read("ledger/queue_consult", {"role": "pm"})] == [c["uid"]]
+
+
+def test_review_finish_records_the_gaps_the_archive_reopened(store):
+    rid = start_review(store)
+    done = {"uid": rid, "state": "done", "archive_reopened": ["gap:1", "gap:2"], "now": T2}
+    store.write("ledger/review_finish", KEEPER, done)
+    [current] = store.read("ledger/review_current", {})
+    assert current["archive_reopened"] == ["gap:1", "gap:2"]
+    other = start_review(store, now=T3)
+    store.write("ledger/review_finish", KEEPER, {"uid": other, "state": "done", "now": T3})
+    assert store.read("ledger/review_current", {})[0]["archive_reopened"] == []
 
 
 def test_write_and_read_claims(store):

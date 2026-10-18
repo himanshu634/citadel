@@ -19,7 +19,7 @@ assignees, no links), dated at that run's start so it passes the ingest cursor.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,7 @@ from brain.canonical import (
     CLOSED_STATUS,
     CanonicalRecord,
     Comment,
+    Document,
     Link,
     Person,
     Team,
@@ -59,6 +60,10 @@ REMOVED_STATE = "Removed from Linear"  # state of a tombstone (see the module do
 
 def issue_uid(id: str) -> str:
     return f"linear:issue:{id}"
+
+
+def doc_uid(id: str) -> str:
+    return f"linear:doc:{id}"
 
 
 def _login(user: dict[str, Any] | None) -> str | None:
@@ -138,6 +143,70 @@ def _link(rel: str, from_uid: str, to_uid: str) -> Link:
     )
 
 
+def _related_ids(node: dict[str, Any]) -> list[str]:
+    """Ids of the issues `node` blocks, is blocked by, or relates to."""
+    ids = [
+        rel["relatedIssue"]["id"]
+        for rel in nodes(node.get("relations"))
+        if rel["type"] in ("blocks", "related")
+    ]
+    ids += [
+        rel["issue"]["id"] for rel in nodes(node.get("inverseRelations")) if rel["type"] == "blocks"
+    ]
+    return ids
+
+
+def ticket_records(node: dict[str, Any], known: Callable[[str], bool]) -> Iterator[CanonicalRecord]:
+    """One issue's records: the ticket, its comments and its relation links (BLOCKS, related and
+    attachment MENTIONS). `known(id)` says whether an issue id is in the cache; related or
+    blocking issues it does not know are the ticket's `unresolved_refs`."""
+    ticket = _ticket(node)
+    ticket.unresolved_refs = sorted({issue_uid(i) for i in _related_ids(node) if not known(i)})
+    yield ticket
+
+    for comment in nodes(node.get("comments")):
+        author = _login(comment.get("user"))
+        if author is None:
+            continue  # deleted user: no one to credit
+        yield Comment(
+            uid=f"linear:comment:{comment['id']}",
+            source=SOURCE,
+            url=ticket.url,
+            work_item_uid=ticket.uid,
+            author_login=author,
+            created_at=comment["createdAt"],
+            body=(comment.get("body") or "")[:MAX_BODY],
+        )
+
+    for rel in nodes(node.get("relations")):
+        other = issue_uid(rel["relatedIssue"]["id"])
+        if rel["type"] == "blocks":
+            yield _link("BLOCKS", ticket.uid, other)
+        elif rel["type"] == "related":
+            yield _link("MENTIONS", ticket.uid, other)
+    for rel in nodes(node.get("inverseRelations")):
+        if rel["type"] == "blocks":
+            yield _link("BLOCKS", issue_uid(rel["issue"]["id"]), ticket.uid)
+    for attachment in nodes(node.get("attachments")):
+        if attachment.get("url"):
+            yield _link("MENTIONS", ticket.uid, url_ref(attachment["url"]))
+
+
+def document_record(node: dict[str, Any]) -> Document:
+    """A Linear document as a Document node. Only archived ones reach the graph: a build does
+    not fetch Linear documents."""
+    return Document(
+        uid=doc_uid(node["id"]),
+        source=SOURCE,
+        url=node.get("url"),
+        path=f"linear/document/{node['id']}",
+        title=node.get("title") or node["id"],
+        body=(node.get("content") or "")[:MAX_BODY],
+        author_login=_login(node.get("creator")),
+        updated_at=node.get("updatedAt") or node.get("createdAt"),
+    )
+
+
 def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRecord]:
     meta = read_json(cache / "meta.json")
     if meta is None:
@@ -179,34 +248,11 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
             removed.add(ticket.uid)
             yield _removed(ticket, newest)
             continue
-        yield ticket
-
-        for comment in nodes(node.get("comments")):
-            author = _login(comment.get("user"))
-            if author is None:
-                continue  # deleted user: no one to credit
-            yield Comment(
-                uid=f"linear:comment:{comment['id']}",
-                source=SOURCE,
-                url=ticket.url,
-                work_item_uid=ticket.uid,
-                author_login=author,
-                created_at=comment["createdAt"],
-                body=(comment.get("body") or "")[:MAX_BODY],
-            )
-
-        for rel in nodes(node.get("relations")):
-            other = issue_uid(rel["relatedIssue"]["id"])
-            if rel["type"] == "blocks":
-                blocks.add((ticket.uid, other))
-            elif rel["type"] == "related":
-                mentions.add((ticket.uid, other))
-        for rel in nodes(node.get("inverseRelations")):
-            if rel["type"] == "blocks":
-                blocks.add((issue_uid(rel["issue"]["id"]), ticket.uid))
-        for attachment in nodes(node.get("attachments")):
-            if attachment.get("url"):
-                mentions.add((ticket.uid, url_ref(attachment["url"])))
+        for rec in ticket_records(node, lambda id: id in issues):
+            if isinstance(rec, Link):
+                (blocks if rec.rel == "BLOCKS" else mentions).add((rec.from_uid, rec.to_uid))
+            else:
+                yield rec
 
     # Every BLOCKS link on every call: the loader deletes BLOCKS edges of this source that are
     # missing from the load, so leaving one out would delete a real edge. Links that touch a

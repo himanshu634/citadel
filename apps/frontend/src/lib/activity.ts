@@ -33,7 +33,7 @@ export interface Trail {
 }
 
 /** The agents by the name the page gives them. */
-const ACTORS: Record<string, string> = { brain: 'Ask agent', keeper: 'Keeper', pm: 'pm', qa: 'qa' };
+const ACTORS: Record<string, string> = { brain: 'Ask agent', keeper: 'Keeper', pm: 'pm', qa: 'qa', archivist: 'Archivist' };
 
 export function actorName(actor: string): string {
 	return ACTORS[actor] ?? actor;

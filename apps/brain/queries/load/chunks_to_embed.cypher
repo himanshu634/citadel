@@ -8,6 +8,8 @@
 // returns: uid, text, text_hash (null on chunks written before chunks carried one), by uid
 // notes:   `embedded_hash IS NULL` is spelled out because `null <> x` is null, not true.
 //          semantic_search applies the same bot rule, for vectors written before it.
+//          Twin: chunks_to_embed_from.cypher (the same rules for some sources' chunks); change
+//          a rule in both.
 // example: embeddings.embed_pending("synthetic") reads it once per batch
 MATCH (c:Chunk)
 WHERE trim(coalesce(c.text, '')) <> ''

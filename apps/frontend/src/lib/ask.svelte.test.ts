@@ -286,9 +286,98 @@ describe('turnFromChat', () => {
 		expect(turn).toMatchObject({ status: 'done', rating: 'up', rated: 'idle' });
 	});
 
+	test("a reopened turn keeps the Archivist's steps under its ask_archivist step", () => {
+		const inner = { ms: 4, count: 1, error: null, rows: [], nodes: [], rels: [], status: 'done', result: null, server: null, call: null, n: null, kind: 'archive' as const, parent: 'o' };
+		const base = chatTurn();
+		const outer = {
+			...base.steps[0],
+			id: 'o',
+			tool: 'ask_archivist',
+			input: { kind: 'reference', text: '#900' },
+			rows: [{ summary: 'found #900' }],
+			parent: null,
+			steps: [
+				{ ...inner, id: 'i1', tool: 'archive_fetch', input: { source: 's', id: '#900' } },
+				{ ...inner, id: 'i2', tool: 'submit_archive_answer', kind: 'archive' as const, input: { outcome: 'found' }, status: 'running' }
+			]
+		};
+		const turn = turnFromChat({ ...base, steps: [outer, ...base.steps.slice(1)] });
+		const [step] = turn.steps;
+		expect(step.id).toBe('o');
+		expect(step.children?.map((c) => [c.id, c.tool, c.n, c.status])).toEqual([
+			['i1', 'archive_fetch', null, 'done'],
+			['i2', 'submit_archive_answer', null, 'done']
+		]);
+		expect(step.children?.[0]).toMatchObject({ input: { source: 's', id: '#900' }, ms: 4, count: 1, error: null });
+		expect(step.children?.[1].error).toBe(NOT_RUN); // the turn ended before it finished
+		expect(turn.steps.find((s) => s.id === 'z')?.children).toBeUndefined();
+	});
+
 	test('a step a stopped turn never finished is shown as not run', () => {
 		const t = chatTurn({ status: 'stopped' });
 		t.steps[0] = { ...t.steps[0], status: 'running' };
 		expect(turnFromChat(t).steps[0]).toMatchObject({ status: 'done', error: NOT_RUN });
+	});
+});
+
+describe('the Archivist inside Ask', () => {
+	const doneInner = (id: string, tool: string, extra = {}) => ({
+		parent: 'o',
+		event: 'step_done',
+		id,
+		tool,
+		input: {},
+		ms: 4,
+		count: 1,
+		error: null,
+		rows: [],
+		nodes: [],
+		rels: [],
+		uids: [],
+		...extra
+	});
+	const outer = { id: 'o', n: 1, tool: 'ask_archivist', input: { kind: 'topic', text: 'old auth' } };
+	const outerDone = { ...outer, ms: 90, count: 1, error: null, rows: [{ summary: 'found 1 older PR' }], nodes: [], rels: [] };
+
+	test('archive_step before its parent step is kept and attached', async () => {
+		serve(
+			sse([
+				['start', { thread_id: 't' }],
+				['archive_step', { parent: 'o', event: 'llm' }],
+				['archive_step', { parent: 'o', event: 'step', id: 'i1', tool: 'archive_search', input: { source: 'github', terms: 'x' } }],
+				['step', outer],
+				['archive_step', doneInner('i1', 'archive_search')],
+				['step_done', outerDone],
+				['answer', { thread_id: 't', text: 'ok', sources: [], path: [], stop: 'tool_use', model: 'm' }]
+			])
+		);
+		const t = new AskThread('acme');
+		await t.ask('q');
+		const [step] = t.turns[0].steps;
+		expect(step.status).toBe('done');
+		expect(step.children?.map((c) => [c.id, c.status])).toEqual([['i1', 'done']]);
+		expect(step.rows).toEqual([{ summary: 'found 1 older PR' }]);
+	});
+
+	test('children replace by id and stay when the parent is done', async () => {
+		serve(
+			sse([
+				['start', { thread_id: 't' }],
+				['step', outer],
+				['archive_step', { parent: 'o', event: 'step', id: 'i1', tool: 'archive_fetch', input: {} }],
+				['archive_step', { parent: 'o', event: 'step', id: 'i2', tool: 'archive_fetch', input: {} }],
+				['archive_step', doneInner('i2', 'archive_fetch')],
+				['step_done', outerDone]
+			])
+		);
+		const t = new AskThread('acme');
+		await t.ask('q');
+		const kids = t.turns[0].steps[0].children ?? [];
+		expect(kids.map((c) => [c.id, c.status])).toEqual([
+			['i1', 'done'],
+			['i2', 'done']
+		]);
+		expect(kids[0].error).toBe(NOT_RUN); // never finished: the run ended
+		expect(kids[1].error).toBeNull();
 	});
 });

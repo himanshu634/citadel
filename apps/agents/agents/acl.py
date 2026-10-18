@@ -23,6 +23,7 @@ PERMISSIONS: dict[str, dict[str, str]] = {
     "citadel_qa": {"brain": R, "keeper": RW},
     "citadel_brain": {"brain": R, "agent": RW, "keeper": RW},  # Ask opens gaps
     "citadel_keeper": {"brain": RW, "keeper": RW},
+    "citadel_archivist": {"brain": R, "keeper": RW},  # the brain is loaded by the archive stage
 }
 
 

@@ -11,7 +11,7 @@ MATCH (a:Node {uid: $from_uid}), (b:Node {uid: $to_uid})
 CALL algo.SPpaths({
   sourceNode: a, targetNode: b, relDirection: 'both', maxLen: $max_len, pathCount: $paths,
   relTypes: ['AUTHORED', 'REVIEWED', 'COMMENTED_ON', 'ASSIGNED_TO', 'MEMBER_OF', 'OWNS',
-             'TOUCHES', 'PART_OF', 'CLOSES', 'MENTIONS', 'BLOCKS']
+             'TOUCHES', 'PART_OF', 'CLOSES', 'MENTIONS', 'BLOCKS', 'SUPERSEDED_BY']
 }) YIELD path
 RETURN length(path) AS length,
        [n IN nodes(path) | {label: head([l IN labels(n) WHERE l <> 'Node']),

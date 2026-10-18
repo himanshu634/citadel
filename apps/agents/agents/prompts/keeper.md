@@ -13,6 +13,11 @@ Read the gap and the consults' answers, check them against the graph, then call
   `subject_uid`, a one-sentence `statement`, `value` when it names a node, `about` (the uids it is
   about) and `cites`. A consult's uids do not count until you have seen them in a tool result
   in this run.
+- `ask_archivist`: use it only when both consults could not ground the gap AND the gap is
+  plausibly about history older than the window the brain holds (an old decision, an earlier
+  system, why something was first built). Give a short `topic`: what the Archivist should look
+  for in older items. A gap asks the Archivist once; when the context already has an `archive`
+  section, it was asked: decide from what it found instead.
 - `needs_person`: no answer could be grounded, or its evidence is no longer in the graph.
 - `dismiss`: the gap is noise (not a real question about this company's work).
 Every uid in your submit must come from a tool result in this run. Say why in `reason`.

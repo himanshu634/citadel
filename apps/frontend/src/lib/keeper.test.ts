@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from './api/client';
 import {
+	gapStatusWords,
 	checkApproval,
 	criticalLine,
 	decidedLine,
@@ -108,6 +109,7 @@ function review(extra: Partial<Review> = {}): Review {
 		stop: null,
 		gaps: [],
 		gap_text: null,
+		archive_reopened: [],
 		...extra
 	};
 }
@@ -157,6 +159,20 @@ describe('log lines', () => {
 		expect(logSentence(entry('review_skipped'))).toBe('Keeper skipped a review');
 		expect(logSentence(entry('brand_new_thing'))).toBe('Keeper brand new thing');
 	});
+	it('words the Archivist actions and gap status', () => {
+		expect(logSentence(entry('archive_requested', { actor: 'ask' }))).toBe('Ask asked the Archivist for older history');
+		expect(logSentence(entry('archive_loaded', { actor: 'archivist' }))).toBe(
+			'Archivist loaded older history into the brain'
+		);
+		expect(logSentence(entry('archive_nothing', { actor: 'archivist' }))).toBe('Archivist found nothing older');
+		for (const a of ['refused', 'dropped', 'returned', 'conflict', 'released'])
+			expect(logSentence(entry(`archive_${a}`))).not.toBe(`Keeper archive ${a}`);
+		expect(logSentence(entry('archive_refs_ignored', { actor: 'archivist' }))).toBe(
+			'Archivist set aside refs no source owns'
+		);
+		expect(gapStatusWords('waiting_archive')).toBe('Waiting for the Archivist');
+		expect(gapStatusWords('needs_person')).toBe('Needs person');
+	});
 	it('names who was consulted', () => {
 		expect(logSentence(entry('consulted', { why: 'asked pm' }))).toBe('Keeper asked pm about a gap');
 		expect(logSentence(entry('consulted'))).toBe('Keeper asked about a gap');
@@ -164,6 +180,9 @@ describe('log lines', () => {
 	it('puts a review reason into words and drops its uid', () => {
 		expect(logWhy(entry('review_start', { why: 'review:ab12cd34: manual, budget 3' }))).toBe('on request, budget 3');
 		expect(logWhy(entry('review_start', { why: 'review:ab12cd34: build, budget 1' }))).toBe('after a build, budget 1');
+		expect(logWhy(entry('review_start', { why: 'review:ab12cd34: archive, budget 2' }))).toBe(
+			'after the Archivist found history, budget 2'
+		);
 		expect(logWhy(entry('review_skipped', { why: 'review:ab12cd34: no_api_key' }))).toBe('no API key');
 		expect(logWhy(entry('review_done', { why: 'review:ab12cd34: done' }))).toBeNull();
 	});

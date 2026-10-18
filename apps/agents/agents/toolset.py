@@ -81,8 +81,9 @@ def graph_toolset() -> Toolset:
 
 
 def ask_toolset() -> Toolset:
-    """What Ask uses: the graph tools plus the interview tools on the real ledger."""
-    return with_interview(graph_toolset())
+    """What Ask uses: the graph tools, the interview tools and `ask_archivist`, on the real
+    ledger."""
+    return with_archivist(with_interview(graph_toolset()))
 
 
 def with_interview(
@@ -103,6 +104,54 @@ def with_interview(
     return Toolset(tools={**base.tools, **extra}, run=run)
 
 
+def with_archivist(
+    base: Toolset,
+    ledger: Callable[[str], Any] | None = None,
+    client: Callable[[], Any] | None = None,
+    **hooks: Any,
+) -> Toolset:
+    """`base` plus `ask_archivist` (`archivist/live.py`), which runs the Archivist's job inline
+    and forwards its steps to Ask's stream. `ledger(slug)` gives the keeper_<slug> store
+    (default: FalkorDB); `client()` makes the Archivist's client when a call runs (default:
+    Claude); `hooks` go to `live.run` (tests pass `clock` and `poll`). Only a call inside a
+    running Ask graph streams its steps (outside one there is nowhere to send them)."""
+    from agents.archivist import live
+    from agents.keeper.interview import keeper_ledger
+    from agents.loop import CURRENT_STEP
+
+    def default_client() -> Any:
+        from agents import llm
+
+        return llm.client()
+
+    def run(slug: str, name: str, **params: Any) -> list[Any]:
+        if name != live.NAME:
+            return base.run(slug, name, **params)
+        from agents.ask import ASK_STOP
+
+        writer, thread = _ask_run()
+        return live.run(
+            slug, live.AskArchivistParams(**params), client=client or default_client,
+            ledger=(ledger or keeper_ledger)(slug), writer=writer, stop=ASK_STOP.get(),
+            parent=CURRENT_STEP.get(), thread=thread, **hooks,
+        )  # fmt: skip
+
+    return Toolset(tools={**base.tools, **live.TOOLS}, run=run)
+
+
+def _ask_run() -> tuple[Callable[[dict[str, Any]], None], str | None]:
+    """The running Ask graph's stream writer and thread id (a no-op writer and None outside
+    one)."""
+    from langgraph.config import get_config, get_stream_writer
+
+    try:
+        writer = get_stream_writer()
+        thread = get_config().get("configurable", {}).get("thread_id")
+    except RuntimeError:
+        return (lambda chunk: None), None
+    return writer, thread
+
+
 def _definition(tool: GraphTool) -> dict[str, Any]:
     schema = tool.params.model_json_schema()
     schema.pop("title", None)
@@ -121,7 +170,8 @@ def _collect_nodes(value: Any, seen: dict[str, dict[str, Any]]) -> None:
     its first `*_uid` key when it has no `uid` (the row's subject, e.g. an expert row's
     `person_uid`). Other `*_uid`
     and `uids` values are recorded bare. Citations are checked against this, and shown with
-    the title and url found here."""
+    the title and url found here. A node a row marks `archived: true` (an Archivist find, an
+    archived item's entity) keeps `archived`: its own date, "" when it has none."""
     if isinstance(value, list):
         for v in value:
             _collect_nodes(v, seen)
@@ -137,6 +187,8 @@ def _collect_nodes(value: Any, seen: dict[str, dict[str, Any]]) -> None:
         for key, v in (("title", title), ("url", value.get("url")), ("label", value.get("label"))):
             if v and not node.get(key):
                 node[key] = v
+        if value.get("archived") is True and "archived" not in node:
+            node["archived"] = str(value.get("date") or "")  # an Archivist find: its own date
     for key, v in value.items():
         if key.endswith("_uid") and isinstance(v, str) and v:
             seen.setdefault(v, {"uid": v})

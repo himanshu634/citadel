@@ -58,7 +58,7 @@
 	import { RepoChecks, type RepoResult } from '$lib/repochecks.svelte';
 	import * as builds from './build-samples';
 	import { syntheticGraph } from './graph-samples';
-	import { doneRun, failedRun, runningRun } from './activity-samples';
+	import { archivistRun, doneRun, failedRun, runningRun } from './activity-samples';
 	import * as keeper from './keeper-samples';
 	import { evidenceRefs } from '$lib/keeper';
 	const galleryRefs = (uids: string[]) => evidenceRefs(uids, () => null);
@@ -442,6 +442,7 @@
 	const doneTrail = trailOf(doneRun, drawnUid);
 	const failedTrail = trailOf(failedRun, drawnUid);
 	const keeperTrail = trailOf(keeper.keeperRun, drawnUid);
+	const archivistTrail = trailOf(archivistRun, drawnUid);
 	// The approval card's live sample: any name approves after a short wait.
 	let approverName = $state('');
 	let approverError = $state<string | null>(null);
@@ -1017,6 +1018,18 @@
 				<figcaption>The answer check sent back with a reason</figcaption>
 			</figure>
 			<figure>
+				<WalkLedger steps={walks.archivistRunning} />
+				<figcaption>Nested steps, live: the Archivist's search is done, its read is running</figcaption>
+			</figure>
+			<figure>
+				<WalkLedger steps={walks.archivistDone} settled />
+				<figcaption>Nested steps, done: the row says what the Archivist reported</figcaption>
+			</figure>
+			<figure>
+				<WalkAnswer answer={walks.archived} />
+				<figcaption>Answer citing an archived source (Archive · year badge)</figcaption>
+			</figure>
+			<figure>
 				<StepRows step={walks.done[2]} cites={walkCites} active={walkActive} />
 				<figcaption>Step rows: paths read as chains of nodes and relationships</figcaption>
 			</figure>
@@ -1360,6 +1373,10 @@
 			<div>
 				<h3 class="sub">Failed, no steps</h3>
 				<AgentRun run={failedRun} trail={failedTrail} />
+			</div>
+			<div>
+				<h3 class="sub">Archivist run</h3>
+				<AgentRun run={archivistRun} trail={archivistTrail} />
 			</div>
 			<div>
 				<h3 class="sub">Keeper review, working now</h3>
