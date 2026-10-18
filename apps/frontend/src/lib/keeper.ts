@@ -33,6 +33,46 @@ export function criticalLine(reasons: string[]): string {
 	return reasons.length ? `Needs a lead because ${list(reasons.map(reasonWords))}.` : 'Needs a lead.';
 }
 
+/** One reason a claim waits for a lead, as the review page lists it: a heading and what it means. */
+export interface ReasonRow {
+	code: string;
+	title: string;
+	detail: string;
+}
+
+const REASON_ROWS: Record<string, Omit<ReasonRow, 'code'>> = {
+	replaces_claim: {
+		title: 'It replaces an earlier claim',
+		detail: 'Approving it retires the Keeper update it replaces.'
+	},
+	high_impact_system: {
+		title: 'It touches a high-impact system',
+		detail: 'The system is in the top quarter by how often it changes together with others.'
+	},
+	no_source_evidence: {
+		title: 'No source is behind it',
+		detail: 'No commit, PR, ticket or doc says it: the agents worked it out.'
+	},
+	from_person: {
+		title: 'A person said it in Ask',
+		detail: 'It comes from a reply someone gave in Ask, so a lead decides.'
+	}
+};
+
+/** Why a pending claim needs a lead, one row per reason; a code without words reads as itself. */
+export function reasonRows(codes: string[]): ReasonRow[] {
+	if (!codes.length) return [{ code: 'lead', title: 'It needs a lead', detail: 'The Keeper does not write it on its own.' }];
+	return codes.map((code) => ({ code, ...(REASON_ROWS[code] ?? { title: words(code), detail: '' }) }));
+}
+
+/** A decided claim in one or two words, from the claim the server returned. */
+export function decidedTag(decision: 'approve' | 'reject', status: ClaimStatus): { text: string; tone: 'success' | 'neutral' | 'warning' } {
+	if (decision === 'reject') return { text: 'Rejected', tone: 'neutral' };
+	if (status === 'conflicts_with_source') return { text: 'Approved, sources differ', tone: 'warning' };
+	if (status === 'stale') return { text: 'Approved, not added', tone: 'warning' };
+	return { text: 'Approved', tone: 'success' };
+}
+
 export const CLAIM_KINDS: Record<ClaimKind, string> = {
 	owner: 'Owner',
 	expert: 'Expert',

@@ -37,7 +37,12 @@ class TemplateAdapter:
     def key(self, source: TemplateSource) -> str:
         return f"{self.name}:{source.team}"
 
-    def fetch(self, company: CompanyConfig, source: TemplateSource, cache_dir: Path) -> None:
+    def fetch(
+        self, company: CompanyConfig, source: TemplateSource, cache_dir: Path, full: bool = False
+    ) -> None:
+        """`full`: pull the whole window again instead of only what changed since the last
+        fetch (a source that pages through an API should use brain.adapters.runs.fetch_paged,
+        which handles both)."""
         cache_dir.mkdir(parents=True, exist_ok=True)
         # page = httpx.get(...).json()
         # (cache_dir / "page_0001.json").write_text(json.dumps(page))
@@ -48,6 +53,13 @@ class TemplateAdapter:
         """Optional: what would stop the next build reading this source (no network)."""
         # if not get_settings().template_api_key:
         #     return SourceProblem("No API key: set TEMPLATE_API_KEY in .env", blocks=True)
+        return None
+
+    def incomplete(
+        self, company: CompanyConfig, source: TemplateSource, cache_dir: Path
+    ) -> str | None:
+        """Optional: a sentence when the cache is not all the source holds (a fetch that stopped
+        halfway), so ingest loads it but keeps its cursor; None when it is complete."""
         return None
 
     def records(

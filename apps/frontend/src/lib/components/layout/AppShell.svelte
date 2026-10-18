@@ -24,7 +24,7 @@ everything inside.
 
 	let { children }: { children: Snippet } = $props();
 	// Graph, Ask and Systems fill the window under the top bar: no content width cap, no padding (design-system.md).
-	const bleed = $derived(/\/(graph|ask|systems)$/.test(page.url.pathname));
+	const bleed = $derived(/\/(graph|ask|systems|review)$/.test(page.url.pathname));
 	const companies = getCompanies();
 	let navOpen = $state(false);
 	const close = () => (navOpen = false);

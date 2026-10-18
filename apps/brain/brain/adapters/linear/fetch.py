@@ -76,13 +76,16 @@ def run(
     source: LinearSource,
     cache: Path,
     client: PagedClient | None = None,
+    full: bool = False,
     log=print,
 ) -> None:
+    """The whole fetch. `full` makes the issue run start at the window (see
+    brain.adapters.runs.fetch_paged)."""
     check_permission(company)  # before any data is pulled
     cache.mkdir(parents=True, exist_ok=True)
     if client is None:
         with LinearClient(log=log) as own_client:
-            return run(company, source, cache, own_client, log)
+            return run(company, source, cache, own_client, full, log)
 
     meta = fetch_meta(client, source, cache)
     keys = [t["key"] for t in fetch_teams(client, source, cache)]
@@ -99,5 +102,6 @@ def run(
         lambda d: d["issues"],
         issues,
         window_start,
+        full=full,
         log=log,
     )

@@ -217,6 +217,7 @@ purpose, parameters, returns, example.
 | File | Purpose |
 |---|---|
 | `schema/range_indexes.cypher` | Range indexes on every label's `uid`, plus `Person.login`, `WorkItem.number`, `System.name` |
+| `schema/node_label.cypher` | Gives every node the `Node` label beside its kind, so a lookup by uid alone is an index scan |
 | `schema/fulltext_indexes.cypher` | Full-text indexes on `WorkItem` and `Document` title and body |
 | `schema/vector_index.cypher` | HNSW cosine vector index on `Chunk.embedding` (dimension from `EMBEDDING_DIM`) |
 | `schema/list_indexes.cypher` | List indexes; a vector index whose dimension is not `EMBEDDING_DIM` fails the schema step |

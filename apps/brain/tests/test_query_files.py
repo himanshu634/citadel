@@ -20,9 +20,10 @@ def _written(pattern: str, *folders: str) -> set[str]:
 
 
 def test_range_indexes_cover_only_written_labels():
-    """Every indexed label is one the loader or the Keeper's projection creates."""
+    """Every indexed label is one the loader or the Keeper's projection creates: the kind a
+    MERGE names, or a label a SET adds (every node also gets `Node`)."""
     labels = re.findall(r"CREATE INDEX FOR \(n:(\w+)\)", queries.get("schema/range_indexes").body)
-    written = _written(r"MERGE \(\w+:(\w+)", "load", "keeper")
+    written = _written(r"MERGE \(\w+:(\w+)", "load", "keeper") | _written(r"SET \w+:(\w+)", "load")
     assert set(labels) <= written, sorted(set(labels) - written)
 
 

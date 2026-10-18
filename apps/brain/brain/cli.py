@@ -54,6 +54,8 @@ def schema_cmd(slug: str) -> None:
         f"{cfg.graph_name}: {len(report.created)} index statements applied, "
         f"{len(report.existing)} already present."
     )
+    if report.backfilled:
+        typer.echo(f"  {report.backfilled} nodes given the Node label (loaded before it existed).")
     for idx in schema.list_indexes(slug):
         kinds = ", ".join(f"{p}:{'/'.join(t)}" for p, t in idx["types"].items())
         typer.echo(f"  {idx['label']:<10} {kinds}  [{idx['status']}]")
@@ -103,14 +105,17 @@ def linear_seed_cmd(
 
 
 SOURCE_OPT = typer.Option(None, "--source", help="Only this source type, e.g. github.")
+FETCH_FULL_OPT = typer.Option(
+    False, "--full", help="Pull the whole window again, not only what changed since last time."
+)
 
 
 @app.command()
-def fetch(slug: str, source: str = SOURCE_OPT) -> None:
+def fetch(slug: str, full: bool = FETCH_FULL_OPT, source: str = SOURCE_OPT) -> None:
     """Network step: pull raw data for each source into data/raw/<slug>/ (cached, resumable)."""
     company(slug)
     try:
-        for line in pipeline.fetch(slug, only=source):
+        for line in pipeline.fetch(slug, only=source, full=full):
             typer.echo(f"fetch {line}")
     except (PermissionError, GithubError) as e:
         fail(str(e))
@@ -134,6 +139,10 @@ def ingest(
             typer.secho(f"skipped {s.key}: {s.skipped_reason}", fg="yellow")
         else:
             typer.echo(f"ingested {s.key}: {s.read} read, {s.loaded} loaded")
+            if s.incomplete:
+                typer.secho(
+                    f"  {s.incomplete}; sync cursor kept until a fetch completes it", fg="yellow"
+                )
     dropped = {q: n for q, n in report.load.dropped.items() if n}
     for q, n in sorted(dropped.items()):
         typer.secho(f"  dropped {n} rows in {q} (an end node is not in the graph)", fg="yellow")
@@ -163,9 +172,15 @@ def _print_embed(report: embeddings.EmbedReport) -> None:
 
 
 @app.command()
-def sync(slug: str, full: bool = typer.Option(False, "--full"), source: str = SOURCE_OPT) -> None:
+def sync(
+    slug: str,
+    full: bool = typer.Option(
+        False, "--full", help="Pull the whole window again and reload everything."
+    ),
+    source: str = SOURCE_OPT,
+) -> None:
     """fetch + ingest."""
-    fetch(slug, source=source)
+    fetch(slug, full=full, source=source)
     ingest(slug, full=full, source=source)
 
 

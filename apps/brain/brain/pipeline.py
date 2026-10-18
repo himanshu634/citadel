@@ -8,7 +8,10 @@ Incremental by default: each source has a SyncState node holding a cursor (the l
 skipped; records without one (people, teams, ownership, links, and git-dated commits and docs)
 are always loaded, which is cheap and keeps edges complete.
 `full=True` ignores the cursor, and so does a changed `window.since` (widening the window must
-pull in records older than the cursor).
+pull in records older than the cursor). A source whose cache is not complete (its adapter's
+optional `incomplete` hook: a fetch run that stopped halfway, a list not fetched yet) is loaded
+as far as it goes, but its cursor stays where it was: moved past the records still to come,
+it would skip them as already seen once they arrive.
 
 After the sources, `embed` runs: text still without chunks, or held whole in one chunk (graphs
 built before work items had chunks or long text was cut; the cursor skips old items), is cut
@@ -36,6 +39,7 @@ class SourceResult:
     read: int = 0  # records the adapter produced
     loaded: int = 0  # records passed to the loader after incremental filter + normalize
     skipped_reason: str | None = None
+    incomplete: str | None = None  # what the cache still lacks; the cursor was kept
 
 
 @dataclass
@@ -116,11 +120,13 @@ def fetch(
     slug: str,
     only: str | None = None,
     keys: set[str] | None = None,
+    full: bool = False,
     on_event: OnEvent | None = None,
 ) -> list[str]:
     """Network step: let each adapter pull raw data into data/raw/<slug>/<type>/.
 
-    `keys` limits the step to those adapter keys (e.g. 'github:acme/widgets').
+    `keys` limits the step to those adapter keys (e.g. 'github:acme/widgets'). `full` makes
+    each adapter pull the whole window again instead of only what changed since its last fetch.
     """
     emit = on_event or noop
     cfg = load_company(slug)
@@ -135,7 +141,7 @@ def fetch(
             continue
         emit(BuildEvent(slug, "fetch", "running", key))
         try:
-            adapter.fetch(cfg, source, raw_dir(slug, source.type))
+            adapter.fetch(cfg, source, raw_dir(slug, source.type), full=full)
         except Exception as e:
             emit(BuildEvent(slug, "fetch", "failed", key, message=str(e)))
             raise
@@ -171,7 +177,10 @@ def ingest(
             emit(BuildEvent(slug, "records", "skipped", key, message=str(e)))
             continue
         result.read = len(records)
-        emit(BuildEvent(slug, "records", "done", key, count=result.read))
+        pending = getattr(adapter, "incomplete", None)
+        result.incomplete = pending(cfg, source, raw_dir(slug, source.type)) if pending else None
+        message = f"{result.incomplete}; the sync cursor is kept" if result.incomplete else None
+        emit(BuildEvent(slug, "records", "done", key, count=result.read, message=message))
 
         cursor = None if full else loader.get_cursor(slug, key, window_since)
         records = list(normalize(select_new(records, cursor), cfg))
@@ -181,7 +190,10 @@ def ingest(
         emit(BuildEvent(slug, "load", "running", key))
         loaded = loader.load(slug, records, origin=key)
         report.load.merge(loaded)
-        latest = next_cursor(records, cursor, datetime.now(UTC))
+        if result.incomplete:  # records still to come must not fall behind the cursor
+            latest = cursor
+        else:
+            latest = next_cursor(records, cursor, datetime.now(UTC))
         loader.set_sync_state(slug, adapter.name, key, latest, window_since, result.loaded)
         emit(BuildEvent(slug, "load", "done", key, count=sum(loaded.written.values())))
     report.embed = embed(slug, on_event=emit)

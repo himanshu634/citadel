@@ -9,7 +9,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from brain import db, loader, tools
+from brain import db, keeper, loader, schema, tools
 from brain.canonical import Document, Link, Person, System, WorkItem
 from brain.embeddings import embed_pending
 from brain.testing import FakeEmbedder, load_company, needs_graph, synthetic_company
@@ -481,3 +481,100 @@ def test_a_chunk_uid_opens_its_passage_and_its_source(synthetic_graph):
     assert "Rounding is off by a cent" in chunk.body
     links = {(n.rel, n.direction, n.uid) for n in chunk.neighbours}
     assert ("FROM", "out", "synthetic:pr:3") in links
+
+
+# Every lookup of a node by uid, with the params each query takes. Each must be served by the
+# Node.uid range index: a label-less `MATCH (n {uid: $uid})` is an All Node Scan, which on a
+# real company graph walks every chunk of text for each lookup.
+UID_LOOKUPS = {
+    "tools/get_entity": {"uid": "synthetic:pr:4", "limit": 25},
+    "tools/path_between": {
+        "from_uid": "person:erin",
+        "to_uid": "system:Auth",
+        "max_len": 6,
+        "paths": 3,
+    },  # fmt: skip
+    "keeper/evidence": {"uids": ["synthetic:pr:4", "person:erin"]},
+    "keeper/source_facts": {"uid": "system:Auth"},
+    "keeper/project_claim": {
+        "claims": [
+            {
+                "uid": "claim:plan",
+                "kind": "fact",
+                "subject": "system:Auth",
+                "statement": "s",
+                "value": None,
+                "valid_from": None,
+                "author": "keeper",
+                "approved_by": "lead",
+                "about": ["system:Auth"],
+                "evidence": ["synthetic:pr:4"],
+            }
+        ]
+    },  # fmt: skip
+}
+
+
+@pytest.mark.parametrize("name", sorted(UID_LOOKUPS))
+def test_uid_lookups_are_index_scans(synthetic_graph, name):
+    plan = db.explain(synthetic_graph, name, UID_LOOKUPS[name])
+    assert any("Index Scan" in op for op in plan), plan
+    assert not any("All Node Scan" in op for op in plan), plan
+
+
+def test_keeper_notes_starts_from_the_claims(synthetic_graph):
+    """The planner anchors on the Claim label (claims are few) and walks ABOUT to the uid: not
+    an index lookup, but never a scan of every node."""
+    plan = db.explain(synthetic_graph, "tools/keeper_notes", {"uid": "system:Auth"})
+    assert any("Label Scan" in op for op in plan), plan
+    assert not any("All Node Scan" in op for op in plan), plan
+
+
+def test_the_kind_label_is_reported_whatever_the_label_order():
+    """FalkorDB lists a node's labels in the order the graph first saw them, so with `Node`
+    created first `labels(n)[0]` is 'Node' for every node. The kind (Person, WorkItem, ...) must
+    still be what every query reports."""
+    slug = "test_label_order"
+    db.delete_graph(slug)
+    try:
+        db.run_text(slug, "CREATE INDEX FOR (n:Node) ON (n.uid)")  # Node is the first label
+        load_company(synthetic_company(slug))
+        db.run_text(slug, "MATCH (n) SET n:Node")
+        first = db.run_text(slug, "MATCH (n) RETURN DISTINCT labels(n)[0]").result_set
+        assert first == [["Node"]]  # the precondition this test is about
+
+        counts = stats(slug)
+        assert "node:Node" not in counts and counts["node:Person"] == 6
+        assert tools.get_entity(slug, uid="synthetic:pr:4").label == "WorkItem"
+        assert keeper.evidence(slug, ["person:erin"]) == {"person:erin": "Person"}
+        assert keeper.source_facts(slug, "system:Auth").declared_owners == ["team:identity"]
+        path = tools.path_between(slug, "person:erin", "system:Auth")[0]
+        assert [n.label for n in path.nodes][0] == "Person"
+        sources = db.run(slug, "sources/nodes_by_source", read_only=True)
+        assert {r["label"] for r in sources} == {
+            "Person", "Team", "System", "WorkItem", "Change", "Document", "Chunk",
+        }  # fmt: skip
+        people = db.run(slug, "graph/nodes", {"labels": ["Person"]}, read_only=True)
+        assert len(people) == 6 and {r["label"] for r in people} == {"Person"}
+        edges = db.run(slug, "graph/edges", {"labels": ["Person", "Team"]}, read_only=True)
+        assert {e["rel"] for e in edges} == {"MEMBER_OF"}
+    finally:
+        db.delete_graph(slug)
+
+
+def test_schema_backfills_the_node_label():
+    """A graph loaded before the Node label existed is labelled by `brain schema`, once."""
+    slug = "test_node_backfill"
+    db.delete_graph(slug)
+    try:
+        load_company(synthetic_company(slug))
+        db.run_text(slug, "MATCH (n) REMOVE n:Node")
+        assert tools.get_entity(slug, uid="synthetic:pr:4") is None  # not a Node: not found
+        total = db.run_text(slug, "MATCH (n) RETURN count(n)").result_set[0][0]
+
+        assert schema.apply_schema(slug).backfilled == total
+        assert tools.get_entity(slug, uid="synthetic:pr:4").label == "WorkItem"
+        assert schema.apply_schema(slug).backfilled == 0  # idempotent
+        assert stats(slug)["node:WorkItem"] == 15  # the label is added, nothing is duplicated
+    finally:
+        db.delete_graph(slug)
