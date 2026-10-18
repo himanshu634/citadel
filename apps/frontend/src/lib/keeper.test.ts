@@ -16,9 +16,81 @@ import {
 	reasonRows,
 	reasonWords,
 	reviewNote,
+	keeperReasoning,
+	trailJobTitle,
+	trailLog,
+	trailSummary,
 	whoName
 } from './keeper';
-import type { ActivityRun, LogEntry, Review } from './types';
+import type { ActivityRun, ClaimTrail, Consult, LogEntry, Review, TrailJob } from './types';
+
+describe('the work behind a claim', () => {
+	const consult = (extra: Partial<Consult>): Consult => ({
+		uid: 'consult:gap:a:pm:0',
+		gap: 'gap:a',
+		role: 'pm',
+		attempt: 0,
+		status: 'answered',
+		can_ground: true,
+		kind: 'owner',
+		subject: 'system:x',
+		statement: 'x',
+		value: null,
+		cites: [],
+		created_at: '2026-10-17T09:00:00Z',
+		answered_at: null,
+		...extra
+	});
+	const job = (extra: Partial<TrailJob>): TrailJob => ({
+		actor: 'pm',
+		tool: 'submit_consult',
+		steps: [],
+		submit: {},
+		wrote: true,
+		error: null,
+		consult: null,
+		...extra
+	});
+	const line = (action: string, why: string | null): LogEntry => ({
+		uid: `log:${action}`,
+		at: '2026-10-17T09:00:00Z',
+		actor: 'agent:keeper',
+		action,
+		why,
+		gap: 'gap:a',
+		claim: null,
+		evidence: []
+	});
+
+	it('says what each job came to', () => {
+		expect(trailJobTitle(job({ consult: consult({ kind: 'expert' }) }), 'claim:1')).toBe('pm drafted an expert claim');
+		expect(trailJobTitle(job({ actor: 'qa', consult: consult({ can_ground: false }) }), 'claim:1')).toBe(
+			'qa could not ground it in the graph'
+		);
+		expect(trailJobTitle(job({ actor: 'keeper', submit: { claim: 'claim:1' } }), 'claim:1')).toBe(
+			'Keeper checked the drafts and wrote this claim'
+		);
+		expect(trailJobTitle(job({ wrote: false, error: 'step_limit' }), 'claim:1')).toBe('pm wrote nothing (step limit)');
+	});
+
+	it("reads the Keeper's reasoning from its decide episode", () => {
+		const log = [line('consulted', 'asked pm'), line('episode', 'keeper.decide gap:a: The OWNS edge holds.')];
+		expect(keeperReasoning(log)).toBe('The OWNS edge holds.');
+		expect(keeperReasoning([line('episode', 'pm.consult consult:gap:a:pm:0: drafted')])).toBeNull();
+		expect(trailLog(log).map((e) => e.action)).toEqual(['consulted']);
+	});
+
+	it('counts the agents and their graph reads', () => {
+		const step = { n: 1, actor: 'pm', tool: 'get_entity', kind: 'graph' as const, input: {}, status: 'done' as const, count: 1, error: null, touched: [] };
+		const trail: ClaimTrail = {
+			claim: 'claim:1',
+			review: null,
+			jobs: [job({ steps: [step, { ...step, n: 2 }] }), job({ actor: 'keeper', steps: [{ ...step, n: 3 }] })],
+			log: []
+		};
+		expect(trailSummary(trail)).toBe('2 agents, 3 graph reads');
+	});
+});
 
 function entry(action: string, extra: Partial<LogEntry> = {}): LogEntry {
 	return { uid: 'log:1', at: '2026-10-17T10:00:00Z', actor: 'keeper', action, why: null, gap: null, claim: null, evidence: [], ...extra };

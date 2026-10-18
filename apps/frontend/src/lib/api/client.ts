@@ -11,6 +11,7 @@ import type {
 	BuildSnapshot,
 	Claim,
 	ClaimStatus,
+	ClaimTrail,
 	Company,
 	CompanyConfig,
 	CompanyDetail,
@@ -112,6 +113,9 @@ export const api = {
 		/** Its claims, newest first; `pending_approval` lists the ones waiting for a lead. */
 		claims: (slug: string, status?: ClaimStatus, limit = 100) =>
 			request<Claim[]>('GET', `${keeper(slug)}/claims${query({ status, limit })}`),
+		/** What pm, qa and the Keeper did on the way to one claim. 404 unknown claim. */
+		trail: (slug: string, uid: string) =>
+			request<ClaimTrail>('GET', `${keeper(slug)}/claims/${encodeURIComponent(uid)}/trail`),
 		/** Its log, newest first. */
 		log: (slug: string, limit = 20) => request<LogEntry[]>('GET', `${keeper(slug)}/log${query({ limit })}`),
 		followups: (slug: string) => request<FollowUp[]>('GET', `${keeper(slug)}/followups`),

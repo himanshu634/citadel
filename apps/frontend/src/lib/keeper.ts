@@ -7,7 +7,7 @@
  */
 import { ApiError, describeError } from './api/client';
 import { shortUid } from './walk';
-import type { ActivityRun, ClaimKind, ClaimStatus, FieldError, LogEntry, Review } from './types';
+import type { ActivityRun, ClaimKind, ClaimStatus, ClaimTrail, FieldError, LogEntry, Review, TrailJob } from './types';
 
 const REASONS: Record<string, string> = {
 	replaces_claim: 'it replaces an earlier Keeper update',
@@ -308,4 +308,58 @@ export function evidenceRefs(uids: string[], known: Known): EvidenceRef[] {
 		if (node) return { uid, label: node.label, title: node.title ?? shortUid(uid), url: node.url };
 		return { uid, label: PREFIX_LABELS[uid.split(':')[0]] ?? null, title: shortUid(uid), url: null };
 	});
+}
+
+// --- the work behind a claim (the review page) ------------------------------------------------
+
+const TRIGGERS: Record<Review['trigger'], string> = {
+	build: 'after a build',
+	manual: 'on request',
+	approval: 'after an approval'
+};
+
+/** "Keeper review after a build · 17 Oct": which review wrote the claim, and when. */
+export function trailHeading(review: Review, now: number = Date.now()): string {
+	const at = logTime(review.started_at, now);
+	return `Keeper review ${TRIGGERS[review.trigger]}${at ? ` · ${at}` : ''}`;
+}
+
+/** "3 agents, 14 graph reads": how much work the jobs took. */
+export function trailSummary(trail: ClaimTrail): string {
+	const agents = new Set(trail.jobs.map((j) => j.actor)).size;
+	const reads = trail.jobs.reduce((n, j) => n + j.steps.length, 0);
+	return `${agents} ${agents === 1 ? 'agent' : 'agents'}, ${reads} graph ${reads === 1 ? 'read' : 'reads'}`;
+}
+
+const article = (word: string) => (/^[aeiou]/i.test(word) ? 'an' : 'a');
+
+/** What one job came to: "pm drafted an owner claim", "qa could not ground it", "Keeper wrote this claim". */
+export function trailJobTitle(job: TrailJob, claim: string): string {
+	const who = job.actor === 'keeper' ? 'Keeper' : job.actor;
+	if (!job.wrote) return `${who} wrote nothing${job.error ? ` (${words(job.error)})` : ''}`;
+	if (job.consult) {
+		if (job.consult.can_ground === false) return `${who} could not ground it in the graph`;
+		const kind = job.consult.kind ? CLAIM_KINDS[job.consult.kind].toLowerCase() : null;
+		return kind ? `${who} drafted ${article(kind)} ${kind} claim` : `${who} drafted a claim`;
+	}
+	if (job.actor === 'keeper') {
+		if (job.submit.claim === claim) return 'Keeper checked the drafts and wrote this claim';
+		const outcome = typeof job.submit.outcome === 'string' ? words(job.submit.outcome) : 'decided';
+		return `Keeper decided: ${outcome}`;
+	}
+	return `${who} ${words(job.tool.replace(/^submit_/, ''))}`;
+}
+
+/**
+ * Why the Keeper decided as it did: the text of its decide job's `episode` log line
+ * ("keeper.decide gap:x: I verified ..."), without the job prefix. Null when not logged.
+ */
+export function keeperReasoning(log: LogEntry[]): string | null {
+	const line = [...log].reverse().find((e) => e.action === 'episode' && e.why?.startsWith('keeper.decide'));
+	return line?.why?.replace(/^keeper\.decide\s+\S+:\s*/, '').trim() || null;
+}
+
+/** The gap's log lines worth listing on their own (no runner `episode` lines), oldest first. */
+export function trailLog(log: LogEntry[]): LogEntry[] {
+	return log.filter((e) => e.action !== 'episode');
 }

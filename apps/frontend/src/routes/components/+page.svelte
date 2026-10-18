@@ -28,6 +28,7 @@
 		GraphWalk,
 		Input,
 		KeeperLog,
+		KeeperTrail,
 		Menu,
 		ModelPicker,
 		NodeChip,
@@ -58,6 +59,8 @@
 	import { syntheticGraph } from './graph-samples';
 	import { doneRun, failedRun, runningRun } from './activity-samples';
 	import * as keeper from './keeper-samples';
+	import { evidenceRefs } from '$lib/keeper';
+	const galleryRefs = (uids: string[]) => evidenceRefs(uids, () => null);
 	import { doingNow, hereLabel, trailOf } from '$lib/activity';
 	import * as walks from './walk-samples';
 	import * as chatSamples from './chat-samples';
@@ -1327,7 +1330,9 @@
 						name={approverName}
 						onnameerror={(m) => (approverError = m)}
 						ondecide={approveLater}
-					/>
+					>
+						{#snippet work()}<KeeperTrail trail={keeper.pendingTrail} refsOf={galleryRefs} />{/snippet}
+					</ClaimApproval>
 				</div>
 			</div>
 			<div>
@@ -1373,6 +1378,33 @@
 			<div>
 				<h3 class="sub">Every reason, no evidence, long text</h3>
 				<div class="claim-box"><ClaimApproval claim={keeper.longClaim} gapText="Why do invoice emails go out from a queue now and not from checkout?" evidence={[]} name="Dana Lee" ondecide={approveLater} /></div>
+			</div>
+		</div>
+	</Card>
+
+	<Card title="Keeper trail">
+		<p class="note">
+			How the Keeper got to a claim, inside the claim's detail: the review that wrote it, then pm,
+			qa and the Keeper in the order they worked, each with what it drafted, what it cited and its
+			graph reads (open them). A claim from a person's reply in Ask has no review, so the gap's log
+			stands in.
+		</p>
+		<div class="runs">
+			<div>
+				<h3 class="sub">A review's jobs</h3>
+				<KeeperTrail trail={keeper.pendingTrail} refsOf={galleryRefs} />
+			</div>
+			<div>
+				<h3 class="sub">From Ask (log only)</h3>
+				<KeeperTrail trail={keeper.interviewTrail} refsOf={galleryRefs} />
+			</div>
+			<div>
+				<h3 class="sub">Loading</h3>
+				<KeeperTrail trail={null} refsOf={galleryRefs} />
+			</div>
+			<div>
+				<h3 class="sub">Can't read it</h3>
+				<KeeperTrail trail={null} failed="The API did not answer." refsOf={galleryRefs} />
 			</div>
 		</div>
 	</Card>

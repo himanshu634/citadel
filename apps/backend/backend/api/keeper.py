@@ -20,8 +20,9 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Literal, get_args
 
 import anyio
-from agents.keeper import decide
+from agents.keeper import decide, trail
 from agents.keeper.model import Claim, ClaimStatus, FollowUp, Gap, GapStatus, LogEntry, Review
+from agents.keeper.trail import ClaimTrail
 from brain.config import get_settings
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sse_starlette import EventSourceResponse
@@ -65,6 +66,16 @@ def claims(
     statuses = [status] if status else list(get_args(ClaimStatus))
     rows = runs.store_for(slug).read("ledger/claims", {"statuses": statuses, "limit": limit})
     return [Claim(**r) for r in rows]
+
+
+@router.get(f"{PREFIX}/claims/{{uid}}/trail")
+def claim_trail(slug: Slug, uid: str, runs: Keeper) -> ClaimTrail:
+    """What pm, qa and the Keeper did on the way to one claim (`agents.keeper.trail`)."""
+    store = runs.store_for(slug)
+    rows = store.read("ledger/get_claim", {"uid": uid})
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No claim {uid}")
+    return trail.claim_trail(store, Claim(**rows[0]))
 
 
 @router.get(f"{PREFIX}/log")

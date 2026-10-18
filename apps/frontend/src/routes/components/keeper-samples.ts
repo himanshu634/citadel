@@ -1,5 +1,5 @@
 // The Keeper for the gallery: claims, log lines and a review on the synthetic company.
-import type { ActivityRun, ActivityStep, AskAnswer, Claim, LogEntry } from '$lib/types';
+import type { ActivityRun, ActivityStep, AskAnswer, Claim, ClaimTrail, Consult, LogEntry, Review } from '$lib/types';
 import type { EvidenceRef } from '$lib/keeper';
 import { answer } from './walk-samples';
 
@@ -104,5 +104,94 @@ export const withClaim: AskAnswer = {
 	sources: [
 		{ uid: 'claim:3fa2c1d0e9b8', title: 'bob decides the refund rules in Billing.', url: null, label: 'Claim', step: 1 },
 		answer.sources[0]
+	]
+};
+
+const consult = (role: 'pm' | 'qa', extra: Partial<Consult>): Consult => ({
+	uid: `consult:gap:refunds:${role}:0`,
+	gap: 'gap:refunds',
+	role,
+	attempt: 0,
+	status: 'answered',
+	can_ground: true,
+	kind: 'expert',
+	subject: 'system:Billing',
+	statement: null,
+	value: 'person:bob',
+	cites: [],
+	created_at: at(10),
+	answered_at: at(9),
+	...extra
+});
+
+const review: Review = {
+	uid: 'review:ab12cd34',
+	slug: 'synthetic',
+	trigger: 'build',
+	state: 'done',
+	budget: 3,
+	started_at: at(10),
+	ended_at: at(7),
+	stop: null,
+	gaps: ['gap:refunds'],
+	gap_text: 'Who decides the refund rules?'
+};
+
+/** What pm, qa and the Keeper did on the way to `pendingClaim`. */
+export const pendingTrail: ClaimTrail = {
+	claim: pendingClaim.uid,
+	review,
+	jobs: [
+		{
+			actor: 'pm',
+			tool: 'submit_consult',
+			steps: [
+				step(1, 'pm', 'experts_for_system', { system: 'Billing' }, ['person:bob', 'person:alice']),
+				step(2, 'pm', 'work_history', { system: 'Billing' }, ['synthetic:pr:4', 'synthetic:pr:5'])
+			],
+			submit: { subject: 'consult:gap:refunds:pm:0', can_ground: true, kind: 'expert' },
+			wrote: true,
+			error: null,
+			consult: consult('pm', {
+				statement: 'bob wrote both refund-rule PRs in Billing and reviewed the issue that set them.',
+				cites: ['synthetic:pr:4', 'person:bob']
+			})
+		},
+		{
+			actor: 'qa',
+			tool: 'submit_consult',
+			steps: [step(3, 'qa', 'get_entity', { uid: 'synthetic:issue:12' }, ['synthetic:issue:12'])],
+			submit: { subject: 'consult:gap:refunds:qa:0', can_ground: false },
+			wrote: true,
+			error: null,
+			consult: consult('qa', { can_ground: false, kind: null })
+		},
+		{
+			actor: 'keeper',
+			tool: 'submit_keeper_decision',
+			steps: [step(4, 'keeper', 'get_entity', { uid: 'person:bob' }, ['person:bob'])],
+			submit: { subject: 'gap:refunds', outcome: 'claim', kind: 'expert', claim: pendingClaim.uid },
+			wrote: true,
+			error: null,
+			consult: null
+		}
+	],
+	log: [
+		entry(10, 'keeper', 'consulted', { gap: 'gap:refunds', why: 'asked pm' }),
+		entry(8, 'agent:keeper', 'episode', {
+			gap: 'gap:refunds',
+			why: "keeper.decide gap:refunds: pm's draft cites PR #4, which bob wrote; qa found nothing against it, so bob is the grounded expert."
+		})
+	]
+};
+
+/** A claim from a person's reply in Ask: no review, only the gap's log. */
+export const interviewTrail: ClaimTrail = {
+	claim: pendingClaim.uid,
+	review: null,
+	jobs: [],
+	log: [
+		entry(30, 'keeper', 'gap_opened', { gap: 'gap:refunds', why: 'Ask found no sources' }),
+		entry(5, 'ask', 'claim_queued', { gap: 'gap:refunds', claim: pendingClaim.uid, why: 'from_person' })
 	]
 };

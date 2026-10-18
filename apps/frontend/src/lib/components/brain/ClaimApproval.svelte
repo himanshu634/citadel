@@ -2,7 +2,7 @@
 @component
 One Keeper claim waiting for a lead, as the review page's detail pane shows it (design direction
 D): its kind and subject, the statement large, why it needs a lead (one row per reason), the gap it
-answers, the evidence behind it, then an optional reason and Reject or Approve under it. Use it for
+answers, how the Keeper got there (the `work` snippet, a `KeeperTrail`), the evidence behind it, then an optional reason and Reject or Approve under it. Use it for
 claims whose status is `pending_approval`.
 
 The approver's name is typed once in the page's header and comes in as `name`; a missing or
@@ -12,6 +12,7 @@ through, or to the error to show (`decisionError`). A 409 or 404 says so here; t
 list again, so a claim someone else decided leaves it.
 -->
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import NodeChip from '$lib/components/ui/NodeChip.svelte';
@@ -44,6 +45,8 @@ list again, so a claim someone else decided leaves it.
 		busy?: Decision | null;
 		/** The last failure (the gallery sets it to show the state). */
 		failure?: DecisionError | null;
+		/** How the Keeper got to the claim (`KeeperTrail`), shown between the gap and the evidence. */
+		work?: Snippet;
 	};
 
 	let {
@@ -55,7 +58,8 @@ list again, so a claim someone else decided leaves it.
 		ondecide,
 		onnameerror,
 		busy = $bindable(null),
-		failure = $bindable(null)
+		failure = $bindable(null),
+		work
 	}: Props = $props();
 	const id = $props.id();
 
@@ -113,6 +117,8 @@ list again, so a claim someone else decided leaves it.
 				<p class="gap">{gap}</p>
 			</section>
 		{/if}
+
+		{@render work?.()}
 
 		<section aria-labelledby="{id}-evidence">
 			<h3 id="{id}-evidence">Evidence</h3>
