@@ -8,9 +8,10 @@ windowed one. One backend per source of the company YAML (`backends_for`):
 - `github`: one per repo. Same data rule as its fetch: a private repo is refused unless
   `data_permission: own` (checked before any data query, from the cached meta or one repo_meta
   query). Item ids are refs, `github:<owner>/<repo>#<n>`.
-- `linear`: the workspace (`own`/`synthetic` data only), issues and documents, scoped to the
-  configured teams. Item ids are uids, `linear:issue:<uuid>` / `linear:doc:<id>`; a key
-  ("ENG-12") also fetches, and comes back under its uid.
+- `linear`: the workspace (`own`/`synthetic` data only): issues of the configured teams, and
+  documents of the whole workspace (a Linear document belongs to no team). Item ids are uids,
+  `linear:issue:<uuid>` / `linear:doc:<id>`; a key ("ENG-12") also fetches, and comes back
+  under its uid.
 - `canonical_jsonl`: a source folder with an `archive/` subfolder (the synthetic company's held
   back items). Item ids are uids.
 
@@ -335,6 +336,9 @@ def _interleave(a: list, b: list) -> Iterator:
 
 
 class LinearBackend:
+    """Issues of the configured teams (all teams when none are configured) and documents of
+    the whole workspace: documents belong to no team, so the team list does not scope them."""
+
     def __init__(
         self,
         company: CompanyConfig,

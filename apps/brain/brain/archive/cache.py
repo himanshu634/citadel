@@ -5,7 +5,7 @@ the window. Archived items must come back, so each one is kept as canonical reco
 raw cache (which `brain/backend reset` keeps), and `pipeline.load_archive` loads them again.
 
 File format: first line `{"type": "meta", ...}` (source key, item id, uid, ref, archived_at,
-request), then one `{"type": "<RecordClass>", ...fields}` line per record.
+request, superseded_by), then one `{"type": "<RecordClass>", ...fields}` line per record.
 """
 
 from __future__ import annotations
@@ -32,6 +32,9 @@ class ArchiveEntry:
     archived_at: str  # ISO time it was archived
     request: str  # the question that made someone look for it
     records: list[c.CanonicalRecord]
+    # a newer item that replaces this one; re-marked on every load, since a rebuild loads the
+    # archive before the windowed item it points at exists
+    superseded_by: str | None = None
 
 
 def _safe(name: str) -> str:
@@ -56,6 +59,7 @@ def write_entry(slug: str, entry: ArchiveEntry) -> Path:
         "ref": entry.ref,
         "archived_at": entry.archived_at,
         "request": entry.request,
+        "superseded_by": entry.superseded_by,
     }
     lines = [json.dumps(meta)]
     for rec in entry.records:

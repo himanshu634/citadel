@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from brain import adapters, embeddings, loader
-from brain.archive.cache import ArchiveEntry, archive_dir, archived_uids, read_entries
+from brain.archive.cache import ArchiveEntry, archive_dir, read_entries
 from brain.canonical import CanonicalRecord, WorkItem
 from brain.config import CompanyConfig, SourceConfig, load_company, raw_dir
 from brain.embeddings import EmbedReport
@@ -150,7 +150,8 @@ def load_entries(slug: str, cfg: CompanyConfig, entries: list[ArchiveEntry]) -> 
     """Load archived items into brain_<slug>: each entry normalized with its item kept past the
     window, loaded under its own origin (`archive:<source>:<item>`, so a source's BLOCKS prune
     and another entry's load never remove its edges), flagged archived, then every ref that
-    points at an archived node resolved. No SyncState: the archive has no cursor."""
+    points at an archived node resolved and every supersession marked (`report.superseded`
+    holds the pairs whose newer item exists). No SyncState: the archive has no cursor."""
     report = loader.LoadReport()
     rows = []
     for e in entries:
@@ -162,7 +163,17 @@ def load_entries(slug: str, cfg: CompanyConfig, entries: list[ArchiveEntry]) -> 
         )
     loader.mark_archived(slug, rows)
     loader.resolve_refs(slug)
+    report.superseded = supersede(slug, entries)
     return report
+
+
+def supersede(slug: str, entries: list[ArchiveEntry]) -> dict[str, str]:
+    """Mark each entry's `superseded_by`; returns the pairs marked (both nodes exist)."""
+    return {
+        e.uid: e.superseded_by
+        for e in entries
+        if e.superseded_by and loader.mark_superseded(slug, e.uid, e.superseded_by)
+    }
 
 
 def load_archive(slug: str, cfg: CompanyConfig) -> loader.LoadReport:
@@ -191,8 +202,9 @@ def ingest(
     cfg = load_company(slug)
     window_since = cfg.window.since.isoformat()
     report = IngestReport()
-    archived = archived_uids(slug)
-    report.load.merge(load_archive(slug, cfg))
+    entries = read_entries(slug)
+    archived = frozenset(e.uid for e in entries)
+    report.load.merge(load_entries(slug, cfg, entries))
     for source, adapter, key in _selected(cfg, only):
         if adapter is None:
             report.sources.append(SourceResult(key=key, skipped_reason=_NO_ADAPTER))
@@ -222,6 +234,7 @@ def ingest(
         loader.set_sync_state(slug, adapter.name, key, latest, window_since, result.loaded)
         emit(BuildEvent(slug, "load", "done", key, count=sum(loaded.written.values())))
     loader.resolve_refs(slug)  # items the sources just loaded may point at archived ones
+    report.load.superseded.update(supersede(slug, entries))  # their newer items exist now
     report.embed = embed(slug, on_event=emit)
     return report
 

@@ -70,12 +70,14 @@ NO_PRIORITY_RANK = 5
 class LoadReport:
     written: dict[str, int] = field(default_factory=lambda: defaultdict(int))  # query -> rows
     dropped: dict[str, int] = field(default_factory=lambda: defaultdict(int))  # query -> rows
+    superseded: dict[str, str] = field(default_factory=dict)  # archived uid -> newer uid marked
 
     def merge(self, other: LoadReport) -> None:
         for k, v in other.written.items():
             self.written[k] += v
         for k, v in other.dropped.items():
             self.dropped[k] += v
+        self.superseded.update(other.superseded)
 
 
 # --- value helpers ----------------------------------------------------------------------------

@@ -76,6 +76,7 @@ class ArchiveSession:
         *,
         backends: dict[str, Backend] | None = None,
         now: Callable[[], datetime] | None = None,
+        start_refs: list[str] | None = None,
     ) -> None:
         self.slug = slug
         self.budget = budget
@@ -86,6 +87,8 @@ class ArchiveSession:
         self.fetched: dict[str, Fetched] = {}  # by uid
         self.depth: dict[str, int] = {}  # uid -> hops from the request's own items
         self.loaded: list[str] = []
+        self.superseded: dict[str, str] = {}  # archived uid -> newer uid, as marked
+        self.start_refs = list(start_refs or [])  # the request's own refs: depth 0
         self._by_id: dict[tuple[str, str], Fetched] = {}  # (source key, item id) -> fetched
 
     def close(self) -> None:
@@ -121,15 +124,26 @@ class ArchiveSession:
         self._spend()
         return b.search(terms, self.cfg.window.since)[:MAX_RESULTS]
 
-    def _depth_of(self, b: Backend, item_id: str) -> int:
-        """1 + the depth of the shallowest fetched item that lists it in its refs; 0 when none
-        does (one of the request's own items)."""
-        parents = [
-            self.depth[uid]
-            for uid, f in self.fetched.items()
-            if any(r == item_id or b.parse_ref(r) == item_id for r in f.refs)
-        ]
-        return 1 + min(parents) if parents else 0
+    @staticmethod
+    def _names(b: Backend, refs: list[str], ids: set[str]) -> bool:
+        """Whether any of `refs` names one of `ids` (as written, or parsed by the backend)."""
+        return any(r in ids or b.parse_ref(r) in ids for r in refs)
+
+    def _depth_of(self, b: Backend, ids: set[str]) -> int | None:
+        """0 for one of the request's own refs; else 1 + the depth of the shallowest fetched
+        item whose refs name it; None when nothing does (it starts a trail, e.g. a search hit).
+        `ids` are every id known for the item, so an alias (a key, "#812") is not a fresh start
+        once the fetch has told its uid."""
+        if self._names(b, self.start_refs, ids):
+            return 0
+        parents = [self.depth[u] for u, f in self.fetched.items() if self._names(b, f.refs, ids)]
+        return 1 + min(parents) if parents else None
+
+    def _too_deep(self, item_id: str, depth: int | None) -> None:
+        if depth is not None and depth > self.budget.depth:
+            raise BudgetSpent(
+                "depth", f"{item_id} is {depth} hops away, the limit is {self.budget.depth}"
+            )
 
     def fetch(self, source_key: str, item_id: str) -> Fetched:
         b = self.backend(source_key)
@@ -137,19 +151,20 @@ class ArchiveSession:
         for key in (item_id, target):
             if hit := self._by_id.get((source_key, key)):
                 return hit
-        depth = self._depth_of(b, target)
-        if depth > self.budget.depth:
-            raise BudgetSpent(
-                "depth", f"{item_id} is {depth} hops away, the limit is {self.budget.depth}"
-            )
+        self._too_deep(item_id, self._depth_of(b, {item_id, target}))
         self._spend()
         got = b.fetch(target)
         uid = got.candidate.uid
         if uid in self.fetched:  # the same item asked for by another id (a key, then its uid)
             got = self.fetched[uid]
         else:
+            # Its uid may name a parent's ref that the alias did not: the call is spent, but an
+            # item past the depth budget is never kept (so never loaded).
+            ids = {item_id, target, uid, got.candidate.id, got.candidate.ref}
+            depth = self._depth_of(b, ids)
+            self._too_deep(item_id, depth)
             self.fetched[uid] = got
-            self.depth[uid] = depth
+            self.depth[uid] = depth or 0
         for key in (item_id, target, got.candidate.id):
             self._by_id[(source_key, key)] = got
         return got
@@ -158,7 +173,9 @@ class ArchiveSession:
         self, request: str, uids: list[str], *, superseded: dict[str, str] | None = None
     ) -> list[str]:
         """Archive and load fetched items (in order, up to the item budget and the daily cap);
-        returns the uids loaded. `superseded` maps an older uid to the uid that replaces it."""
+        returns the uids loaded. `superseded` maps an older uid to the uid that replaces it; a
+        pair applies only when its older item is loaded now, and is kept in its cache entry so a
+        rebuild marks it again. The pairs marked are added to `self.superseded`."""
         if unknown := [u for u in uids if u not in self.fetched]:
             raise ValueError(f"not fetched in this session: {', '.join(unknown)}")
         wanted = [u for u in dict.fromkeys(uids) if u not in self.loaded]
@@ -183,14 +200,13 @@ class ArchiveSession:
                     archived_at=loader.iso(now) or "",
                     request=request,
                     records=f.records,
+                    superseded_by=(superseded or {}).get(uid),
                 )
             )
         for e in entries:
             write_entry(self.slug, e)
         if entries:
-            pipeline.load_entries(self.slug, self.cfg, entries)
-        for old, new in (superseded or {}).items():
-            loader.mark_superseded(self.slug, old, new)
+            self.superseded.update(pipeline.load_entries(self.slug, self.cfg, entries).superseded)
         if entries and embeddings.is_warm():
             embeddings.embed_pending(self.slug, sources=take)
         self.loaded += take

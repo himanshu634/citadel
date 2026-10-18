@@ -343,7 +343,8 @@ def test_canonical_archive_search_and_fetch(root):
 
 
 class Stub:
-    """A backend over a dict of items: id -> refs. Counts its calls."""
+    """A backend over a dict of items: id -> refs. Counts its calls. "K-<id>" is an alias that
+    parses to itself (like a Linear key) and fetches as <id> (like the key's uuid)."""
 
     key = "stub"
 
@@ -352,6 +353,8 @@ class Stub:
         self.calls = 0
 
     def parse_ref(self, ref: str) -> str | None:
+        if ref.startswith("K-") and ref[2:] in self.items:
+            return ref
         ref = ref.removeprefix("alias:")
         return ref if ref in self.items else None
 
@@ -364,6 +367,7 @@ class Stub:
 
     def fetch(self, item_id: str) -> Fetched:
         self.calls += 1
+        item_id = item_id.removeprefix("K-")
         item = WorkItem(
             uid=item_id,
             kind="issue",
@@ -608,3 +612,75 @@ def test_load_embeds_only_the_loaded_items_when_warm(graph, warm_flags):
     warm.load("why?", ["b"], superseded={})
     assert embedded("b") and all(embedded("b"))
     assert not any(embedded("wi:other")) and not any(embedded("a"))  # the backlog waits
+
+
+def test_depth_holds_through_aliases(session_company):
+    """Parents list uids; fetching by key must still count the hops."""
+    stub = Stub({"u1": ["u2"], "u2": ["u3"], "u3": ["u4"], "u4": []})
+    s = session(stub, calls=10, depth=2)
+    s.fetch("stub", "u1")
+    s.fetch("stub", "K-u2")
+    s.fetch("stub", "K-u3")
+    assert [s.depth[u] for u in ("u1", "u2", "u3")] == [0, 1, 2]
+    with pytest.raises(BudgetSpent, match="depth") as exc:
+        s.fetch("stub", "K-u4")
+    assert exc.value.budget == "depth"
+    assert "u4" not in s.fetched  # too deep: never loadable
+    assert s.calls_used == 4  # the call was made before its uid was known
+
+    # the request's own refs are depth 0, also when fetched by an alias
+    s = ArchiveSession(
+        SLUG, Budget(calls=10, items=3, depth=2), backends={"stub": stub}, start_refs=["u3"]
+    )
+    s.fetch("stub", "u1")
+    s.fetch("stub", "u2")
+    s.fetch("stub", "K-u3")
+    assert s.depth["u3"] == 0
+    s.fetch("stub", "K-u4")
+    assert s.depth["u4"] == 1
+
+
+@needs_graph
+def test_superseded_pair_applies_only_to_loaded_items(graph):
+    windowed = [
+        WorkItem(uid=uid, kind="issue", title=uid, state="open", created_at="2026-05-01T00:00:00Z")
+        for uid in ("wi:new", "b")  # "b" also has a windowed copy, so a mark would show
+    ]
+    loader.load(SLUG, windowed)
+    stub = Stub({"a": [], "b": []})
+    s = ArchiveSession(SLUG, Budget(calls=5, items=1, depth=2), backends={"stub": stub})
+    s.fetch("stub", "a")
+    s.fetch("stub", "b")
+    loaded = s.load("why?", ["a", "b"], superseded={"a": "wi:new", "b": "wi:new", "a2": "x"})
+    assert loaded == ["a"]
+    assert s.superseded == {"a": "wi:new"}
+    rows = db.graph(SLUG).query(
+        "MATCH (w:WorkItem) WHERE w.superseded_by IS NOT NULL RETURN w.uid ORDER BY w.uid"
+    )
+    assert [r[0] for r in rows.result_set] == ["a"]
+
+
+@needs_graph
+def test_supersession_survives_rebuild(graph):
+    from brain import pipeline
+
+    pipeline.ingest(SLUG, full=True)  # the synthetic company: synthetic:pr:1 is windowed
+    stub = Stub({"a": []})
+    s = ArchiveSession(SLUG, Budget(calls=5, items=5, depth=2), backends={"stub": stub})
+    s.fetch("stub", "a")
+    s.load("why?", ["a"], superseded={"a": "synthetic:pr:1"})
+
+    def superseded() -> list:
+        return (
+            db.graph(SLUG)
+            .query(
+                "MATCH (a:WorkItem {uid:'a'})-[:SUPERSEDED_BY]->(b) RETURN a.superseded_by, b.uid"
+            )
+            .result_set
+        )
+
+    assert superseded() == [["synthetic:pr:1", "synthetic:pr:1"]]
+    db.delete_graph(SLUG)
+    schema.apply_schema(SLUG)
+    pipeline.ingest(SLUG, full=True)  # the archive loads before the windowed item exists
+    assert superseded() == [["synthetic:pr:1", "synthetic:pr:1"]]
