@@ -10,6 +10,7 @@ import pytest
 from backend import registry
 from backend.api import create_app
 from backend.api.companies import status_of
+from backend.api.tools import http_tools
 from backend.testing import second_company
 from brain import db, embeddings, tools
 from brain.testing import FakeEmbedder, load_company, needs_graph, synthetic_company
@@ -78,7 +79,7 @@ def responses(client: TestClient, slug: str, args: dict[str, str]) -> dict[str, 
             f"{base}?dry_run=1", json={**detail.json()["config"], "name": "Renamed"}
         ),
     }
-    for name in tools.TOOLS:
+    for name in http_tools():
         out[f"tools/{name}"] = client.post(f"{base}/tools/{name}", json=tool_body(name, args))
     return out
 

@@ -38,12 +38,18 @@ from brain.config import get_settings
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
 
-from agents import llm
+from agents import llm, skills
 from agents import mcp as mcp_
 from agents.toolset import Toolset
 from agents.walk import preview_rows, subgraph
 
-SYSTEM_PROMPT = resources.files("agents").joinpath("system_prompt.md").read_text()
+# Ask's prompt: the rules, then the guide for writing a `run_cypher` query
+SYSTEM_PROMPT = (
+    resources.files("agents").joinpath("system_prompt.md").read_text().rstrip()
+    + "\n\n"
+    + skills.load("cypher")
+    + "\n"
+)
 SUBMIT = "submit_answer"
 MAX_NUDGES = 1  # times we ask for submit_answer after a plain-text reply before giving up
 MAX_REFUSALS = 5  # refused submits in one question before the turn ends without an answer

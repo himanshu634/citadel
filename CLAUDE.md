@@ -164,8 +164,14 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
 - **`tools.py`** is the read side: `TOOLS` maps each tool name to its `queries/tools/<name>.cypher`,
   a pydantic params model (input schema for agents) and a row model (always uids + urls for
   citations). `call(slug, name, **params)` is the one entry point; typed wrappers sit on top.
-  `prepare` only converts params (days → epoch, text → RediSearch OR query, login → uid). No
-  LLM-generated Cypher anywhere. `path_between` uses `algo.SPpaths` (FalkorDB's `shortestPath`
+  `prepare` only converts params (days → epoch, text → RediSearch OR query, login → uid). The
+  one tool without a query file is `run_cypher` (`brain/cypher.py`, `Tool.run`): one read query
+  Ask writes when no named tool fits, sent as GRAPH.RO_QUERY (the server refuses writes) through
+  `db.run_cypher` with a 5 s timeout; LOAD CSV (the two words anywhere) and a query with no LIMIT
+  are refused, rows are cut to `limit` (`truncated`),
+  nodes become `{label, uid, ...}` without `embedding`, a column `w.uid` becomes `w_uid` so it is
+  citable. It is `agent_only`: the HTTP tool route neither lists nor runs it (404), so only Ask
+  (and the `brain query` CLI) can. How to write one is `agents/skills/cypher/SKILL.md` (below). `path_between` uses `algo.SPpaths` (FalkorDB's `shortestPath`
   rejects undirected traversals). `central_nodes` ranks one label by `algo.pageRank(NULL, NULL)`
   (whole graph; `algo.pageRank` follows only edges whose both ends have the label it is given,
   so a System-only run is flat). `bottlenecks` sums 8 seeded runs of `algo.betweenness` over
@@ -221,7 +227,8 @@ the brain loop (the Keeper, not this graph, is the one writer of knowledge; Ask 
 person's reply as a claim waiting for a lead, see "Interview" below). The brain loop (`agents/loop.py`): `call_claude` streams one Messages API call
 (anthropic SDK via `llm.client()`; `llm.fallback_params` adds server-side `fallbacks: "default"`
 for every model except Haiku, which has none) and `run_tools` runs the
-requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-written Cypher). Rules:
+requested graph tools (`agents/toolset.py` adapts `brain.tools`; the only model-written Cypher is
+Ask's `run_cypher`, read-only, see `tools.py` above). Rules:
 - State is append-only and in Anthropic block format; assistant content is replayed exactly as
   returned (thinking blocks included), because the API rejects edited history. Never trim it.
 - All tool results of one turn go back in one user message; failures are `is_error` results.
@@ -237,6 +244,12 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
 - Step limits (LangGraph `recursion_limit`; each tool round trip is two steps): 40 per Ask
   question (`ask.RECURSION_LIMIT`), 30 per role job (`runner.RECURSION_LIMIT`). Hitting one
   ends the run with stop `step_limit`.
+- Ask's system prompt (`loop.SYSTEM_PROMPT`) is `agents/system_prompt.md` followed by the body of
+  `agents/skills/cypher/SKILL.md` (`skills.load`; SKILL.md format, front matter dropped): the
+  graph's labels, properties, relationships, the rules for a fast and citable query, and
+  examples. `apps/agents/tests/test_cypher_skill.py` checks it names every label and relationship
+  type the load and Keeper queries write, and runs every example on the synthetic graph; change
+  the skill with the schema. Role prompts do not get it, and no role has `run_cypher`.
 - Keep `agents/system_prompt.md` and the tool list static (no dates, sorted tools) so the prompt
   prefix stays cacheable. Threads are checkpointed in graph `agent_<slug>` (`checkpoint.py`).
 - MCP servers (`agents/mcp.py`): a company's `mcp_servers:` (name, https url, optional

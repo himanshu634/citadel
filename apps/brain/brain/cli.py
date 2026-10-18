@@ -23,6 +23,7 @@ from brain.adapters.linear import seed as linear_seed
 from brain.adapters.linear.client import LinearClient, LinearError
 from brain.adapters.linear.source import LinearSource
 from brain.cli_util import company, connected, fail, graph_name, short
+from brain.cypher import CypherError
 
 app = typer.Typer(help="Company Brain: a company's engineering activity as one FalkorDB graph.")
 
@@ -254,7 +255,7 @@ def query(
         params[key] = value
     try:
         rows = tools.call(slug, tool, **params)
-    except (KeyError, ValidationError) as e:
+    except (KeyError, ValidationError, CypherError) as e:
         fail(str(e))
     data = [r.model_dump(by_alias=True) for r in rows]
     if as_json:

@@ -90,6 +90,27 @@ def run_text(slug: str, cypher: str, params: dict[str, Any] | None = None):
     return graph(slug).query(cypher, params)
 
 
+def run_cypher(
+    slug: str, cypher: str, params: dict[str, Any] | None, timeout_ms: int
+) -> tuple[list[str], list[list[Any]]]:
+    """Run a model-written read query (the `run_cypher` tool, `brain/cypher.py`) on
+    brain_<slug>: column names and raw rows (nodes, edges and paths as FalkorDB objects).
+
+    GRAPH.RO_QUERY makes the server refuse any write, and the query can only see the graph
+    selected here. `cypher.check` refuses what a read query can still do outside the graph
+    (LOAD CSV) before this runs. A graph that does not exist has no rows.
+    """
+    g = graph(slug)
+    try:
+        result = g.ro_query(cypher, params, timeout=timeout_ms)
+    except ResponseError:
+        if not graph_exists(slug):
+            return [], []
+        raise
+    cols = [c[1] if isinstance(c, (list, tuple)) else c for c in result.header]
+    return cols, result.result_set
+
+
 def delete_graph(slug: str) -> bool:
     if not graph_exists(slug):
         return False
