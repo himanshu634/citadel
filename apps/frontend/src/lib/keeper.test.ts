@@ -34,6 +34,7 @@ function review(extra: Partial<Review> = {}): Review {
 		stop: null,
 		gaps: [],
 		gap_text: null,
+		archive_reopened: [],
 		...extra
 	};
 }
@@ -90,6 +91,9 @@ describe('log lines', () => {
 	it('puts a review reason into words and drops its uid', () => {
 		expect(logWhy(entry('review_start', { why: 'review:ab12cd34: manual, budget 3' }))).toBe('on request, budget 3');
 		expect(logWhy(entry('review_start', { why: 'review:ab12cd34: build, budget 1' }))).toBe('after a build, budget 1');
+		expect(logWhy(entry('review_start', { why: 'review:ab12cd34: archive, budget 2' }))).toBe(
+			'after the Archivist found history, budget 2'
+		);
 		expect(logWhy(entry('review_skipped', { why: 'review:ab12cd34: no_api_key' }))).toBe('no API key');
 		expect(logWhy(entry('review_done', { why: 'review:ab12cd34: done' }))).toBeNull();
 	});

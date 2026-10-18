@@ -99,6 +99,7 @@ const REVIEW_WORDS: Record<string, string> = {
 	manual: 'on request',
 	build: 'after a build',
 	approval: 'after an approval',
+	archive: 'after the Archivist found history',
 	no_api_key: 'no API key',
 	brain_unavailable: "the company's brain isn't there",
 	restart: 'the server restarted'

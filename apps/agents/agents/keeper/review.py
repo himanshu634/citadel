@@ -6,16 +6,30 @@ now, or after an approval (docs/superpowers/specs/2026-10-16-keeper-design.md, "
     2. reproject  every accepted claim against the new sources (`project.reproject`), then
        notice     open gaps the brain shows on its own (`notice.notice`, cap keeper_notice_cap)
     3. pick       `budget` open gaps (`rules.pick_order`) -> in_review
-    4. consult    post a pm and a qa consult per picked gap (attempt = gap.attempts), then run
-                  those roles' consult jobs on them
+    4. consult    post a pm and a qa consult per picked gap (attempt = gap.attempts; a gap that
+                  asked the Archivist gets a fresh round, `archive`), then run those roles'
+                  consult jobs on them
     5. decide     the keeper's decide job on each picked gap whose consults are answered
-    6. follow up  pm's follow_up job, once per claim in its queue (not budgeted); a run that
+    6. archive    the Archivist's job (`archivist.job.answer_request`, tier keeper) on the open
+                  requests the Keeper asked, oldest first, at most `archivist_per_review`; each
+                  gap then leaves `waiting_archive`: `found` / `already_in_brain` -> `open` (no
+                  attempt used; recorded in `archive_reopened`), anything else -> `needs_person`
+    7. follow up  pm's follow_up job, once per claim in its queue (not budgeted); a run that
                   opens no task is recorded, and the claim is not tried again
-    7. finish     `ledger/review_finish("done")`
+    8. finish     `ledger/review_finish("done")`, with `archive_reopened`
 
-`budget=0` runs only 1, 2, 6 and 7 (the backend's run after an approval, so the follow-up shows).
-Every job goes through `runner.run_job` with `client_for(role, job)`: `llm.client()` in
-production, `policies.offline_client` offline.
+`budget=0` runs only 1, 2, 7 and 8 (the backend's run after an approval, so the follow-up shows),
+so it runs no Archivist. Every job goes through `runner.run_job` with `client_for(role, job)`:
+`llm.client()` in production, `policies.offline_client` offline.
+
+The archive step: a gap whose request this run did not reach (the cap, a stop) stays
+`waiting_archive` (never released) and the next review runs its request first. The backend
+follows a run with `archive_reopened` with one review of that budget (trigger "archive"), so
+those gaps are consulted again with the finds in their consult context. A stop waits for the
+Archivist run in progress, as for any job (it is not passed in: a hard stop would end the
+request "nothing found" and send the gap to a person). The Archivist is told the company builds
+when the review's brain reads as missing; such a refusal puts the request back to `open` and
+stops the run `brain_unavailable`.
 
 The run ends early, between jobs:
 - `should_stop()` -> `stopped`, stop "requested". A job already running finishes and writes
@@ -52,6 +66,8 @@ from typing import Any, Literal, Protocol
 from brain.config import get_settings
 from redis.exceptions import ResponseError
 
+from agents.archivist.job import BUILDING as ARCHIVE_BUILDING
+from agents.archivist.job import answer_request
 from agents.keeper import decide
 from agents.keeper.decide import (
     DB_USER,
@@ -62,7 +78,7 @@ from agents.keeper.decide import (
     log,
 )
 from agents.keeper.gaps import utc_now
-from agents.keeper.model import Gap, Review, review_uid
+from agents.keeper.model import LIVE_REQUEST, ArchiveRequest, Gap, Review, ReviewTrigger, review_uid
 from agents.keeper.notice import notice
 from agents.keeper.project import reproject
 from agents.keeper.rules import pick_order
@@ -75,11 +91,14 @@ from agents.walk import subgraph
 from agents.work.store import WorkStore
 
 GAP_LIMIT = 10_000  # open gaps read for picking (pick_order needs all of them)
+ARCHIVE_QUEUE_LIMIT = 1_000  # open archive requests read (Ask's too, filtered out after)
+REOPENED = ("found", "already_in_brain")  # Archivist outcomes that send a gap back to open
 CONSULTED_BY = ("pm", "qa")
 REQUESTED = "requested"  # stop: should_stop() said so
 BRAIN_UNAVAILABLE = "brain_unavailable"  # stop: brain_<slug> is gone or FalkorDB refused
 NO_API_KEY = "no_api_key"  # stop of a skipped review: no key for the LLM jobs
-SUBMIT_KEYS = ("can_ground", "outcome", "kind", "title")  # a submit step's input, when present
+# A submit step's input, when present.
+SUBMIT_KEYS = ("can_ground", "outcome", "kind", "topic", "title")
 
 EventKind = Literal["start", "step", "done", "stopped", "failed", "skipped"]
 
@@ -89,7 +108,7 @@ class ReviewEvent:
     """One progress event of a review run, for the stream the app shows."""
 
     kind: EventKind
-    step: str | None = None  # reproject, notice, pick, consult, pm.consult, keeper.decide, ...
+    step: str | None = None  # reproject, notice, pick, consult, pm.consult, archivist, ...
     gap: str | None = None
     claim: str | None = None
     message: str = ""
@@ -110,7 +129,7 @@ def review(
     slug: str,
     *,
     budget: int,
-    trigger: Literal["build", "manual", "approval"],
+    trigger: ReviewTrigger,
     client_for: Callable[[str, str], Any],
     graph_run: Runner | None = None,
     brain: ReviewBrain | None = None,
@@ -157,19 +176,21 @@ def review(
                     message = f"Review failed: {stop}"
     finally:  # whatever happened above, the review does not stay `running`
         ended = now()
-        store.write("ledger/review_finish", DB_USER,
-                    {"uid": uid, "state": state, "stop": stop, "now": ended})  # fmt: skip
+        reopened = list(run.reopened) if run is not None else []
+        store.write("ledger/review_finish", DB_USER, {"uid": uid, "state": state, "stop": stop,
+                    "archive_reopened": reopened, "now": ended})  # fmt: skip
         log(store, ended, "keeper", f"review_{state}", why=f"{uid}: {stop or state}")
     on_event(ReviewEvent(state, message=message))
     return Review(uid=uid, slug=slug, trigger=trigger, state=state, budget=budget,
-                  started_at=started, ended_at=ended, stop=stop)  # fmt: skip
+                  started_at=started, ended_at=ended, stop=stop,
+                  archive_reopened=reopened)  # fmt: skip
 
 
 def skip_review(
     store: WorkStore,
     slug: str,
     *,
-    trigger: Literal["build", "manual", "approval"],
+    trigger: ReviewTrigger,
     budget: int,
     brain: ReviewBrain | None = None,
     on_event: Callable[[ReviewEvent], None] = lambda e: None,
@@ -236,7 +257,10 @@ class _Run:
             self.now,
             draw=lambda tool, params, rows: subgraph(tool, params, rows),
         )
-        self.picked: dict[str, int] = {}  # gap uid -> its attempts when picked, in pick order
+        # gap uid -> (its attempts, whether it asked the Archivist) when picked, in pick order:
+        # the consult round it is asked in
+        self.picked: dict[str, tuple[int, bool]] = {}
+        self.reopened: list[str] = []  # gaps the archive step sent back to open
         self.brain_error: Exception | None = None  # raised inside a job's write, re-raised after
 
     def steps(self, budget: int) -> None:
@@ -253,6 +277,7 @@ class _Run:
             self.pick(budget)
             self.consult()
             self.decide()
+            self.archive()
         self.follow_up()
 
     # --- steps --------------------------------------------------------------------------------
@@ -263,7 +288,7 @@ class _Run:
         for gap in pick_order([Gap(**r) for r in rows])[:budget]:
             moved = _set_gap(self.store, self.now(), gap.uid, ["open"], "in_review", "picked")
             if moved:
-                self.picked[gap.uid] = gap.attempts
+                self.picked[gap.uid] = (gap.attempts, gap.archive_asked)
                 texts.append(gap.text)
                 self.event("pick", gap=gap.uid, message=gap.text)
         if self.picked:
@@ -271,10 +296,11 @@ class _Run:
             self.store.write("ledger/review_picked", DB_USER, picked)
 
     def consult(self) -> None:
-        for gap, attempt in self.picked.items():
+        for gap, (attempt, archive) in self.picked.items():
             for role in CONSULTED_BY:
                 now = self.now()
-                params = {"gap": gap, "role": role, "attempt": attempt, "now": now}
+                params = {"gap": gap, "role": role, "attempt": attempt, "archive": archive,
+                          "now": now}  # fmt: skip
                 [row] = self.store.write("ledger/post_consult", DB_USER, params)
                 if row["created"]:
                     log(self.store, now, "keeper", "consulted", gap=gap, why=f"asked {role}")
@@ -286,7 +312,8 @@ class _Run:
             queues[role] = {
                 s.data["gap"]: s
                 for s in job.queue(self.store, self.ctx(role))
-                if self.picked.get(s.data["gap"]) == s.data.get("attempt")  # this attempt only
+                # this round only
+                if self.picked.get(s.data["gap"]) == (s.data["attempt"], s.data["archive"])
             }
         for gap in self.picked:
             for role in CONSULTED_BY:
@@ -299,6 +326,59 @@ class _Run:
         for subject in job.queue(self.store, self.ctx("keeper")):
             if subject.uid in self.picked:
                 self.run("keeper", "decide", subject, gap=subject.uid)
+
+    def archive(self) -> list[str]:
+        """The Archivist on the open requests the Keeper asked (Ask's are never touched), oldest
+        first, at most `archivist_per_review`, then each request's gap settled (`settle`).
+        Returns the gaps that went back to open. Stops between requests like between jobs."""
+        rows = self.store.read("ledger/archive_queue", {"limit": ARCHIVE_QUEUE_LIMIT})
+        mine = [ArchiveRequest(**r) for r in rows if r["asked_by"] == "keeper"]
+        for request in mine[: get_settings().archivist_per_review]:
+            if self.should_stop():
+                raise _Stop(REQUESTED)
+            if not self.brain.graph_exists(self.slug):
+                raise BrainUnavailable(self.slug)
+            self.event("archivist", gap=request.gap, message=f"archivist on {request.uid}")
+            done = answer_request(
+                self.store,
+                self.slug,
+                request,
+                client=self.client_for("archivist", "answer_request"),
+                tier="keeper",
+                graph_run=self.graph_run,  # its steps go under the request's uid, not here
+                building=lambda slug: not self.brain.graph_exists(slug),
+            )
+            if done.status == "refused" and done.reason == ARCHIVE_BUILDING:
+                # the brain went between the check above and the run: the next review runs it
+                back = {"uid": done.uid, "from": ["refused"], "to": "open", "now": self.now()}
+                self.store.write("ledger/archive_set_request", DB_USER, back)
+                raise BrainUnavailable(self.slug)
+            self.settle(done)
+        return list(self.reopened)
+
+    def settle(self, done: ArchiveRequest) -> None:
+        """The gap of an ended request leaves `waiting_archive`: `found` / `already_in_brain` ->
+        `open`, no attempt used, logged `archive_returned` with the finds (its next consult
+        round reads them); `nothing_found`, `failed` or `refused` -> `needs_person`, the reason
+        the request's outcome and reason. A request still open or running leaves it waiting."""
+        if done.gap is None or done.status in LIVE_REQUEST:
+            return
+        now, gap = self.now(), done.gap
+        if done.status == "answered" and done.outcome in REOPENED:
+            reason = f"archive {done.outcome}: {done.uid}"
+            if not _set_gap(self.store, now, gap, ["waiting_archive"], "open", reason):
+                return
+            self.reopened.append(gap)
+            finds = self.store.read("ledger/archive_finds", {"requests": [done.uid]})
+            log(self.store, now, "keeper", "archive_returned", gap=gap,
+                why=f"{done.uid}: {done.outcome}: {done.summary}",
+                evidence=[f["uid"] for f in finds])  # fmt: skip
+            self.event("archivist", gap=gap, message=f"{done.outcome}: the gap is open again")
+            return
+        reason = ": ".join(x for x in (done.outcome, done.reason) if x) or done.status
+        if _set_gap(self.store, now, gap, ["waiting_archive"], "needs_person", reason):
+            log(self.store, now, "keeper", "needs_person", gap=gap, why=f"{done.uid}: {reason}")
+            self.event("archivist", gap=gap, message=f"{reason}: the gap needs a person")
 
     def follow_up(self) -> None:
         """pm's follow-up job once per claim in its queue. A run that opens no task is recorded

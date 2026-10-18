@@ -15,6 +15,7 @@ from agents.keeper.gaps import utc_now
 from agents.keeper.model import gap_uid
 from agents.policies import offline_client
 from agents.testing import FakeBrainFacts, fake_brain
+from backend import keeper_runs
 from backend.api import create_app
 from backend.jobs import JobRunner
 from backend.keeper_runs import BUILDING, BrainBuilding, KeeperRuns, ReviewNotStarted
@@ -251,6 +252,62 @@ def test_a_pending_build_review_is_dropped_when_another_build_runs(keeper, ledge
     assert keeper.wait(SLUG, 5)
     time.sleep(0.05)
     assert len(ledger.reviews) == 1
+
+
+def reopening(monkeypatch, reopened: list[str]) -> list[tuple[str, int]]:
+    """Patch the review keeper_runs runs: the first run says its Archivist runs reopened
+    `reopened`; every run is recorded as (trigger, budget)."""
+    calls: list[tuple[str, int]] = []
+    real = keeper_runs.review
+
+    def fake(store, slug, *, budget, trigger, **kw):
+        calls.append((trigger, budget))
+        r = real(store, slug, budget=budget, trigger=trigger, **kw)
+        return r.model_copy(update={"archive_reopened": reopened if len(calls) == 1 else []})
+
+    monkeypatch.setattr(keeper_runs, "review", fake)
+    return calls
+
+
+def test_follow_on_review_queued(keeper, ledger, brain, company, monkeypatch):
+    """A review whose Archivist runs sent gaps back to open is followed by one review with
+    trigger "archive" and a budget of that many gaps, started when it ends."""
+    calls = reopening(monkeypatch, ["gap:a", "gap:b"])
+    keeper.start(SLUG, "manual", 5)
+    after = wait_review(ledger, 2)
+    assert (after.trigger, after.budget, after.state) == ("archive", 2, "done")
+    assert keeper.wait(SLUG, 5)
+    time.sleep(0.05)
+    assert calls == [("manual", 5), ("archive", 2)]  # the follow-on reopened nothing: no third
+
+
+def test_a_stopped_review_queues_no_follow_on(keeper, ledger, brain, company, monkeypatch):
+    calls = reopening(monkeypatch, ["gap:a"])
+    seed_gap(ledger)  # a job to stop before
+    brain.gate.clear()
+    keeper.start(SLUG, "manual", 5)
+    assert keeper.stop(SLUG)
+    brain.gate.set()
+    assert wait_review(ledger, 1).state == "stopped"
+    assert keeper.wait(SLUG, 5)
+    time.sleep(0.05)
+    assert calls == [("manual", 5)] and len(ledger.reviews) == 1
+
+
+def test_a_follow_on_and_a_pending_build_review_run_as_one(keeper, ledger, brain, company,
+                                                         monkeypatch):  # fmt: skip
+    """A build ended during the review, which also reopened gaps: one review runs after it, the
+    build's, with the larger budget."""
+    calls = reopening(monkeypatch, ["gap:a", "gap:b", "gap:c", "gap:d"])
+    brain.gate.clear()
+    first = keeper.start(SLUG, "manual", 5)
+    assert keeper.start(SLUG, "build", 3).uid == first.uid
+    brain.gate.set()
+    after = wait_review(ledger, 2)
+    assert (after.trigger, after.budget) == ("build", 4)
+    assert keeper.wait(SLUG, 5)
+    time.sleep(0.05)
+    assert calls == [("manual", 5), ("build", 4)]
 
 
 def test_while_the_brain_builds_reviews_and_decisions_are_refused(

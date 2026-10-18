@@ -3,7 +3,9 @@
 Why: the model only proposes. Whether a claim becomes knowledge is fixed here, in this order
 (docs/superpowers/specs/2026-10-16-keeper-design.md, "The review run" steps 4-5):
 
-1. `dismiss` / `needs_person`: the gap leaves review.
+1. `dismiss` / `needs_person`: the gap leaves review. `ask_archivist` (`_ask_archivist`): the
+   gap waits (`waiting_archive`) while the review's archive step runs the request it opens; a
+   gap asks once, ever, so a second ask is `needs_person`.
 2. Evidence: every cited uid must be a node in brain_<slug>, else the claim is `rejected`
    (`evidence_missing`) and the gap goes back to `open` with one more attempt (`needs_person` at
    `MAX_ATTEMPTS`).
@@ -24,8 +26,9 @@ Every claim status move is guarded on its current status, so of two racing appro
 and reject) one wins and the other raises `ClaimNotPending` having written nothing. Every path
 writes exactly one LogEntry for its outcome (plus one `claim_superseded` per claim it replaces):
 
-    decide:  gap_dismissed | needs_person | claim_rejected | claim_conflicts_with_source
-             | claim_queued | claim_written (actor "auto") | claim_stale
+    decide:  gap_dismissed | needs_person | archive_requested | claim_rejected
+             | claim_conflicts_with_source | claim_queued | claim_written (actor "auto")
+             | claim_stale
     approve: claim_approved | claim_conflicts_with_source | claim_stale
              | claim_approval_failed (the projection failed)  (actor: the lead)
     reject:  claim_rejected  (actor: the lead)
@@ -40,7 +43,8 @@ from brain import db
 from brain import keeper as brain_keeper
 from brain.keeper import SourceFacts
 
-from agents.keeper.model import Claim, Gap, claim_uid, iso, log_uid
+from agents.archivist.rules import norm
+from agents.keeper.model import Claim, Gap, archive_uid, claim_uid, iso, log_uid
 from agents.keeper.rules import conflict, critical_reasons
 from agents.work.store import Row, WorkStore
 
@@ -53,6 +57,7 @@ DB_USER = "citadel_keeper"  # the Keeper's database user (roles/keeper.py ROLE.d
 # brain_<slug> and makes it again, empty, so every claim would look stale or ungrounded.
 BUILDING = "The brain is being rebuilt; try again when the build finishes."
 MAX_ATTEMPTS = 2  # rejected claims before a gap needs a person
+ALREADY_ASKED = "already asked the Archivist"  # a gap asks the Archivist once, ever
 EARLIER_LIMIT = 10_000  # accepted claims read for the critical rule's replaces_claim
 
 
@@ -111,6 +116,8 @@ def apply_decision(
 ) -> list[Row]:
     """Write the Keeper's decision on a gap in review. [] when the gap is no longer in review
     (nothing written). Rows: the gap's new status, or the claim's final status."""
+    if sub.outcome == "ask_archivist":
+        return _ask_archivist(store, ctx, gap, sub)
     if sub.outcome != "claim":
         to, action = ("dismissed", "gap_dismissed") if sub.outcome == "dismiss" else (
             "needs_person", "needs_person")  # fmt: skip
@@ -173,6 +180,36 @@ def apply_decision(
 
     done = accept(store, ctx, claim, "auto", brain, slug=slug)
     return [{"uid": done.uid, "status": done.status}]
+
+
+def _ask_archivist(store: WorkStore, ctx: Ctx, gap: Gap, sub: SubmitKeeperDecision) -> list[Row]:
+    """Open a topic request for the Archivist (asked_by keeper) and move the gap in_review ->
+    waiting_archive; the review's archive step runs it. Once per gap, ever (the guarded
+    `ledger/gap_archive_asked`): a second ask is `needs_person`. When the same question is
+    already open or running (Ask's, or another gap's), no request opens and the gap stays in
+    review: the review releases it to `open`, and its next round can read what was loaded."""
+    if gap.status != "in_review":
+        return []
+    asked = not gap.archive_asked and store.write(
+        "ledger/gap_archive_asked", DB_USER, {"uid": gap.uid}
+    )
+    if not asked:
+        rows = _set_gap(store, ctx.now, gap.uid, ["in_review"], "needs_person", ALREADY_ASKED)
+        if rows:
+            log(store, ctx.now, "keeper", "needs_person", gap=gap.uid, why=ALREADY_ASKED)
+        return rows
+    topic = (sub.topic or "").strip()
+    params = {"uid": archive_uid(), "kind": "topic", "text": topic, "asked_by": "keeper",
+              "gap": gap.uid, "norm": norm("topic", topic, []), "now": ctx.now}  # fmt: skip
+    [row] = store.write("ledger/archive_open_request", DB_USER, params)
+    if not row["created"]:
+        log(store, ctx.now, "keeper", "archive_requested", gap=gap.uid,
+            why=f"{row['uid']} (already in flight): {topic}")  # fmt: skip
+        return [{"uid": gap.uid, "status": "in_review", "request": row["uid"]}]
+    rows = _set_gap(store, ctx.now, gap.uid, ["in_review"], "waiting_archive",
+                    f"asked the Archivist: {row['uid']}")  # fmt: skip
+    log(store, ctx.now, "keeper", "archive_requested", gap=gap.uid, why=f"{row['uid']}: {topic}")
+    return [{**r, "request": row["uid"]} for r in rows]
 
 
 # --- accept, approve, reject -----------------------------------------------------------------

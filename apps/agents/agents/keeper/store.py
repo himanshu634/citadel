@@ -10,7 +10,8 @@ graph. Agent jobs reach them through the `WorkStore` protocol (`agents/work/stor
 Two implementations with the same behaviour:
 - `KeeperStore` runs `apps/brain/queries/ledger/<name>.cypher` on keeper_<slug>. Dedupe and
   guards (one live gap per question, one consult per role per gap, one follow-up per claim,
-  guarded gap and claim status moves, one running review, a step finished once) are in the
+  guarded gap and claim status moves, a gap asks the Archivist once, one running review, a step
+  finished once) are in the
   Cypher: `review_start` starts nothing while a review is running, `review_stop_running`
   stops every running one (`backend.keeper_runs`: their run is gone). A review's steps
   (`ledger/write_step`, `finish_step`, `review_steps`) are the activity trail's; a step's
@@ -92,6 +93,7 @@ EPISODES: tuple[str, ...] = ("ledger/write_episode",)  # from runner.run_job
 WRITES: tuple[str, ...] = (
     "ledger/open_gap",
     "ledger/set_gap_status",
+    "ledger/gap_archive_asked",
     "ledger/log",
     "ledger/review_start",
     "ledger/review_finish",
@@ -118,7 +120,8 @@ OPTIONAL: dict[str, dict[str, Any]] = {
     "ledger/set_gap_status": {"reason": None, "attempts_inc": 0},
     "ledger/log": {"why": None, "gap": None, "claim": None, "evidence": []},
     "ledger/read_log": {"gap": None, "claim": None},
-    "ledger/review_finish": {"stop": None},
+    "ledger/review_finish": {"stop": None, "archive_reopened": []},
+    "ledger/post_consult": {"archive": False},
     "ledger/review_picked": {"gap_text": None},
     "ledger/write_step": {
         "kind": "graph",
@@ -468,6 +471,13 @@ class MemoryKeeperStore(_LedgerStore):
         g.attempts += p["attempts_inc"]
         return [{"uid": g.uid, "status": g.status}]
 
+    def _w_gap_archive_asked(self, p: Mapping[str, Any]) -> list[Row]:
+        g = self.gaps.get(p["uid"])
+        if g is None or g.archive_asked:
+            return []
+        g.archive_asked = True
+        return [{"uid": g.uid}]
+
     # --- log ----------------------------------------------------------------------------------
 
     def _w_log(self, p: Mapping[str, Any]) -> list[Row]:
@@ -503,6 +513,7 @@ class MemoryKeeperStore(_LedgerStore):
         for r in self.reviews:
             if r.uid == p["uid"] and r.state == "running":
                 r.state, r.stop, r.ended_at = p["state"], p["stop"], p["now"]
+                r.archive_reopened = list(p["archive_reopened"])
                 return [{"uid": r.uid, "state": r.state}]
         return []
 
@@ -559,12 +570,12 @@ class MemoryKeeperStore(_LedgerStore):
     # --- consults -----------------------------------------------------------------------------
 
     def _w_post_consult(self, p: Mapping[str, Any]) -> list[Row]:
-        uid = consult_uid(p["gap"], p["role"], p["attempt"])
+        uid = consult_uid(p["gap"], p["role"], p["attempt"], p["archive"])
         created = uid not in self.consults
         if created:
-            self.consults[uid] = Consult(
-                uid=uid, gap=p["gap"], role=p["role"], attempt=p["attempt"], created_at=p["now"]
-            )
+            self.consults[uid] = Consult(uid=uid, gap=p["gap"], role=p["role"],
+                                         attempt=p["attempt"], archive=p["archive"],
+                                         created_at=p["now"])  # fmt: skip
         return [{"uid": uid, "created": created}]
 
     def _r_queue_consult(self, p: Mapping[str, Any]) -> list[Row]:
@@ -593,7 +604,11 @@ class MemoryKeeperStore(_LedgerStore):
         if gap is None:
             return []
         rows = sorted(
-            (c for c in self.consults.values() if c.gap == gap.uid and c.attempt == gap.attempts),
+            (
+                c
+                for c in self.consults.values()
+                if c.gap == gap.uid and c.attempt == gap.attempts and c.archive == gap.archive_asked
+            ),
             key=lambda c: c.role,
         )
         return [c.model_dump() for c in rows]

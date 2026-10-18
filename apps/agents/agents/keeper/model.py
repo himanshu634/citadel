@@ -66,12 +66,17 @@ class LogEntry(BaseModel):
     evidence: list[str] = Field(default_factory=list)
 
 
+# What started a review: a finished build, Review now, an approval, or an Archivist run that sent
+# gaps back to open (the follow-on review, `backend.keeper_runs`).
+ReviewTrigger = Literal["build", "manual", "approval", "archive"]
+
+
 class Review(BaseModel):
     """One bounded review run. At most one per company is `running`."""
 
     uid: str
     slug: str
-    trigger: Literal["build", "manual", "approval"]
+    trigger: ReviewTrigger
     state: Literal["running", "done", "stopped", "failed", "skipped"] = "running"
     budget: int
     started_at: str
@@ -79,6 +84,7 @@ class Review(BaseModel):
     stop: str | None = None  # why it ended early, e.g. "restart", "brain_unavailable"
     gaps: list[str] = Field(default_factory=list)  # the gaps it picked, in pick order
     gap_text: str | None = None  # the first picked gap's text (a gap's text never changes)
+    archive_reopened: list[str] = Field(default_factory=list)  # gaps its Archivist runs reopened
 
 
 StepStatus = Literal["running", "done", "failed"]
@@ -116,6 +122,7 @@ class Consult(BaseModel):
     gap: str
     role: Literal["pm", "qa"]
     attempt: int = 0  # the gap's `attempts` when it was posted; a reopened gap asks again
+    archive: bool = False  # posted after the gap asked the Archivist: a fresh round, same attempt
     status: Literal["open", "answered"] = "open"
     can_ground: bool | None = None  # None until answered
     kind: ClaimKind | None = None
@@ -239,9 +246,10 @@ def claim_uid() -> str:
     return f"claim:{_hex(12)}"
 
 
-def consult_uid(gap: str, role: str, attempt: int) -> str:
-    """Mirrored in apps/brain/queries/ledger/post_consult.cypher."""
-    return f"consult:{gap}:{role}:{attempt}"
+def consult_uid(gap: str, role: str, attempt: int, archive: bool = False) -> str:
+    """Mirrored in apps/brain/queries/ledger/post_consult.cypher. The round after the gap asked
+    the Archivist ends in ":archive"."""
+    return f"consult:{gap}:{role}:{attempt}" + (":archive" if archive else "")
 
 
 def archive_uid() -> str:

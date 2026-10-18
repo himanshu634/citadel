@@ -783,7 +783,7 @@ export interface FollowUp {
 export interface Review {
 	uid: string;
 	slug: string;
-	trigger: 'build' | 'manual' | 'approval';
+	trigger: 'build' | 'manual' | 'approval' | 'archive';
 	state: 'running' | 'done' | 'stopped' | 'failed' | 'skipped';
 	budget: number;
 	started_at: string;
@@ -793,6 +793,8 @@ export interface Review {
 	/** The gaps it picked, in pick order. */
 	gaps: string[];
 	gap_text: string | null;
+	/** The gaps its Archivist runs sent back to open (a follow-on review consults them). */
+	archive_reopened: string[];
 }
 
 /** A lead's approve or reject. `by` is 1..80 characters once trimmed, `why` at most 500. */

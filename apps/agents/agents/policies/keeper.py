@@ -1,8 +1,10 @@
 """Keeper policies: pm and qa answer a consult from the work items related to the gap's text; the
-Keeper re-reads the first grounded answer's uids and claims it, or says it needs a person."""
+Keeper re-reads the first grounded answer's uids and claims it; when no consult could ground a
+gap about old history it asks the Archivist, else it says the gap needs a person."""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from brain.canonical import system_uid
@@ -10,6 +12,8 @@ from brain.canonical import system_uid
 from agents.policies.base import Call, Results, uniq
 
 CONSULT_ROWS = 3  # related work items a consult answer quotes and cites
+# A gap about history older than the window: "old" or "history" as a word (not "golden").
+OLD_HISTORY = re.compile(r"\b(old|history)\b", re.IGNORECASE)
 
 
 def consult(context: dict[str, Any], results: Results) -> list[Call] | dict[str, Any]:
@@ -42,8 +46,14 @@ def decide(context: dict[str, Any], results: Results) -> list[Call] | dict[str, 
     consult's search again, and get_entity on each uid), so the claim cites only what this run
     saw; none grounded, or none of its uids found again, gives needs_person."""
     gap = context["gap"]
-    grounded = [c for c in context.get("consults") or [] if c.get("can_ground")]
+    consults = context.get("consults") or []
+    grounded = [c for c in consults if c.get("can_ground")]
     if not grounded:
+        topic = _old_topic(gap.get("text") or "")
+        if topic and len(consults) >= 2:
+            why = "No consult could ground it, and it asks about older history."
+            return {"gap": gap["uid"], "outcome": "ask_archivist", "topic": topic,
+                    "reason": why, "cites": []}  # fmt: skip
         return _needs_person(gap, "No consult could ground it in the graph.")
     c = grounded[0]
     if not results.called("get_entity"):
@@ -68,6 +78,14 @@ def decide(context: dict[str, Any], results: Results) -> list[Call] | dict[str, 
         "reason": f"Grounded by {c['role']}: {c['statement']}",
         "cites": cites,
     }
+
+
+def _old_topic(text: str) -> str | None:
+    """What to ask the Archivist about a gap on old history: its words from "old" / "history"
+    on ("who decided the old auth system?" -> "old auth system"), since an archive search wants
+    every word it is given in the item; None when the gap is not about old history."""
+    m = OLD_HISTORY.search(text)
+    return " ".join(re.findall(r"\w+", text[m.start() :])) if m else None
 
 
 def _needs_person(gap: dict[str, Any], reason: str) -> dict[str, Any]:

@@ -43,6 +43,7 @@ _log = logging.getLogger(__name__)
 
 Tier = Literal["ask", "keeper"]
 JOB = ROLE.job("answer_request")
+BUILDING = "building"  # the refusal's reason while the company builds (rule 19)
 
 
 def _never(slug: str) -> bool:
@@ -107,7 +108,7 @@ def _answer(
         _from_memory(store, ctx, request, earlier)
         return
     if building(slug):
-        _refuse(store, ctx, request, "building")
+        _refuse(store, ctx, request, BUILDING)
         return
     sources = None if backends is None else dict(backends)  # None: the company's own
     session = ArchiveSession(slug, Budget.for_tier(tier), backends=sources, start_refs=request.refs)

@@ -101,6 +101,7 @@ TRIGGER_TITLES = {
     "build": "Keeper review after a build",
     "manual": "Keeper review on request",
     "approval": "Keeper review after an approval",
+    "archive": "Keeper review after the Archivist found history",
 }
 _REVIEW_STATUS: dict[str, RunStatus] = {
     "done": "done",

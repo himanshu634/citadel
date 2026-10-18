@@ -97,12 +97,14 @@ class SubmitKeeperDecision(Submit):
     name: ClassVar[str] = "submit_keeper_decision"
     description: ClassVar[str] = (
         "Decide the gap from the consults' answers: write a claim (kind, subject, statement, "
-        "about, cites), mark it needs_person when nobody could ground it, or dismiss it as noise."
+        "about, cites), ask_archivist (topic) when nobody could ground it and it is about history "
+        "older than the brain holds, mark it needs_person when nobody could ground it, or "
+        "dismiss it as noise."
     )
     subject: ClassVar[str | None] = "gap"
 
     gap: str = Field(description="uid of the gap being decided.")
-    outcome: Literal["claim", "needs_person", "dismiss"]
+    outcome: Literal["claim", "ask_archivist", "needs_person", "dismiss"]
     kind: ClaimKind | None = Field(None, description="What the claim is (claim).")
     subject_uid: str | None = Field(None, description="uid of the node the claim is about.")
     statement: str | None = Field(None, description="The claim in one sentence (claim).")
@@ -112,11 +114,16 @@ class SubmitKeeperDecision(Submit):
     about: list[str] = Field(
         default_factory=list, description="uids of the nodes the claim is about (claim)."
     )
+    topic: str | None = Field(
+        None, description="What the Archivist should look for in older items (ask_archivist)."
+    )
     reason: str = Field(description="One or two sentences: why this outcome.")
     cites: list[str] = OPTIONAL_CITES
 
     @model_validator(mode="after")
     def _claim(self) -> SubmitKeeperDecision:
+        if self.outcome == "ask_archivist" and not (self.topic or "").strip():
+            raise ValueError("ask_archivist needs a topic")
         if self.outcome == "claim":
             if not (self.kind and self.subject_uid and self.statement and self.about):
                 raise ValueError("a claim needs kind, subject_uid, statement and about")
