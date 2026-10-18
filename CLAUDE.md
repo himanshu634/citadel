@@ -206,7 +206,8 @@ Every node with a uid carries the label `Node` beside its kind (the loads `SET x
 MERGE on the kind label; `schema/node_label`, run by `brain schema` and every build's prepare
 stage, backfills a graph loaded before it existed), and a lookup that takes any kind of node is
 `MATCH (n:Node {uid: $uid})` (get_entity, path_between, the Keeper's evidence, source_facts and
-project_claim; `test_graph.py` checks their plans with `db.explain`). FalkorDB lists a node's
+project_claim, the Archivist's archive_mark, archive_supersede and chunks_to_embed_from;
+`test_graph.py` checks their plans with `db.explain`). FalkorDB lists a node's
 labels in the order the graph first saw them, so a query reads the kind as
 `head([l IN labels(n) WHERE l <> 'Node'])`, never `labels(n)[0]` (`test_queries.py` forbids it).
 

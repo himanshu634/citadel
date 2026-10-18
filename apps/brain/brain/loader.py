@@ -515,7 +515,7 @@ def mark_archived(slug: str, rows: list[dict[str, Any]]) -> int:
 def resolve_refs(slug: str) -> int:
     """Link every item's unresolved ref to the archived node carrying that `ref` (MENTIONS) and
     drop the ref from the item. Returns the edges made; a second call makes none."""
-    return _n(db.run(slug, "load/archive_resolve"))
+    return sum(row["n"] for row in db.run(slug, "load/archive_resolve"))  # one row per kind
 
 
 def mark_superseded(slug: str, uid: str, by_uid: str) -> bool:

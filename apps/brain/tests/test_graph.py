@@ -512,6 +512,11 @@ UID_LOOKUPS = {
             }
         ]
     },  # fmt: skip
+    "load/archive_mark": {
+        "rows": [{"uid": "synthetic:pr:4", "ref": "r", "archived_at": "t", "request": "q"}]
+    },
+    "load/archive_supersede": {"uid": "synthetic:pr:4", "by_uid": "synthetic:pr:1"},
+    "load/chunks_to_embed_from": {"model": "m", "limit": 10, "sources": ["synthetic:pr:4"]},
 }
 
 
@@ -519,6 +524,14 @@ UID_LOOKUPS = {
 def test_uid_lookups_are_index_scans(synthetic_graph, name):
     plan = db.explain(synthetic_graph, name, UID_LOOKUPS[name])
     assert any("Index Scan" in op for op in plan), plan
+    assert not any("All Node Scan" in op for op in plan), plan
+
+
+def test_archive_resolve_never_scans_every_node(synthetic_graph):
+    """It runs after every ingest and has no uid to look up: it starts from the archived kinds'
+    labels, never from every node (chunks included)."""
+    plan = db.explain(synthetic_graph, "load/archive_resolve")
+    assert any("Label Scan" in op for op in plan), plan
     assert not any("All Node Scan" in op for op in plan), plan
 
 
