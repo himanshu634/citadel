@@ -229,7 +229,7 @@ purpose, parameters, returns, example.
 
 One tool has no file: `run_cypher` ([`brain/cypher.py`](apps/brain/brain/cypher.py)) runs one
 read query Ask writes when no tool above fits. FalkorDB runs it as `GRAPH.RO_QUERY`, so writes
-are refused; it has a 5 s timeout, a row limit, and no `LOAD CSV`. Ask learns the schema from
+are refused; it has a 5 s timeout, must carry a `LIMIT`, and may not use `LOAD CSV`. Ask learns the schema from
 [`agents/skills/cypher/SKILL.md`](apps/agents/agents/skills/cypher/SKILL.md), which is part of its
 system prompt.
 

@@ -167,7 +167,8 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   `prepare` only converts params (days → epoch, text → RediSearch OR query, login → uid). The
   one tool without a query file is `run_cypher` (`brain/cypher.py`, `Tool.run`): one read query
   Ask writes when no named tool fits, sent as GRAPH.RO_QUERY (the server refuses writes) through
-  `db.run_cypher` with a 5 s timeout; LOAD CSV is refused, rows are cut to `limit` (`truncated`),
+  `db.run_cypher` with a 5 s timeout; LOAD CSV (the two words anywhere) and a query with no LIMIT
+  are refused, rows are cut to `limit` (`truncated`),
   nodes become `{label, uid, ...}` without `embedding`, a column `w.uid` becomes `w_uid` so it is
   citable. How to write one is `agents/skills/cypher/SKILL.md` (below). `path_between` uses `algo.SPpaths` (FalkorDB's `shortestPath`
   rejects undirected traversals). `central_nodes` ranks one label by `algo.pageRank(NULL, NULL)`

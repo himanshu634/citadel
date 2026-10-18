@@ -26,7 +26,8 @@ an error with FalkorDB's message: fix the query and try again, at most twice.
    one. Indexed: `uid` on every label, `Person.login`,
    `System.name`, `WorkItem.number`, `WorkItem.key`, `WorkItem.url`. A pattern without a label or
    an indexed property scans the whole graph.
-4. **Bound variable-length paths**: `[:BLOCKS*1..3]`, never `[*]`. Keep `LIMIT` on every query.
+4. **Bound variable-length paths**: `[:BLOCKS*1..3]`, never `[*]`. Every query needs a `LIMIT`
+   (the tool refuses one without), also a count: `RETURN count(n) AS n LIMIT 1`.
 5. **Pass values as parameters** (`$login`, `$since`) in `params`, not pasted into the text.
 6. **Read a node's kind** as `head([l IN labels(n) WHERE l <> 'Node'])`, never `labels(n)[0]`:
    every node also has the label `Node`, in any position.
@@ -36,7 +37,8 @@ an error with FalkorDB's message: fix the query and try again, at most twice.
    `$since = <now epoch> - 30*86400`, or `timestamp() / 1000 - 30*86400` in the query.
 9. Never return `embedding` (a vector of hundreds of numbers). The tool removes it anyway.
 10. Do not use `shortestPath` (FalkorDB refuses undirected ones): use `algo.SPpaths` below.
-    `LOAD CSV` is refused.
+    `LOAD CSV` is refused (so are the words `LOAD` and `CSV` together in the query text: put
+    such a literal in `params`).
 
 ## Nodes
 
@@ -102,6 +104,9 @@ A text can be cut into several chunks; `coalesce(c.idx, 0) = 0` keeps one per co
   RediSearch query: words joined by `|` match any (`'retry|idempotency'`).
 - Shortest paths: `CALL algo.SPpaths({sourceNode: a, targetNode: b, relDirection: 'both',
   maxLen: 4, pathCount: 3}) YIELD path`.
+These are for building a bigger query. When `related_work_items`, `related_documents`,
+`path_between` or `central_nodes` already answers, use that tool: it also leaves bots out.
+
 - PageRank over the whole graph: `CALL algo.pageRank(NULL, NULL) YIELD node, score`, then filter
   `WHERE node:System`. (Given a label, it follows only edges between nodes of that label.)
 - Graph contents: `CALL db.labels()`, `CALL db.relationshipTypes()`, `CALL db.propertyKeys()`.
@@ -146,7 +151,7 @@ Commits per kind on a system in the last 90 days:
 MATCH (c:Change)-[:TOUCHES]->(s:System {name: $system})
 WHERE c.ts >= timestamp() / 1000 - 90 * 86400
 RETURN s.uid AS system_uid, c.kind AS kind, count(c) AS commits
-ORDER BY commits DESC
+ORDER BY commits DESC LIMIT 20
 ```
 
 Everything one ticket blocks, up to three steps, with who is assigned:
@@ -164,5 +169,5 @@ Counts by kind of node (a quick look at what the graph holds):
 ```cypher
 MATCH (n:Node)
 RETURN head([l IN labels(n) WHERE l <> 'Node']) AS label, count(n) AS nodes
-ORDER BY nodes DESC
+ORDER BY nodes DESC LIMIT 20
 ```

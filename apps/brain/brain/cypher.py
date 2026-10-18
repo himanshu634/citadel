@@ -6,8 +6,10 @@ one place such text runs, with fixed guards around it:
 
 - read only: `db.run_cypher` sends GRAPH.RO_QUERY, so the server refuses any write;
 - one graph: the query can only see brain_<slug>, which `db` selects;
-- nothing outside the graph: `check` refuses LOAD CSV (a read query may fetch a URL or file);
-- bounded: a server-side timeout, and at most `limit` rows come back (`truncated` says so);
+- nothing outside the graph: `check` refuses LOAD CSV (a read query may fetch a URL or file),
+  also when a comment sits between the two words;
+- bounded: `check` wants a LIMIT (without one, FalkorDB sends every row before any cut), a
+  server-side timeout, and at most `limit` rows come back (`truncated` says so);
 - citable: nodes become dicts with `uid` and `label`, a column `w.uid` is renamed `w_uid`, and
   embedding vectors and long texts are cut, so the rows fit the agent's context and every node
   in them can be cited.
@@ -29,7 +31,9 @@ from brain import db
 TIMEOUT_MS = 5_000
 MAX_TEXT = 1_500  # a longer string value (a PR body, a chunk's text) is cut to this
 HIDDEN = frozenset({"embedding", "embedded_hash", "text_hash", "company"})
-_LOAD_CSV = re.compile(r"\bLOAD\s+CSV\b", re.IGNORECASE)
+_LOAD = re.compile(r"\bLOAD\b", re.IGNORECASE)
+_CSV = re.compile(r"\bCSV\b", re.IGNORECASE)
+_LIMIT = re.compile(r"\bLIMIT\b", re.IGNORECASE)
 
 
 class CypherError(ValueError):
@@ -65,8 +69,12 @@ def check(query: str) -> str:
     text = query.strip().rstrip(";").strip()
     if not text:
         raise CypherError("the query is empty")
-    if _LOAD_CSV.search(text):
+    # Both words anywhere, not "LOAD CSV" as written: `LOAD /* x */ CSV` runs too. A literal
+    # with these words can go in `params`.
+    if _LOAD.search(text) and _CSV.search(text):
         raise CypherError("LOAD CSV is not allowed: query only the graph")
+    if not _LIMIT.search(text):
+        raise CypherError("add a LIMIT to the query (at most 200 rows come back anyway)")
     return text
 
 
@@ -78,7 +86,7 @@ def run(slug: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         columns, raw = db.run_cypher(slug, text, p.params or None, TIMEOUT_MS)
     except Exception as e:
         raise CypherError(_reason(e)) from e
-    ids = _node_uids(raw)
+    ids = _node_uids(raw[: p.limit])
     names = _column_names(columns)
     rows = [
         {name: _value(v, ids) for name, v in zip(names, r, strict=True)} for r in raw[: p.limit]
