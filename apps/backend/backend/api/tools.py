@@ -5,6 +5,8 @@ wrappers over `brain.tools.TOOLS` and `tools.call`. The slug picks the graph; th
 tool's params and is validated by the tool's own model (bad values -> 422; unknown keys are
 dropped). A tool that needs embeddings it cannot use (off, nothing embedded yet, or embedded
 with another model) is a 503 with the reason. Both responses carry the slug they were built for.
+An agent-only tool (`run_cypher`, a query the caller writes) is neither listed nor run here: it
+is a 404, as an unknown tool.
 """
 
 from __future__ import annotations
@@ -12,7 +14,6 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from brain import db, tools
-from brain.cypher import CypherError
 from brain.embeddings import EmbeddingUnavailable
 from fastapi import APIRouter, Body, HTTPException
 from pydantic import ValidationError
@@ -23,6 +24,11 @@ from backend.api.models import ToolInfo, ToolList, ToolResult
 router = APIRouter(prefix="/companies/{slug}/tools", tags=["tools"])
 
 
+def http_tools() -> dict[str, tools.Tool]:
+    """The tools this API serves: every tool but the agent-only ones."""
+    return {name: t for name, t in tools.TOOLS.items() if not t.agent_only}
+
+
 @router.get("")
 def list_tools(slug: Slug) -> ToolList:
     return ToolList(
@@ -31,7 +37,7 @@ def list_tools(slug: Slug) -> ToolList:
             ToolInfo(
                 name=t.name, description=t.description, params_schema=t.params.model_json_schema()
             )
-            for t in tools.TOOLS.values()
+            for t in http_tools().values()
         ],
     )
 
@@ -40,7 +46,7 @@ def list_tools(slug: Slug) -> ToolList:
 def call_tool(
     slug: Slug, name: str, params: Annotated[dict[str, Any] | None, Body()] = None
 ) -> ToolResult:
-    tool = tools.TOOLS.get(name)
+    tool = http_tools().get(name)
     if tool is None:
         raise HTTPException(status_code=404, detail=f"No tool {name}")
     try:
@@ -53,8 +59,6 @@ def call_tool(
         rows = tools.call(slug, name, **validated.model_dump()) if db.graph_exists(slug) else []
     except EmbeddingUnavailable as exc:  # semantic search without usable vectors: say why
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except CypherError as exc:  # run_cypher: a refused or broken query is the caller's mistake
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return ToolResult(
         slug=slug, tool=name, rows=[r.model_dump(mode="json", by_alias=True) for r in rows]
     )

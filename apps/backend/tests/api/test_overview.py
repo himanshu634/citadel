@@ -58,7 +58,7 @@ def test_tool_list_and_call(api_client_with, synthetic_graph):
     client = api_client_with(synthetic_graph)
     listed = client.get(f"/api/companies/{synthetic_graph}/tools").json()
     assert listed["slug"] == synthetic_graph
-    assert {t["name"] for t in listed["tools"]} == set(tools.TOOLS)
+    assert {t["name"] for t in listed["tools"]} == set(tools.TOOLS) - {"run_cypher"}
     recent = next(t for t in listed["tools"] if t["name"] == "recent_work_items")
     assert recent["description"] and recent["params_schema"]["properties"]["limit"]
 
@@ -102,6 +102,19 @@ def test_unknown_tool_is_404_and_bad_params_are_422(api_client_with, monkeypatch
     assert bad.status_code == 422
     bad = client.post("/api/companies/acme/tools/recent_work_items", json={"limit": 0})
     assert bad.status_code == 422
+
+
+def test_agent_only_tools_are_not_served(api_client_with, monkeypatch):
+    """run_cypher runs a query the caller writes: Ask may use it, the HTTP API may not."""
+    client = api_client_with("acme")
+    ran: list[str] = []
+    monkeypatch.setattr(db, "graph_exists", lambda slug: True)
+    monkeypatch.setattr(db, "run_cypher", lambda slug, text, *a: ran.append(text) or ([], []))
+    r = client.post(
+        "/api/companies/acme/tools/run_cypher", json={"query": "MATCH (n) RETURN n LIMIT 1"}
+    )
+    assert r.status_code == 404 and ran == []
+    assert tools.TOOLS["run_cypher"].agent_only
 
 
 @pytest.mark.parametrize("error", [RedisConnectionError, RedisTimeoutError])

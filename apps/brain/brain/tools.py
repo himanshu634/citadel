@@ -576,6 +576,8 @@ class Tool:
     on_empty: Callable[[str, dict[str, Any]], None] | None = None
     # runs the tool instead of its named query file: (slug, query params) -> rows
     run: Callable[[str, dict[str, Any]], list[dict[str, Any]]] | None = None
+    # only agents (and the CLI) may call it; the HTTP API neither lists nor runs it
+    agent_only: bool = False
 
     @property
     def query(self) -> str:
@@ -736,6 +738,7 @@ TOOLS: dict[str, Tool] = {
             cypher.CypherParams,
             cypher.CypherResult,
             run=cypher.run,
+            agent_only=True,
         ),
         Tool("graph_stats", "Node and relationship counts in the company graph.", NoParams, Stat),
         Tool(

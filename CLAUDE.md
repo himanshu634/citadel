@@ -170,7 +170,8 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   `db.run_cypher` with a 5 s timeout; LOAD CSV (the two words anywhere) and a query with no LIMIT
   are refused, rows are cut to `limit` (`truncated`),
   nodes become `{label, uid, ...}` without `embedding`, a column `w.uid` becomes `w_uid` so it is
-  citable. How to write one is `agents/skills/cypher/SKILL.md` (below). `path_between` uses `algo.SPpaths` (FalkorDB's `shortestPath`
+  citable. It is `agent_only`: the HTTP tool route neither lists nor runs it (404), so only Ask
+  (and the `brain query` CLI) can. How to write one is `agents/skills/cypher/SKILL.md` (below). `path_between` uses `algo.SPpaths` (FalkorDB's `shortestPath`
   rejects undirected traversals). `central_nodes` ranks one label by `algo.pageRank(NULL, NULL)`
   (whole graph; `algo.pageRank` follows only edges whose both ends have the label it is given,
   so a System-only run is flat). `bottlenecks` sums 8 seeded runs of `algo.betweenness` over
