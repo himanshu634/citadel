@@ -1,7 +1,8 @@
 <!--
 @component
 Primary navigation. The current page is the solid ultramarine block: the one loud element in
-the shell. Sections that are not built yet stay visible but inert, marked "Soon". `folded` shows
+the shell. "Review claims" carries the count of Keeper claims waiting for a lead, on a soft
+warning tint (the count sits on the icon when folded). Sections that are not built yet stay visible but inert, marked "Soon". `folded` shows
 the icons only (`--sidebar-folded` wide), each named by a tooltip. Open and folded are one markup:
 AppShell animates the slot's width, the labels fade (out at once, in once there is room) and are
 clipped, and no icon or row moves. Each link carries its name in `aria-label`, so a folded item
@@ -14,6 +15,7 @@ keeps it. `--fold-motion` (1, or 0 from AppShell before its first paint) turns t
 		BookOpen,
 		Boxes,
 		LayoutDashboard,
+		ListChecks,
 		MessageSquareText,
 		Network,
 		Palette,
@@ -21,17 +23,23 @@ keeps it. `--fold-motion` (1, or 0 from AppShell before its first paint) turns t
 	} from '@lucide/svelte';
 	import type { Component } from 'svelte';
 	import { getCompanies } from '$lib/companies.svelte';
+	import { getPendingClaims } from '$lib/pendingClaims.svelte';
 	import Tooltip from '../ui/Tooltip.svelte';
 
 	type Props = { onnavigate?: () => void; folded?: boolean };
 	let { onnavigate, folded = false }: Props = $props();
 
 	const companies = getCompanies();
+	const pending = getPendingClaims();
 	const slug = $derived(companies.current);
 	const company = $derived(companies.currentCompany);
+	const waiting = $derived(slug === null ? null : pending.count(slug));
 
-	/** `path` is relative to `/c/<slug>/`; an item without one is not built yet and stays inert. */
-	type Item = { label: string; path?: string; href?: '/components'; icon: Component };
+	/**
+	 * `path` is relative to `/c/<slug>/`; an item without one is not built yet and stays inert.
+	 * `count` is what waits for the user there (claims for a lead): a badge, and a tint while above 0.
+	 */
+	type Item = { label: string; path?: string; href?: '/components'; icon: Component; count?: number | null };
 	type Group = { heading: string; items: Item[] };
 
 	const brain: Group = {
@@ -44,6 +52,10 @@ keeps it. `--fold-motion` (1, or 0 from AppShell before its first paint) turns t
 			{ label: 'Sources', path: 'sources', icon: BookOpen }
 		]
 	};
+	const keeper: Group = $derived({
+		heading: 'Keeper',
+		items: [{ label: 'Review claims', path: 'review', icon: ListChecks, count: waiting }]
+	});
 	const manage: Group = {
 		heading: 'Company',
 		items: [{ label: 'Settings', path: 'settings', icon: Settings }]
@@ -53,7 +65,9 @@ keeps it. `--fold-motion` (1, or 0 from AppShell before its first paint) turns t
 		items: [{ label: 'Components', href: '/components', icon: Palette }]
 	};
 	// The company groups only make sense inside a company; elsewhere the sidebar keeps Build.
-	const groups = $derived(slug === null ? [build] : [brain, manage, build]);
+	const groups = $derived(slug === null ? [build] : [brain, keeper, manage, build]);
+	/** The item's name with what waits there ("Review claims, 5 waiting"), for its tooltip and screen readers. */
+	const named = (item: Item) => (item.count ? `${item.label}, ${item.count} waiting` : item.label);
 
 	// Paths are this app's own routes; the cast to '/' only satisfies `resolve`'s route typing.
 	const trim = (path: string) => path.replace(/\/+$/, '');
@@ -82,18 +96,19 @@ keeps it. `--fold-motion` (1, or 0 from AppShell before its first paint) turns t
 					{@const active = path !== undefined && trim(resolve(path as '/')) === trim(page.url.pathname)}
 					<li>
 						{#if path !== undefined}
-							<Tooltip text={item.label} side="right" disabled={!folded}>
+							<Tooltip text={named(item)} side="right" disabled={!folded}>
 								{#snippet trigger(props)}
 									<a
 										{...props}
 										href={resolve(path as '/')}
-										class={['item', { active }]}
+										class={['item', { active, waiting: !!item.count }]}
 										aria-current={active ? 'page' : undefined}
-										aria-label={item.label}
+										aria-label={named(item)}
 										onclick={onnavigate}
 									>
 										<item.icon aria-hidden="true" />
 										<span class="label">{item.label}</span>
+										{#if item.count}<span class="count tabular" aria-hidden="true">{item.count}</span>{/if}
 									</a>
 								{/snippet}
 							</Tooltip>
@@ -215,6 +230,7 @@ keeps it. `--fold-motion` (1, or 0 from AppShell before its first paint) turns t
 		list-style: none;
 	}
 	.item {
+		position: relative;
 		display: flex;
 		align-items: center;
 		gap: var(--space-3);
@@ -260,6 +276,36 @@ keeps it. `--fold-motion` (1, or 0 from AppShell before its first paint) turns t
 	}
 	a.item.active:hover :global(svg) {
 		transform: none;
+	}
+	/* Something waits for the user there: the soft warning tint and a count, never the accent. */
+	.item.waiting:not(.active) {
+		background: var(--color-warning-soft);
+	}
+	.count {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: var(--rail-badge);
+		height: var(--rail-badge);
+		padding-inline: var(--space-1);
+		box-sizing: border-box;
+		border-radius: var(--radius-full);
+		background: var(--color-warning);
+		color: var(--color-surface);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-bold);
+	}
+	.item.active .count {
+		background: var(--color-on-accent);
+		color: var(--color-accent);
+	}
+	/* Folded, the count sits on the icon's corner. */
+	.folded .count {
+		position: absolute;
+		top: 0;
+		left: calc(var(--space-3) + var(--space-2));
+		min-width: var(--space-4);
+		height: var(--space-4);
 	}
 	.soon {
 		color: var(--color-text-faint);

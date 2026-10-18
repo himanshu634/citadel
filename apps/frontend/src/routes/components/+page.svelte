@@ -439,6 +439,7 @@
 	const keeperTrail = trailOf(keeper.keeperRun, drawnUid);
 	// The approval card's live sample: any name approves after a short wait.
 	let approverName = $state('');
+	let approverError = $state<string | null>(null);
 	const approveLater = () => new Promise<null>((done) => setTimeout(() => done(null), 900));
 	const neverDecides = () => new Promise<null>(() => {});
 	let mapSelected = $state<string | null>('person:alice');
@@ -1307,57 +1308,71 @@
 
 	<Card title="Claim approval" id="claim-approval">
 		<p class="note">
-			A Keeper claim waiting for a lead, in the Systems page's rail: why it needs one in words, the
-			gap it answers, its evidence, then a typed name (no sign-in), an optional reason, and Approve or
-			Reject. Type a name and press Approve; an empty name says what is missing.
+			A Keeper claim waiting for a lead, as the review page's detail pane shows it: its kind and
+			subject, the statement, why it needs a lead (one row per reason), the gap it answers, its
+			evidence, then an optional reason with Reject and Approve. The name is typed once in the
+			page's header; with none, the page says so under that field. Type a name and press Approve.
 		</p>
-		<div class="runs">
+		<div class="claim-name">
+			<Input label="Deciding as" placeholder="Your name" bind:value={approverName} error={approverError ?? undefined} oninput={() => (approverError = null)} />
+		</div>
+		<div class="claims">
 			<div>
 				<h3 class="sub">Waiting (try it)</h3>
-				<ClaimApproval
-					claim={keeper.pendingClaim}
-					gapText={keeper.gapTexts.get('gap:refunds')}
-					evidence={keeper.pendingEvidence}
-					bind:name={approverName}
-					ondecide={approveLater}
-				/>
+				<div class="claim-box">
+					<ClaimApproval
+						claim={keeper.pendingClaim}
+						gapText={keeper.gapTexts.get('gap:refunds')}
+						evidence={keeper.pendingEvidence}
+						name={approverName}
+						onnameerror={(m) => (approverError = m)}
+						ondecide={approveLater}
+					/>
+				</div>
 			</div>
 			<div>
 				<h3 class="sub">Sending the approval</h3>
-				<ClaimApproval claim={keeper.pendingClaim} evidence={keeper.pendingEvidence} name="Dana Lee" busy="approve" ondecide={neverDecides} />
+				<div class="claim-box"><ClaimApproval claim={keeper.pendingClaim} evidence={keeper.pendingEvidence} name="Dana Lee" busy="approve" ondecide={neverDecides} /></div>
 			</div>
 			<div>
 				<h3 class="sub">Someone decided first (409)</h3>
-				<ClaimApproval
-					claim={keeper.pendingClaim}
-					evidence={keeper.pendingEvidence}
-					name="Dana Lee"
-					failure={{ message: 'Someone already decided this claim. The list now shows where it stands.', gone: true }}
-					ondecide={approveLater}
-				/>
+				<div class="claim-box">
+					<ClaimApproval
+						claim={keeper.pendingClaim}
+						evidence={keeper.pendingEvidence}
+						name="Dana Lee"
+						failure={{ message: 'Someone already decided this claim. The list now shows where it stands.', gone: true }}
+						ondecide={approveLater}
+					/>
+				</div>
 			</div>
 			<div>
 				<h3 class="sub">Brain unavailable (503)</h3>
-				<ClaimApproval
-					claim={keeper.pendingClaim}
-					evidence={keeper.pendingEvidence}
-					name="Dana Lee"
-					failure={{ message: 'The brain of synthetic is not there (brain_synthetic is missing). Build the company, then approve again.' }}
-					ondecide={approveLater}
-				/>
+				<div class="claim-box">
+					<ClaimApproval
+						claim={keeper.pendingClaim}
+						evidence={keeper.pendingEvidence}
+						name="Dana Lee"
+						failure={{ message: 'The brain of synthetic is not there (brain_synthetic is missing). Build the company, then approve again.' }}
+						ondecide={approveLater}
+					/>
+				</div>
 			</div>
 			<div>
-				<h3 class="sub">Name refused (422)</h3>
-				<ClaimApproval
-					claim={keeper.pendingClaim}
-					evidence={keeper.pendingEvidence}
-					failure={{ field: 'by', message: 'Type your name, up to 80 characters.' }}
-					ondecide={approveLater}
-				/>
+				<h3 class="sub">Reason refused (422)</h3>
+				<div class="claim-box">
+					<ClaimApproval
+						claim={keeper.pendingClaim}
+						evidence={keeper.pendingEvidence}
+						name="Dana Lee"
+						failure={{ field: 'why', message: 'Keep the reason to 500 characters.' }}
+						ondecide={approveLater}
+					/>
+				</div>
 			</div>
 			<div>
 				<h3 class="sub">Every reason, no evidence, long text</h3>
-				<ClaimApproval claim={keeper.longClaim} gapText="Why do invoice emails go out from a queue now and not from checkout?" evidence={[]} ondecide={approveLater} />
+				<div class="claim-box"><ClaimApproval claim={keeper.longClaim} gapText="Why do invoice emails go out from a queue now and not from checkout?" evidence={[]} name="Dana Lee" ondecide={approveLater} /></div>
 			</div>
 		</div>
 	</Card>
@@ -1451,6 +1466,21 @@
 	}
 	.map-sample.short {
 		height: 18rem;
+	}
+	.claim-name {
+		max-width: 16rem;
+		margin-bottom: var(--space-4);
+	}
+	.claims {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 34rem), 1fr));
+		gap: var(--space-6);
+	}
+	.claim-box {
+		height: 34rem;
+		overflow: hidden;
+		border: var(--border-hair) solid var(--color-line);
+		border-radius: var(--radius-md);
 	}
 	.runs {
 		display: grid;

@@ -323,11 +323,12 @@ demo's agents are `brain`, `keeper`, `pm` and `qa`. Pieces:
   review the ledger shows `running` that this process is not running is gone: `recover` stops
   every one at startup and a start stops any left over first (`ledger/review_stop_running`,
   stop `restart`); there is no heartbeat. There is no Keeper CLI: the app and the API are its
-  only surfaces. No Keeper page: reviews show on the
-  Systems page's activity trail (`GET .../activity`), its controls in that page's rail.
-- Frontend: Review now in the Systems page's bar; in its rail the claims waiting for a lead
-  (`ClaimApproval`: typed name, optional why) and the log (`KeeperLog`), read again when a Keeper
-  run starts, steps or ends. Words for reasons, log actions, errors in `src/lib/keeper.ts`; Ask
+  only surfaces. Reviews show on the Systems page's activity trail (`GET .../activity`).
+- Frontend: Review now in the Systems page's bar and the log (`KeeperLog`) in its rail, read
+  again when a Keeper run starts, steps or ends. Claims waiting for a lead are decided on
+  `/c/<slug>/review` (list + detail, `ClaimApproval`: name typed once in the header, optional
+  why; the open claim in `?claim=`), opened from the sidebar's "Review claims", whose count comes
+  from `src/lib/pendingClaims.svelte.ts`. Words for reasons, log actions, errors in `src/lib/keeper.ts`; Ask
   marks a cited `Claim` source "Keeper" (`WalkAnswer`).
 
 ### Agent roles (`agents/roles`, `agents/work`, `agents/policies`)
