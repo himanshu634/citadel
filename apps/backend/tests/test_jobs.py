@@ -779,3 +779,30 @@ def test_real_pipeline_reaches_the_planned_step_count(two_source_company, tmp_pa
     stamped = steps_of(snap)
     assert stamped == sorted(stamped)
     assert snap.events[-2].step == snap.steps == snap.step  # the last stage before `done`
+
+
+@needs_graph
+def test_prepare_fails_the_build_when_the_vector_index_dimension_differs(tmp_path, monkeypatch):
+    """brain_<slug> keeps a vector index of another size (an earlier EMBEDDING_DIM). FalkorDB
+    accepts vectors of the wrong size and never indexes them, so semantic search would find
+    nothing while the build looks fine: the build fails on prepare and says what to do."""
+    from brain import queries
+    from brain.config import get_settings
+    from brain.testing import write_company
+
+    slug = "test_schema_dim"
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    write_company(synthetic_company(slug))
+    db.delete_graph(slug)
+    other = get_settings().embedding_dim + 1
+    stmt = queries.get("schema/vector_index").statements()[0]
+    db.run_text(slug, stmt.replace("{{EMBEDDING_DIM}}", str(other)))
+    try:
+        runner = JobRunner(steps=PipelineSteps(), jobs_dir=tmp_path)
+        runner.start(slug)
+        snap = wait_done(runner, slug, timeout=60)
+        assert snap.state == "failed" and "EMBEDDING_DIM" in snap.error
+        assert pairs(snap, 2) == [("prepare", "running", None), ("prepare", "failed", None)]
+        assert "Drop the index" in snap.events[-1].message
+    finally:
+        db.delete_graph(slug)
