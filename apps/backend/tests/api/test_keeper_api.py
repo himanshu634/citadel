@@ -254,14 +254,19 @@ def test_a_pending_build_review_is_dropped_when_another_build_runs(keeper, ledge
     assert len(ledger.reviews) == 1
 
 
+firsts: list[list[str]] = []  # each patched run's pick_first, in run order
+
+
 def reopening(monkeypatch, reopened: list[str]) -> list[tuple[str, int]]:
     """Patch the review keeper_runs runs: the first run says its Archivist runs reopened
-    `reopened`; every run is recorded as (trigger, budget)."""
+    `reopened`; every run is recorded as (trigger, budget), its pick_first in `firsts`."""
+    firsts.clear()
     calls: list[tuple[str, int]] = []
     real = keeper_runs.review
 
     def fake(store, slug, *, budget, trigger, **kw):
         calls.append((trigger, budget))
+        firsts.append(list(kw.get("pick_first", [])))
         r = real(store, slug, budget=budget, trigger=trigger, **kw)
         return r.model_copy(update={"archive_reopened": reopened if len(calls) == 1 else []})
 
@@ -279,6 +284,7 @@ def test_follow_on_review_queued(keeper, ledger, brain, company, monkeypatch):
     assert keeper.wait(SLUG, 5)
     time.sleep(0.05)
     assert calls == [("manual", 5), ("archive", 2)]  # the follow-on reopened nothing: no third
+    assert firsts == [[], ["gap:a", "gap:b"]]  # it picks the reopened gaps first
 
 
 def test_a_stopped_review_queues_no_follow_on(keeper, ledger, brain, company, monkeypatch):
@@ -308,6 +314,7 @@ def test_a_follow_on_and_a_pending_build_review_run_as_one(keeper, ledger, brain
     assert keeper.wait(SLUG, 5)
     time.sleep(0.05)
     assert calls == [("manual", 5), ("build", 4)]
+    assert firsts[1] == ["gap:a", "gap:b", "gap:c", "gap:d"]
 
 
 def test_while_the_brain_builds_reviews_and_decisions_are_refused(

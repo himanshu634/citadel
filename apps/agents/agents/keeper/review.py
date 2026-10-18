@@ -48,7 +48,8 @@ and the brain uids it touched; each job then adds one `submit` step, `failed` wh
 nothing. The pick records the picked gaps and the first one's text on the Review
 (`ledger/review_picked`). Step writes are best effort: a ledger hiccup never changes a job.
 
-A run also puts back to `open` the Keeper's archive requests an earlier run left `running`.
+A run also puts back to `open` the Keeper's archive requests an earlier run left `running`, and
+settles the gaps an earlier run left `waiting_archive` after their request ended.
 Whatever the end, the gaps this run moved to in_review and left undecided (still in_review, no
 claim waiting for a lead) go back to `open` without using an attempt, so the next review can
 pick them; a run first does the same for gaps an earlier run left behind (a killed process).
@@ -60,7 +61,7 @@ LogEntry `review_<state>`.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Literal, Protocol
 
@@ -138,10 +139,13 @@ def review(
     should_stop: Callable[[], bool] = lambda: False,
     now: Callable[[], str] = utc_now,
     uid: str | None = None,
+    pick_first: Sequence[str] = (),
 ) -> Review:
     """Run one review (see the module doc). Returns the review as it ended, or the running one
     when a review is already running. `brain` defaults to `decide.DEFAULT_BRAIN`, read now.
-    `uid` (default: a new one) lets the caller know the review before it starts."""
+    `uid` (default: a new one) lets the caller know the review before it starts. `pick_first`:
+    gaps the pick takes ahead of `pick_order` while they are open (a follow-on review's, the
+    gaps the previous review's Archivist runs reopened)."""
     uid, started = uid or review_uid(), now()
     start = {"uid": uid, "trigger": trigger, "budget": budget, "now": started}
     if not store.write("ledger/review_start", DB_USER, start):
@@ -155,7 +159,7 @@ def review(
     try:
         try:
             run = _Run(store, slug, brain or decide.DEFAULT_BRAIN, client_for, graph_run,
-                       on_event, should_stop, now, uid)  # fmt: skip
+                       on_event, should_stop, now, uid, tuple(pick_first))  # fmt: skip
             log(store, started, "keeper", "review_start", why=f"{uid}: {trigger}, budget {budget}")
             on_event(ReviewEvent("start", message=f"Review started ({trigger}, budget {budget})."))
             run.steps(budget)
@@ -237,6 +241,10 @@ def skip_review(
                   started_at=started, ended_at=ended, stop=stop)  # fmt: skip
 
 
+def _refused_building(request: ArchiveRequest) -> bool:
+    return request.status == "refused" and request.reason == ARCHIVE_BUILDING
+
+
 @dataclass
 class _Run:
     store: WorkStore
@@ -248,6 +256,7 @@ class _Run:
     should_stop: Callable[[], bool]
     now: Callable[[], str]
     uid: str  # the Review's
+    pick_first: tuple[str, ...] = ()  # gaps the pick takes first while open (`review`)
 
     def __post_init__(self) -> None:
         # `subgraph` is looked up on each call, so this module's name is the one in use
@@ -267,6 +276,7 @@ class _Run:
     def steps(self, budget: int) -> None:
         self.release_orphans()
         self.release_archive_orphans()
+        self.settle_waiting()
         if not self.brain.graph_exists(self.slug):
             raise BrainUnavailable(self.slug)
         counts = reproject(self.store, self.slug, brain=self.brain, now=self.now())
@@ -286,8 +296,12 @@ class _Run:
 
     def pick(self, budget: int) -> None:
         rows = self.store.read("ledger/gaps", {"statuses": ["open"], "limit": GAP_LIMIT})
+        ordered = pick_order([Gap(**r) for r in rows])
+        by_uid = {g.uid: g for g in ordered}
+        first = [by_uid[u] for u in dict.fromkeys(self.pick_first) if u in by_uid]
+        ordered = first + [g for g in ordered if g.uid not in set(self.pick_first)]
         texts: list[str] = []
-        for gap in pick_order([Gap(**r) for r in rows])[:budget]:
+        for gap in ordered[:budget]:
             moved = _set_gap(self.store, self.now(), gap.uid, ["open"], "in_review", "picked")
             if moved:
                 self.picked[gap.uid] = (gap.attempts, gap.archive_asked)
@@ -329,10 +343,11 @@ class _Run:
             if subject.uid in self.picked:
                 self.run("keeper", "decide", subject, gap=subject.uid)
 
-    def archive(self) -> list[str]:
+    def archive(self) -> None:
         """The Archivist on the open requests the Keeper asked (Ask's are never touched), oldest
-        first, at most `archivist_per_review`, then each request's gap settled (`settle`).
-        Returns the gaps that went back to open. Stops between requests like between jobs."""
+        first, at most `archivist_per_review`, then each request's gap settled (`settle`; the
+        gaps that went back to open join `reopened`). Stops between requests like between
+        jobs."""
         rows = self.store.read("ledger/archive_queue", {"limit": ARCHIVE_QUEUE_LIMIT})
         mine = [ArchiveRequest(**r) for r in rows if r["asked_by"] == "keeper"]
         for request in mine[: get_settings().archivist_per_review]:
@@ -340,7 +355,8 @@ class _Run:
                 raise _Stop(REQUESTED)
             if not self.brain.graph_exists(self.slug):
                 raise BrainUnavailable(self.slug)
-            self.event("archivist", gap=request.gap, message=f"archivist on {request.uid}")
+            self.event("archivist", gap=request.gap,
+                       message=f"Asked the Archivist about {request.text}.")  # fmt: skip
             done = answer_request(
                 self.store,
                 self.slug,
@@ -350,13 +366,11 @@ class _Run:
                 graph_run=self.graph_run,  # its steps go under the request's uid, not here
                 building=lambda slug: not self.brain.graph_exists(slug),
             )
-            if done.status == "refused" and done.reason == ARCHIVE_BUILDING:
+            if _refused_building(done):
                 # the brain went between the check above and the run: the next review runs it
-                back = {"uid": done.uid, "from": ["refused"], "to": "open", "now": self.now()}
-                self.store.write("ledger/archive_set_request", DB_USER, back)
+                self.requeue(done)
                 raise BrainUnavailable(self.slug)
             self.settle(done)
-        return list(self.reopened)
 
     def settle(self, done: ArchiveRequest) -> None:
         """The gap of an ended request leaves `waiting_archive`: `found` / `already_in_brain` ->
@@ -375,12 +389,46 @@ class _Run:
             log(self.store, now, "keeper", "archive_returned", gap=gap,
                 why=f"{done.uid}: {done.outcome}: {done.summary}",
                 evidence=[f["uid"] for f in finds])  # fmt: skip
-            self.event("archivist", gap=gap, message=f"{done.outcome}: the gap is open again")
+            said = ("found older history" if done.outcome == "found"
+                    else "says it is in the brain already")  # fmt: skip
+            self.event(
+                "archivist", gap=gap, message=f"The Archivist {said}, so the gap is open again."
+            )
             return
         reason = ": ".join(x for x in (done.outcome, done.reason) if x) or done.status
         if _set_gap(self.store, now, gap, ["waiting_archive"], "needs_person", reason):
             log(self.store, now, "keeper", "needs_person", gap=gap, why=f"{done.uid}: {reason}")
-            self.event("archivist", gap=gap, message=f"{reason}: the gap needs a person")
+            if done.status == "answered":
+                said = "found nothing" if done.reason is None else f"found nothing ({done.reason})"
+            else:
+                said = f"{done.status} ({done.reason or 'no reason given'})"
+            self.event("archivist", gap=gap,
+                       message=f"The Archivist {said}, so the gap needs a person.")  # fmt: skip
+
+    def settle_waiting(self) -> None:
+        """Gaps an earlier review left `waiting_archive` although their request ended (a killed
+        process between the Archivist's run and `settle`) are settled now, by the same rules.
+        One read when no gap waits; a gap whose request is still open or running keeps
+        waiting (this run's archive step, or a later one, runs it)."""
+        waiting = {"statuses": ["waiting_archive"], "limit": GAP_LIMIT}
+        for g in self.store.read("ledger/gaps", waiting):
+            rows = self.store.read("ledger/archive_requests_for_gap", {"gap": g["uid"]})
+            if not rows:
+                continue
+            request = ArchiveRequest(**rows[0])  # newest first: the one it waits for
+            if _refused_building(request):
+                self.requeue(request)  # put back before a killed run could: it runs again
+            else:
+                self.settle(request)
+
+    def requeue(self, request: ArchiveRequest) -> None:
+        """A request the Archivist refused because the brain was being rebuilt goes back to
+        `open` for a later review (its gap keeps waiting), logged `archive_released`."""
+        now = self.now()
+        back = {"uid": request.uid, "from": ["refused"], "to": "open", "now": now}
+        if self.store.write("ledger/archive_set_request", DB_USER, back):
+            why = f"{request.uid}: the brain was being rebuilt; back to open to run later"
+            log(self.store, now, "keeper", "archive_released", gap=request.gap, why=why)
 
     def follow_up(self) -> None:
         """pm's follow-up job once per claim in its queue. A run that opens no task is recorded

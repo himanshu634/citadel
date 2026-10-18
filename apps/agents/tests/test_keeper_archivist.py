@@ -20,7 +20,7 @@ from agents.keeper import decide as keeper_decide
 from agents.keeper import review as review_module
 from agents.keeper.decide import apply_decision
 from agents.keeper.model import ArchiveRequest, Gap, archive_uid, gap_uid
-from agents.keeper.review import review
+from agents.keeper.review import ReviewEvent, review
 from agents.keeper.store import MemoryKeeperStore
 from agents.policies import POLICIES, Results, ScriptedClient, offline_client
 from agents.policies import keeper as keeper_policy
@@ -236,7 +236,11 @@ def test_review_asks_and_runs_the_archivist_in_the_same_review(answer):
     (tier keeper, the archivist's client, the review's graph tools) after its decide step."""
     store = MemoryKeeperStore(SLUG)
     gap = seed_gap(store)
-    r = run_review(store)
+    events: list[ReviewEvent] = []
+    r = run_review(store, on_event=events.append)
+    said = [e.message for e in events if e.step == "archivist"]
+    assert said == ["Asked the Archivist about old pricing model.",
+                    "The Archivist found older history, so the gap is open again."]  # fmt: skip
     [req] = requests(store, gap)
     [call] = answer.calls
     assert (call["uid"], call["tier"], call["graph_run"]) == (req.uid, "keeper", fake_brain)
@@ -266,7 +270,13 @@ def test_nothing_found_needs_person(monkeypatch, status, outcome, reason, why):
     monkeypatch.setattr(review_module, "answer_request", FakeAnswer(status, outcome, reason))
     store = MemoryKeeperStore(SLUG)
     gap, req = waiting_gap(store)
-    r = run_review(store, budget=1)
+    events: list[ReviewEvent] = []
+    r = run_review(store, budget=1, on_event=events.append)
+    said = [e.message for e in events if e.step == "archivist"]
+    assert said[0] == "Asked the Archivist about old pricing model."
+    assert said[-1].endswith(", so the gap needs a person.") and said[-1][0].isupper()
+    if (status, reason) == ("answered", None):
+        assert said[-1] == "The Archivist found nothing, so the gap needs a person."
     g = get_gap(store, gap)
     assert (g.status, g.reason, g.attempts) == ("needs_person", why, 0)
     assert r.archive_reopened == []
@@ -305,6 +315,86 @@ def test_archive_runs_keeper_requests_oldest_first_up_to_the_cap(answer, two_per
     second = run_review(store, budget=1)  # it also picks an open gap, which asks anew
     assert answer.calls[2]["uid"] == requests(store, gaps[0])[0].uid  # the leftover goes first
     assert second.archive_reopened[0] == gaps[0]
+
+
+@pytest.fixture
+def one_per_review(monkeypatch):
+    monkeypatch.setenv("ARCHIVIST_PER_REVIEW", "1")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+def test_a_cap_of_one_runs_one_request_per_review(answer, one_per_review):
+    """archivist_per_review 1: one request per review, oldest first; the rest wait their turn."""
+    store = MemoryKeeperStore(SLUG)
+    gaps = []
+    for i, when in enumerate(["2026-10-17T09:03:00Z", "2026-10-17T09:01:00Z",
+                              "2026-10-17T09:02:00Z"]):  # fmt: skip
+        gap = seed_gap(store, f"old question {i}", status="waiting_archive")
+        store.write("ledger/gap_archive_asked", KEEPER, {"uid": gap})
+        open_request(store, gap=gap, text=f"old topic {i}", now=when)
+        gaps.append(gap)
+
+    first = run_review(store, budget=1)
+    assert [c["uid"] for c in answer.calls] == [requests(store, gaps[1])[0].uid]
+    assert first.archive_reopened == [gaps[1]]
+    assert [get_gap(store, g).status for g in (gaps[0], gaps[2])] == ["waiting_archive"] * 2
+
+    second = run_review(store, budget=1)  # picks gaps[1] again: asked already -> needs_person
+    assert [c["uid"] for c in answer.calls[1:]] == [requests(store, gaps[2])[0].uid]
+    assert second.archive_reopened == [gaps[2]]
+    assert get_gap(store, gaps[0]).status == "waiting_archive"
+
+
+def test_a_gap_left_waiting_after_its_request_ended_is_settled():
+    """A review killed between the Archivist's run and `settle`: the request ended but its gap
+    still waits. The next review settles it first, by the same rules (no Archivist run)."""
+    store = MemoryKeeperStore(SLUG)
+    found, found_req = waiting_gap(store, "old one?", "old one")
+    failed, failed_req = waiting_gap(store, "old two?", "old two")
+    live, _ = waiting_gap(store, "old three?", "old three")
+    for uid, fake in ((found_req, FakeAnswer()), (failed_req, FakeAnswer("failed", None, "x"))):
+        [row] = store.read("ledger/archive_get_request", {"uid": uid})
+        fake(store, SLUG, ArchiveRequest(**row), client=None, tier="keeper")
+    r = run_review(store, budget=0)  # budget 0: no Archivist runs, yet the gaps settle
+    assert get_gap(store, found).status == "open"
+    assert (get_gap(store, failed).status, get_gap(store, failed).reason) == ("needs_person", "x")
+    assert get_gap(store, live).status == "waiting_archive"  # its request is still open
+    assert r.archive_reopened == [found]
+    assert "archive_returned" in actions(store, found)
+
+
+class CountingStore(MemoryKeeperStore):
+    def __init__(self, slug: str) -> None:
+        super().__init__(slug)
+        self.reads: list[tuple[str, Any]] = []
+
+    def read(self, name, params=None, *, db_user=None):
+        self.reads.append((name, (params or {}).get("statuses")))
+        return super().read(name, params, db_user=db_user)
+
+
+def test_nothing_waiting_costs_one_read():
+    store = CountingStore(SLUG)
+    run_review(store, budget=0)
+    assert store.reads.count(("ledger/gaps", ["waiting_archive"])) == 1
+    assert not [n for n, _ in store.reads if n == "ledger/archive_requests_for_gap"]
+
+
+def test_a_follow_on_review_picks_the_reopened_gaps_first():
+    """pick_order would take the most-seen gap; the follow-on takes the gaps the Archivist
+    reopened first (only those still open)."""
+    store = MemoryKeeperStore(SLUG)
+    busy = seed_gap(store, "What caused the rotation race?")
+    for _ in range(3):
+        seed_gap(store, "What caused the rotation race?")  # count 4
+    reopened = seed_gap(store, "Who decided the old auth design?")
+    gone = seed_gap(store, "Who decided the old pricing?", status="needs_person")
+    r = run_review(store, budget=1, trigger="archive", pick_first=[gone, reopened])
+    assert store.reviews[-1].gaps == [reopened]
+    assert get_gap(store, busy).status == "open"
+    assert r.trigger == "archive"
 
 
 def test_budget_zero_runs_no_archivist(answer):
@@ -366,6 +456,8 @@ def test_a_building_refusal_puts_the_request_back(monkeypatch):
     assert (r.state, r.stop) == ("stopped", "brain_unavailable")
     assert get_gap(store, gap).status == "waiting_archive"
     assert store.read("ledger/archive_get_request", {"uid": req})[0]["status"] == "open"
+    [back] = [e for e in store.log if e.action == "archive_released"]
+    assert back.gap == gap and req in back.why and "back to open" in back.why
 
 
 def test_a_request_left_running_is_run_again(answer):
