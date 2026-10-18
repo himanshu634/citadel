@@ -197,6 +197,9 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
 - The answer comes through the `submit_answer` tool (forced `tool_choice` is a 400 on current
   models). It may cite only uids seen in tool results; anything else is sent back as an error.
   A plain-text reply gets one nudge to call it (`loop.MAX_NUDGES = 1`), then the turn ends.
+  A tail Haiku writes into the answer text (`</answer>` + `<parameter name="sources">...`) is
+  cut from the accepted answer (`loop.cut_leak`, a copy; the replayed tool_use keeps it), and a
+  leaked sources/path list fills that field only when it is empty.
 - Step limits (LangGraph `recursion_limit`; each tool round trip is two steps): 40 per Ask
   question (`ask.RECURSION_LIMIT`), 30 per role job (`runner.RECURSION_LIMIT`). Hitting one
   ends the run with stop `step_limit`.
