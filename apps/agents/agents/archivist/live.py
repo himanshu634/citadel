@@ -35,6 +35,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import anthropic
+from brain.archive.backends import lookup_node
 from brain.config import get_settings
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -158,7 +159,8 @@ def run(
     try:
         refs = refs_of(params.kind, params.text)
         key = rules.norm(params.kind, params.text, refs)
-        if earlier := rules.recall(ledger, key, "ask", utc_now()):
+        in_brain = lambda uid: lookup_node(slug, {"uid": uid})  # noqa: E731
+        if earlier := rules.recall(ledger, key, "ask", utc_now(), lookup=in_brain):
             return [_row(ledger, earlier, reason="remembered", calls=0)]
         opened = {"uid": archive_uid(), "kind": params.kind, "text": params.text, "refs": refs,
                   "from_uid": params.from_uid, "asked_by": "ask", "thread": thread,

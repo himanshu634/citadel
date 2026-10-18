@@ -286,6 +286,33 @@ describe('turnFromChat', () => {
 		expect(turn).toMatchObject({ status: 'done', rating: 'up', rated: 'idle' });
 	});
 
+	test("a reopened turn keeps the Archivist's steps under its ask_archivist step", () => {
+		const inner = { ms: 4, count: 1, error: null, rows: [], nodes: [], rels: [], status: 'done', result: null, server: null, call: null, n: null, kind: 'archive' as const, parent: 'o' };
+		const base = chatTurn();
+		const outer = {
+			...base.steps[0],
+			id: 'o',
+			tool: 'ask_archivist',
+			input: { kind: 'reference', text: '#900' },
+			rows: [{ summary: 'found #900' }],
+			parent: null,
+			steps: [
+				{ ...inner, id: 'i1', tool: 'archive_fetch', input: { source: 's', id: '#900' } },
+				{ ...inner, id: 'i2', tool: 'submit_archive_answer', kind: 'archive' as const, input: { outcome: 'found' }, status: 'running' }
+			]
+		};
+		const turn = turnFromChat({ ...base, steps: [outer, ...base.steps.slice(1)] });
+		const [step] = turn.steps;
+		expect(step.id).toBe('o');
+		expect(step.children?.map((c) => [c.id, c.tool, c.n, c.status])).toEqual([
+			['i1', 'archive_fetch', null, 'done'],
+			['i2', 'submit_archive_answer', null, 'done']
+		]);
+		expect(step.children?.[0]).toMatchObject({ input: { source: 's', id: '#900' }, ms: 4, count: 1, error: null });
+		expect(step.children?.[1].error).toBe(NOT_RUN); // the turn ended before it finished
+		expect(turn.steps.find((s) => s.id === 'z')?.children).toBeUndefined();
+	});
+
 	test('a step a stopped turn never finished is shown as not run', () => {
 		const t = chatTurn({ status: 'stopped' });
 		t.steps[0] = { ...t.steps[0], status: 'running' };

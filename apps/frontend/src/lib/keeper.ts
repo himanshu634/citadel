@@ -90,7 +90,8 @@ const ACTIONS: Record<string, string> = {
 	archive_dropped: 'dropped an archive request',
 	archive_returned: "took the Archivist's finds back",
 	archive_conflict: 'found older history that conflicts with a claim',
-	archive_released: 'put a gap back after the Archivist'
+	archive_released: 'put a gap back after the Archivist',
+	archive_refs_ignored: 'set aside refs no source owns'
 };
 
 /** "pm opened a follow-up": who did what, without the why. */

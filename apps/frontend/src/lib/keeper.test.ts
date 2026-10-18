@@ -93,6 +93,9 @@ describe('log lines', () => {
 		expect(logSentence(entry('archive_nothing', { actor: 'archivist' }))).toBe('Archivist found nothing older');
 		for (const a of ['refused', 'dropped', 'returned', 'conflict', 'released'])
 			expect(logSentence(entry(`archive_${a}`))).not.toBe(`Keeper archive ${a}`);
+		expect(logSentence(entry('archive_refs_ignored', { actor: 'archivist' }))).toBe(
+			'Archivist set aside refs no source owns'
+		);
 		expect(gapStatusWords('waiting_archive')).toBe('Waiting for the Archivist');
 		expect(gapStatusWords('needs_person')).toBe('Needs person');
 	});

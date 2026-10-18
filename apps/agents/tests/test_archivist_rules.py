@@ -7,14 +7,21 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from agents.archivist import rules
+from agents.archivist import live, rules
 from agents.keeper.model import ArchiveRequest
 from agents.keeper.store import MemoryKeeperStore
 from brain.adapters.github import GithubSource
 from brain.adapters.linear import LinearSource
 from brain.adapters.linear import client as lc
-from brain.archive.backends import Candidate, Fetched, GithubBackend, LinearBackend
+from brain.archive.backends import (
+    Candidate,
+    Fetched,
+    GithubBackend,
+    JsonlArchiveBackend,
+    LinearBackend,
+)
 from brain.config import CompanyConfig
+from brain.testing import SYNTHETIC
 
 T1 = "2026-10-17T10:00:00Z"
 NOW = datetime(2026, 10, 17, 12, 0, tzinfo=UTC)
@@ -87,8 +94,29 @@ class _Backend:
 def test_out_of_scope_repo():
     backends = {"github:acme/widgets": _Backend("acme/widgets")}
     assert rules.check_scope(["acme/widgets#3"], backends) is None
-    assert rules.check_scope(["acme/widgets#3", "other/repo#1"], backends) == "out_of_scope"
+    # one claimed ref is enough: the unclaimed one is dropped from the run, not refused
+    assert rules.check_scope(["acme/widgets#3", "other/repo#1"], backends) is None
+    assert rules.check_scope(["other/repo#1"], backends) == "out_of_scope"
     assert rules.check_scope(["other/repo#1"], {}) == "out_of_scope"
+    assert rules.check_scope([], backends) is None  # a topic has no refs
+
+
+def test_split_scope_keeps_order_and_names_the_dropped():
+    backends = {"github:acme/widgets": _Backend("acme/widgets")}
+    claimed, dropped = rules.split_scope(["auth", "acme/widgets#3", "other/repo#1"], backends)
+    assert claimed == ["acme/widgets#3"] and dropped == ["auth", "other/repo#1"]
+
+
+def test_scope_on_the_synthetic_archive():
+    archive = JsonlArchiveBackend("canonical_jsonl:synthetic", SYNTHETIC / "archive")
+    backends = {archive.key: archive}
+    assert rules.check_scope(["#900"], backends) is None
+    assert rules.check_scope(["https://example.com/synthetic/app/issues/900"], backends) is None
+    refs = live.refs_of("reference", "synthetic:issue:900 #901")
+    assert refs == ["synthetic:issue:900", "#901"]
+    assert rules.split_scope(refs, backends) == (refs, [])
+    assert rules.split_scope(["#900", "auth"], backends) == (["#900"], ["auth"])
+    assert rules.check_scope(["#999", "auth"], backends) == "out_of_scope"
 
 
 def test_valid_find_passes_and_whitespace_is_normalised():
@@ -144,41 +172,66 @@ def _answered(store, uid, norm="n", asked_by="ask", outcome="found", partial=Fal
     )  # fmt: skip
 
 
+def _all_there(uid):
+    return {"uid": uid}
+
+
+def recall(store, norm_, asked_by, now, lookup=_all_there):
+    return rules.recall(store, norm_, asked_by, now, lookup=lookup)
+
+
 def test_recall_serves_a_recent_answer():
     store = MemoryKeeperStore("t")
     _answered(store, "archive:a")
-    got = rules.recall(store, "n", "ask", NOW)
+    got = recall(store, "n", "ask", NOW)
     assert got is not None and got.uid == "archive:a"
-    assert rules.recall(store, "other", "ask", NOW) is None
+    assert recall(store, "other", "ask", NOW) is None
+
+
+def test_recall_skips_an_answer_whose_finds_left_the_brain():
+    store = MemoryKeeperStore("t")
+    _answered(store, "archive:a")
+    for uid in ("github:acme/widgets:issue:12", "github:acme/widgets:issue:13"):
+        store.write(
+            "ledger/archive_write_find",
+            "citadel_archivist",
+            {"request": "archive:a", "uid": uid, "url": None, "title": "t", "date": None,
+             "why": "w", "quote": "q", "verdict": "holds", "evidence": ["system:db"],
+             "superseded_by": None},
+        )  # fmt: skip
+    assert recall(store, "n", "ask", NOW) is not None
+    # after `make archive-clear` and a rebuild, one find is gone: the run must happen again
+    gone = lambda uid: None if uid.endswith(":13") else {"uid": uid}  # noqa: E731
+    assert recall(store, "n", "ask", NOW, lookup=gone) is None
 
 
 def test_recall_forgets_after_memory_days():
     store = MemoryKeeperStore("t")
     _answered(store, "archive:a", now="2026-09-01T10:00:00Z")  # 46 days before NOW
-    assert rules.recall(store, "n", "ask", NOW) is None
-    assert rules.recall(store, "n", "ask", "2026-09-20T10:00:00Z") is not None
+    assert recall(store, "n", "ask", NOW) is None
+    assert recall(store, "n", "ask", "2026-09-20T10:00:00Z") is not None
 
 
 def test_recall_ignores_partial():
     store = MemoryKeeperStore("t")
     _answered(store, "archive:a", partial=True)
-    assert rules.recall(store, "n", "ask", NOW) is None
+    assert recall(store, "n", "ask", NOW) is None
 
 
 def test_ask_nothing_found_does_not_serve_keeper():
     store = MemoryKeeperStore("t")
     _answered(store, "archive:a", outcome="nothing_found")
-    assert rules.recall(store, "n", "keeper", NOW) is None
-    assert rules.recall(store, "n", "ask", NOW) is not None
+    assert recall(store, "n", "keeper", NOW) is None
+    assert recall(store, "n", "ask", NOW) is not None
     _answered(store, "archive:b", asked_by="keeper", outcome="nothing_found", now=T1)
-    assert rules.recall(store, "n", "keeper", NOW).uid == "archive:b"
+    assert recall(store, "n", "keeper", NOW).uid == "archive:b"
 
 
 @pytest.mark.parametrize("asked_by", ["ask", "keeper"])
 def test_ask_found_serves_both_tiers(asked_by):
     store = MemoryKeeperStore("t")
     _answered(store, "archive:a", outcome="found")
-    assert rules.recall(store, "n", asked_by, NOW) is not None
+    assert recall(store, "n", asked_by, NOW) is not None
 
 
 # --- rule 13: an exact ref must resolve to the item (real backends' parse_ref, no network) ----

@@ -159,9 +159,11 @@ item points at an older one, it may follow the trail, inside the same budget.
 
 Code, not the model. Numbers are `Settings` in `brain/config.py`.
 
-- **Scope.** Only the sources in the company YAML; a ref no source owns is `refused`
-  (`out_of_scope`). A private repo needs `data_permission: own`; Linear is for `own` or
-  `synthetic` data. A build in progress refuses the request (`building`).
+- **Scope.** Only the sources in the company YAML. A reference request none of whose refs a
+  source owns is `refused` (`out_of_scope`); refs no source owns beside one that is owned ("#900
+  auth") are dropped from the run and logged `archive_refs_ignored`. The synthetic archive reads
+  a uid, an item url or `#<n>`. A private repo needs `data_permission: own`; Linear is for `own`
+  or `synthetic` data. A build in progress refuses the request (`building`).
 - **Budgets per request.** External calls: Ask 6, Keeper 10 (`ARCHIVIST_CALLS_ASK`,
   `ARCHIVIST_CALLS_KEEPER`). Items loaded: Ask 3, Keeper 8. Trail depth: 2 hops
   (`ARCHIVIST_DEPTH`). Job steps: 24 (`ARCHIVIST_STEPS`). A tool call over budget returns an error
@@ -182,8 +184,10 @@ Code, not the model. Numbers are `Settings` in `brain/config.py`.
   opens).
 - **Memory.** The same normalised request (`norm`: exact refs, or the topic's words without stop
   words) answered in the last `ARCHIVIST_MEMORY_DAYS` (30) days returns that answer without a
-  run. A `partial` answer is never reused, and an Ask-tier `nothing_found` never answers a Keeper
-  request. One request per `norm` runs at a time; a second asker waits for it or gets its answer.
+  run. A `partial` answer is never reused, an Ask-tier `nothing_found` never answers a Keeper
+  request, and an answer whose finds are no longer all in the brain (after `make archive-clear`
+  and a rebuild) is not served: the run happens again. One request per `norm` runs at a time; a
+  second asker waits for it or gets its answer.
 - **Text is data.** Fetched text never steers the agent (the prompt and the context say so).
 
 ### What a load does
@@ -219,7 +223,9 @@ title, date, why, quote, verdict, evidence, `superseded_by`) are in
 **Keeper to Archivist.** The decide job's fourth outcome, `ask_archivist`, opens a `topic` request
 and moves the gap to `waiting_archive`. The review's archive step answers it. A gap asks once,
 ever, and a review runs at most 2 requests; a gap whose request this review did not reach stays
-`waiting_archive` for the next one.
+`waiting_archive` for the next one. Known limitation: a gap whose question is already in flight
+under another request uses its one ask on it, and ends `needs_person` if it cannot be grounded
+(its next round does not see that other request's summary and finds).
 
 **Archivist to Keeper.** When the request ends, the gap is settled: `found` or `already_in_brain`
 sends it back to `open` without using an attempt, and its next pm and qa consults get the
@@ -239,6 +245,16 @@ same question already running is joined; one the Keeper asked and has not run ye
 failure, refusal or timeout is a normal row with a `reason`, never an error, and Ask answers with
 what it has and says what it could not reach. Ask's prompt (`system_prompt.md`) tells it to give
 the date of an archived item and to prefer a newer item in the window.
+
+**Surfaces.** `GET /api/companies/{slug}/archive/requests?limit=` (`backend/api/archive.py`)
+lists the latest requests, most recently updated first, each with its finds (verdict, quote,
+evidence). Each run's steps show on the Systems page's activity trail (`GET .../activity`, actor
+`archivist`), and in Ask under the `ask_archivist` step, live and in a reopened chat.
+
+**Evals.** The synthetic company's cases tagged `archive` (`evals/cases/synthetic.yaml`) load
+`synthetic:issue:900` into `brain_synthetic` and remember the answer in `keeper_synthetic`, so
+a plain `make eval` skips them. Run them on fresh data: `make archive-clear SLUG=synthetic
+CONFIRM=1`, `make synthetic`, then `make eval CASE=archive REPEAT=1`.
 
 ## The agent contract
 

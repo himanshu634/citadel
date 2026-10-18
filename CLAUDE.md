@@ -270,7 +270,10 @@ thread. Case files: `synthetic.yaml` (the offline company, fixed answers) and `f
 live FalkorDB repo: rankings only as gold refs, literals only for merged PR/issue pairs and bot
 uids, several questions taken from real Ask traces). Results: `data/evals/<slug>/<time>-<model>-<effort>.jsonl`; `BASELINE=` diffs pass rates
 against an earlier file. The `[semantic]` cases ask in words with no full-text overlap (the
-graph must be embedded). It calls the API, so it is not part of `make test`;
+graph must be embedded). The `[archive]` cases make the Archivist load into the brain, so a
+plain run skips them (`CASE=archive` runs them); run them after `make archive-clear
+SLUG=synthetic CONFIRM=1` and `make synthetic`, with `REPEAT=1`. It calls the API, so it is not
+part of `make test`;
 `apps/agents/tests/test_evals.py` checks the case files and the harness with the scripted client.
 `evals/drafts.py` (`make eval-drafts`) turns thumbs-down traces into cases `fb-<trace id>`: the
 earlier turns of the thread, then the bad one expecting only an answer, with the bad answer in
@@ -280,7 +283,7 @@ real `expect` and drop the tag.
 ### The Keeper (`agents/keeper`, `roles/keeper.py`, `brain/keeper.py`)
 
 Reviews what the brain could not answer and updates it (spec: docs/agents.md "The Keeper"). The
-demo's agents are `brain`, `keeper`, `pm` and `qa`. Pieces:
+demo's agents are `brain`, `keeper`, `pm`, `qa` and `archivist` (below). Pieces:
 - Ledger graph `keeper_<slug>` (survives rebuilds; `make reset` deletes it): Gap, Consult, Claim,
   FollowUp, LogEntry, Review, ReviewStep (`keeper/model.py`), through the `WorkStore` protocol
   (`keeper/store.py`: `KeeperStore` runs `queries/ledger/*`, `MemoryKeeperStore` for tests).
@@ -345,7 +348,10 @@ docs/agents.md "The Archivist"). One job, `answer_request`, on the Keeper's ledg
   `archivist_*`): only the company's own sources; budgets per tier (Ask 6 calls / 3 items, Keeper
   10 / 8, depth 2, 24 steps); 100 items per company per day; Ask run 45 s (soft stop at 70%);
   a find must be fetched in this run, with a verbatim quote of 20+ chars (or an exact ref) and
-  evidence uids in the brain; requests answered in 30 days are remembered (never `partial`).
+  evidence uids in the brain; requests answered in 30 days are remembered (never `partial`, and
+  not once a find has left the brain). A reference request is refused `out_of_scope` only when
+  no source claims any of its refs; unclaimed words beside a claimed ref are dropped from the run
+  and logged `archive_refs_ignored`. The JSONL archive reads a uid, a url or `#<n>`.
 - Run by `archivist/job.answer_request` (recall, refuse, run, apply, never raises); each tool
   call is a `ReviewStep` under the request, so it shows on `/activity`.
 - Ask: `ask_archivist` (`archivist/live.py`, in `toolset.ask_toolset`) runs the job inline in the
@@ -357,11 +363,12 @@ docs/agents.md "The Archivist"). One job, `answer_request`, on the Keeper's ledg
   whose Archivist reopened gaps gets one follow-on review (trigger `archive`) from the backend.
   A conflicting find opens a gap of kind `archive_conflict`.
 - Synthetic company: `examples/synthetic_company/archive/` holds items older than the window
-  (issue 900, the JWT decision); eval cases tagged `archive` use it.
+  (issue 900, the JWT decision); eval cases tagged `archive` use it (skipped by a plain
+  `make eval`; see Evals).
 
 ### Agent roles (`agents/roles`, `agents/work`, `agents/policies`)
 
-The roles the Keeper's review runs (`pm`, `qa`, `keeper`) plus `brain` (Ask). Agents never
+The roles the Keeper's review runs (`pm`, `qa`, `keeper`, `archivist`) plus `brain` (Ask). Agents never
 message each other: each reads its queue on the Keeper's ledger, makes one decision and writes
 it; the next agent finds it through its own queue. Pieces:
 - `agents/work/`: the `WorkStore` protocol (`store.py`: `read`/`write` by query name, like
@@ -385,7 +392,7 @@ nothing; every role read tool is a `brain.tools` tool (`test_every_read_tool_is_
 HTTP for the frontend, `backend.api:app` (FastAPI, `make api`): its only way in. Company routes
 sit under `/api/companies/{slug}` (GET the company, PUT its YAML) and
 `/api/companies/{slug}/...` (overview, builds, sources, tools, ask, graph, threads,
-`refs/{uid}/threads`, traces, activity, keeper); the slug is resolved only by
+`refs/{uid}/threads`, traces, activity, keeper, `archive/requests`); the slug is resolved only by
 `deps.company_slug`, which 404s unless the slug matches `config.SLUG_RE` and
 `companies/<slug>.yaml` exists. Top-level routes: `/api/companies` (list, create),
 `/api/companies/validate`, `/api/events` (all builds as SSE), `/api/models` (Ask's model
@@ -410,6 +417,8 @@ Behind it:
   DELETE `.../sources/leftovers?key=` removes one (409 while configured or building). POST
   `.../builds` takes `sources` to download only those keys (loading still walks every source).
 - `keeper_runs.py` + `api/keeper.py`: Keeper reviews and approvals (see "The Keeper" above).
+- `api/archive.py`: GET `.../archive/requests?limit=` lists the Archivist's latest requests,
+  most recently updated first, each with its finds (see "The Archivist" above).
 - CLI `backend reset` (`make reset`) deletes a company's graphs (brain_, agent_, keeper_), build
   history and Ask traces.
 

@@ -223,7 +223,9 @@ def add_brain_loop(
             else:
                 answer = use["input"]
                 results.append(result_block(use["id"], "Answer recorded.", False))
-            record({"id": use["id"], "tool": submit, "input": {}, "error": problem})
+            # its input too, so the trail can say what was handed back (an outcome, a summary)
+            record({"id": use["id"], "tool": submit, "input": use.get("input") or {},
+                    "error": problem})  # fmt: skip
         return {
             "messages": [{"role": "user", "content": results}],
             "seen": new_seen,

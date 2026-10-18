@@ -1,7 +1,8 @@
 """Run the Archivist on one request: `answer_request`, the one way its job runs.
 
     recall (rule 15: answered lately -> that answer, no run)
-    -> refuse: the company is building (19), a ref no source owns (2), the daily cap (10)
+    -> refuse: the company is building (19), refs none of which a source owns (2), the daily
+       cap (10); refs no source owns beside one that is owned are dropped and logged
     -> open -> running (before any model call: a review's queue never takes a running request)
     -> run_job (role prompt, read tools + archive tools on one ArchiveSession, the tier's
        budgets, `archivist_steps` steps) -> the role's apply (checks, load, finds, log)
@@ -24,6 +25,7 @@ from functools import partial
 from typing import Any, Literal
 
 import anthropic
+from brain.archive.backends import lookup_node
 from brain.archive.session import ArchiveSession, Budget, daily_loaded
 from brain.config import get_settings
 
@@ -105,7 +107,8 @@ def _answer(
     backends: Mapping[str, Any] | None,
     building: Callable[[str], bool],
 ) -> None:
-    if earlier := rules.recall(store, request.norm, tier, datetime.now(UTC)):
+    in_brain = partial(_in_brain, slug)
+    if earlier := rules.recall(store, request.norm, tier, datetime.now(UTC), lookup=in_brain):
         _from_memory(store, ctx, request, earlier)
         return
     if building(slug):
@@ -124,6 +127,12 @@ def _answer(
             return
         if not _set(store, ctx, request, ["open"], "running"):
             return  # another run has it (rule 16): the caller reads it as it is
+        claimed, dropped = rules.split_scope(request.refs, session.backends)
+        if dropped:  # words no source owns ("auth" in "#900 auth"): the run goes without them
+            log(store, ctx, ACTOR, "archive_refs_ignored", gap=request.gap,
+                why=f"{request.uid}: no source owns {', '.join(dropped)}")  # fmt: skip
+            request = request.model_copy(update={"refs": claimed})
+            session.start_refs = list(claimed)
         _run(store, request, ctx, session, client, hooks)
     finally:
         session.close()
@@ -182,6 +191,10 @@ def _run(
         _end(store, ctx, request, "failed", reason="no_answer", calls=calls)
     else:
         _end(store, ctx, request, "failed", reason=result.stop or "no_answer", calls=calls)
+
+
+def _in_brain(slug: str, uid: str) -> dict[str, Any] | None:
+    return lookup_node(slug, {"uid": uid})
 
 
 # --- ledger writes ----------------------------------------------------------------------------

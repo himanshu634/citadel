@@ -213,7 +213,14 @@
         max_steps: 6
 
 # --- archive: the answer is older than the window; the brain must ask the Archivist -----------
+# These cases write to the demo data: the first run loads synthetic:issue:900 into
+# brain_synthetic, caches it under data/raw/synthetic/archive/ and remembers the answer in
+# keeper_synthetic, so a second run would find it already there. A plain `make eval` skips them
+# (tag `archive`). Run them on their own, once, on fresh data:
+#   make archive-clear SLUG=synthetic CONFIRM=1 && make synthetic
+#   make eval CASE=archive REPEAT=1
 
+# Ask must call ask_archivist: fails if #900 is already in the brain (not reset first).
 - id: archive-reference
   tags: [archive]
   why: Issue #15 says the decisive proof is in #900, a 2025 item outside the window; Ask must hand off to the Archivist and cite what it loaded.
@@ -224,6 +231,7 @@
         tools_any: [ask_archivist]
         max_steps: 8
 
+# Passes without the Archivist when #900 is already in the brain; on fresh data it needs it.
 - id: archive-topic
   tags: [archive]
   why: The decision to move Auth to JWT is the archived issue #900, from 2025; Ask must cite it and say when it was decided.

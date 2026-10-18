@@ -59,6 +59,15 @@ def test_entry_round_trip(root):
     assert read_entries(SLUG) == []
 
 
+def test_a_corrupt_file_is_skipped_with_a_warning(root, caplog):
+    write_entry(SLUG, entry())
+    bad = write_entry(SLUG, entry("wi:bad"))
+    bad.write_text('{"type": "meta", "uid": "wi:bad"}\nnot json\n')
+    with caplog.at_level("WARNING", logger="brain.archive.cache"):
+        assert [e.uid for e in read_entries(SLUG)] == ["wi:old"]
+    assert str(bad) in caplog.text
+
+
 def test_normalize_keeps_archived_children():
     cfg = synthetic_company("archtest_norm")
     records = [old_item(), *comments()]

@@ -433,12 +433,22 @@ function shortRef(ref: string): string {
 /** "a" or "an" before a word. */
 const article = (word: string) => (/^[aeiou]/i.test(word) ? 'an' : 'a');
 
+/**
+ * The Archivist's summary as one sentence: "Found #900…" joins as "The Archivist found #900…";
+ * one that does not start with a word ("JWT…", "#900…") follows a colon instead.
+ */
+function archivistSaid(summary: string): string {
+	if (/^[A-Z][a-z]/.test(summary)) return `The Archivist ${summary[0].toLowerCase()}${summary.slice(1)}`;
+	if (/^[a-z]/.test(summary)) return `The Archivist ${summary}`;
+	return `The Archivist: ${summary}`;
+}
+
 /** What the agent is doing in this step, in plain words; `done` says what it did. */
 export function stepSentence(step: Pick<WalkStep, 'tool' | 'input'> & { rows?: unknown[] }, done = false): string {
 	// A finished request says what the Archivist reported, not what was asked.
 	if (done && step.tool === 'ask_archivist') {
 		const summary = (step.rows?.[0] as { summary?: unknown } | undefined)?.summary;
-		if (typeof summary === 'string' && summary.trim()) return `The Archivist ${summary.trim()}`;
+		if (typeof summary === 'string' && summary.trim()) return archivistSaid(summary.trim());
 	}
 	const said = SAID[step.tool]?.(step.input ?? {}) ?? [`Running ${step.tool}`, `Ran ${step.tool}`];
 	return said[done ? 1 : 0];

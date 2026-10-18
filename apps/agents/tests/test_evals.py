@@ -51,6 +51,23 @@ def test_select_by_id_or_tag():
     assert cases.select([a, b], ["x"]) == [a]
 
 
+def test_plain_run_skips_drafts_and_archive_cases():
+    plain = Case(id="plain", turns=[{"question": "?"}])
+    draft = Case(id="d", tags=["draft"], turns=[{"question": "?"}])
+    archive = Case(id="arch", tags=["archive"], turns=[{"question": "?"}])
+    every = [plain, draft, archive]
+    assert cases.select(every, []) == [plain]
+    assert cases.select(every, ["archive"]) == [archive]
+    assert cases.select(every, ["draft"]) == [draft]
+    assert cases.select(every, ["arch"]) == [archive]
+
+
+def test_synthetic_archive_cases_are_tagged_archive():
+    archive = [c for c in cases.load("synthetic") if c.id.startswith("archive-")]
+    assert archive and all("archive" in c.tags for c in archive)
+    assert cases.select(archive, []) == []
+
+
 def test_duplicate_ids_are_refused(tmp_path):
     f = tmp_path / "x.yaml"
     f.write_text("- {id: a, turns: [{question: q}]}\n- {id: a, turns: [{question: q}]}\n")

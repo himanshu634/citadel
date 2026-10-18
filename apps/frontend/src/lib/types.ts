@@ -471,7 +471,8 @@ export interface AskStepEvent {
  * Where a tool call ran: `graph` (a named graph tool), `submit` (the answer check), `mcp` (a tool
  * on an MCP server, through the API's MCP connector) or `server` (an Anthropic server tool).
  */
-export type CallKind = 'graph' | 'submit' | 'mcp' | 'server';
+/** `archive`: a call the Archivist made inside an `ask_archivist` call (saved chats only). */
+export type CallKind = 'graph' | 'submit' | 'mcp' | 'server' | 'archive';
 
 /** A tool one Claude response used. MCP and server calls ran already and carry their result. */
 export interface AskCall {
@@ -629,6 +630,10 @@ export interface ChatStep extends AskStepDoneEvent {
 	server: string | null;
 	status: string;
 	result: string | null;
+	/** An `ask_archivist` call's own calls (kind `archive`), in order; empty for other calls. */
+	steps?: ChatStep[];
+	/** For an Archivist call: the id of the `ask_archivist` call it ran in. */
+	parent?: string | null;
 }
 
 export interface ChatLlmCall {

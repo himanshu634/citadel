@@ -22,13 +22,14 @@ from agents.policies import archivist as policy
 from agents.roles import ROLES, Ctx, Subject
 from agents.runner import run_job
 from agents.work.submits import SUBMITS, SubmitArchiveAnswer
-from brain import config, db, tools
+from brain import config, db, pipeline, tools
 from brain.archive.backends import SourceFailed, lookup_node
 from brain.archive.session import ArchiveSession, Budget
 from brain.config import get_settings
 from brain.testing import SYNTHETIC, falkordb_up, load_company, synthetic_company, write_company
 
 NOW = "2026-10-17T10:00:00Z"
+SUBMIT_TOOL = "submit_archive_answer"
 ASKER = "synthetic:issue:15"  # windowed: "the decisive proof is in #900"
 OLD = "synthetic:issue:900"  # archived decision: sessions -> JWT
 POLICY = "synthetic:issue:901"  # archived: keep 24h expiry, overturned by #15
@@ -295,6 +296,24 @@ def test_out_of_scope_refused(store, slug):
     assert done.status == "refused" and done.reason == "out_of_scope"
 
 
+def test_unclaimed_refs_are_dropped_not_refused(store, slug):
+    req = open_request(store, text="synthetic:issue:900 auth acme/other#3",
+                       refs=[OLD, "auth", "acme/other#3"])  # fmt: skip
+    done = answer(store, slug, req)
+    assert done.status == "answered" and done.outcome == "found"
+    assert list(finds(store, req.uid)) == [OLD]
+    assert done.refs == [OLD, "auth", "acme/other#3"]  # the ledger keeps what was asked
+    [why] = log_whys(store, "archive_refs_ignored")
+    assert why == f"{req.uid}: no source owns auth, acme/other#3"
+
+
+def test_hash_number_ref_on_the_synthetic_archive(store, slug):
+    req = open_request(store, text="#900", refs=["#900"])
+    done = answer(store, slug, req)
+    assert done.status == "answered" and done.outcome == "found"
+    assert list(finds(store, req.uid)) == [OLD]
+
+
 class RefusingBackend:
     """A source that refuses on use, like a private repo without `own` data."""
 
@@ -330,6 +349,21 @@ def test_recall_serves_from_memory(store, slug):
     assert list(finds(store, again.uid)) == [OLD]
 
 
+def test_memory_is_not_served_when_its_finds_left_the_brain(store, slug):
+    first = answer(store, slug, open_request(store))
+    assert first.outcome == "found"
+    # `make archive-clear` + a rebuild: the ledger remembers #900, the brain no longer has it
+    assert pipeline.clear_archive(slug) > 0
+    db.delete_graph(slug)
+    load_company(config.load_company(slug))
+    assert lookup_node(slug, {"uid": OLD}) is None
+    client = offline_client("archivist", "answer_request")
+    again = answer(store, slug, open_request(store), client=client)
+    assert again.status == "answered" and again.outcome == "found" and client.calls > 0
+    assert not (again.reason or "").startswith("from memory")
+    assert lookup_node(slug, {"uid": OLD}) is not None
+
+
 def test_stop_between_steps_is_partial(store, slug):
     req = open_request(store)
     done = answer(store, slug, req, should_stop=lambda: True)
@@ -353,6 +387,9 @@ def test_steps_written_to_ledger(store, slug):
     assert all(s["status"] == "done" for s in steps)
     assert [s["n"] for s in steps] == list(range(1, len(steps) + 1))
     assert {e["kind"] for e in events} >= {"llm", "step", "step_done"}
+    # the submit's done step carries its input, so the trail can say what it handed back
+    [done] = [e for e in events if e["kind"] == "step_done" and e["tool"] == SUBMIT_TOOL]
+    assert done["input"]["outcome"] == "found" and done["input"]["summary"]
 
 
 # --- run_job ----------------------------------------------------------------------------------

@@ -706,6 +706,16 @@ describe('the Archivist', () => {
 		expect(stepSentence({ ...ask, rows: [{ summary: 'found 2 older PRs on auth' }] }, true)).toBe(
 			'The Archivist found 2 older PRs on auth'
 		);
+		// the summary is a sentence of its own: its first word joins this one lower-case
+		expect(stepSentence({ ...ask, rows: [{ summary: 'Found #900, the JWT decision.' }] }, true)).toBe(
+			'The Archivist found #900, the JWT decision.'
+		);
+		expect(stepSentence({ ...ask, rows: [{ summary: 'Stopped before it reported anything.' }] }, true)).toBe(
+			'The Archivist stopped before it reported anything.'
+		);
+		expect(stepSentence({ ...ask, rows: [{ summary: 'JWT sessions date from 2025.' }] }, true)).toBe(
+			'The Archivist: JWT sessions date from 2025.'
+		);
 		expect(stepSentence(ask, true)).toBe('Asked the Archivist for the 2021 auth rewrite');
 		expect(stepSentence({ tool: 'archive_search', input: { source: 'github', terms: 'jwt sessions' } })).toBe(
 			'Searching github before the window for "jwt sessions"'

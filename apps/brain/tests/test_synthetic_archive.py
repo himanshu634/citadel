@@ -49,3 +49,16 @@ def test_jsonl_archive_backend_finds_and_fetches_the_decision():
     comments = [r for r in fetched.records if r.__class__.__name__ == "Comment"]
     assert len(comments) == 3
     assert any("decision" in c.body.lower() for c in comments)
+
+
+def test_jsonl_archive_backend_parses_a_number_and_a_url():
+    backend = JsonlArchiveBackend("synthetic", ARCHIVE)
+    assert backend.parse_ref("synthetic:issue:900") == "synthetic:issue:900"
+    assert backend.parse_ref("#900") == "synthetic:issue:900"
+    assert backend.parse_ref(" #903 ") == "synthetic:pr:903"  # any kind with that number
+    url = "https://example.com/synthetic/app/issues/901"
+    assert backend.parse_ref(url) == "synthetic:issue:901"
+    assert backend.parse_ref("#999") is None
+    assert backend.parse_ref("https://example.com/synthetic/app/issues/999") is None
+    assert backend.parse_ref("auth") is None
+    assert backend.fetch(backend.parse_ref("#900")).candidate.uid == "synthetic:issue:900"

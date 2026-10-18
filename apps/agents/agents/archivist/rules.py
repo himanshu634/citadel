@@ -5,7 +5,7 @@ source; a find is accepted only if the item was fetched in this run (rule 12), i
 really in the fetched text or the request named the item exactly (rule 13), and the brain
 nodes it cites as evidence exist (rule 3b). `norm` keys the request dedupe (rule 16) and
 `recall` serves a question that was answered lately (rule 15). `check_scope` refuses a
-reference that no source of the company owns.
+reference request none of whose refs a source of the company owns.
 """
 
 from __future__ import annotations
@@ -65,16 +65,25 @@ def resolver(backends: Mapping[str, Backend]) -> Callable[[str], set[str]]:
     return resolve
 
 
+def split_scope(refs: list[str], backends: Mapping[str, Backend]) -> tuple[list[str], list[str]]:
+    """The refs some source of the company claims, and the ones none does, each in order."""
+    claimed, dropped = [], []
+    for ref in refs:
+        owned = any(b.parse_ref(ref) for b in backends.values())
+        (claimed if owned else dropped).append(ref)
+    return claimed, dropped
+
+
 def check_scope(refs: list[str], backends: Mapping[str, Backend]) -> str | None:
-    """`out_of_scope` when some ref is claimed by no source of the company, else None.
+    """`out_of_scope` when the request has refs and no source of the company claims any of
+    them, else None. Unclaimed refs beside a claimed one ("#900 auth") are dropped from the run
+    (`split_scope`), not refused.
 
     A source that would refuse (a private repo without `own` data) is not checked here: the
     backends only say so on use, by raising PermissionError, which the caller turns into a
     `refused: <reason>` request."""
-    for ref in refs:
-        if not any(b.parse_ref(ref) for b in backends.values()):
-            return "out_of_scope"
-    return None
+    claimed, dropped = split_scope(refs, backends)
+    return "out_of_scope" if dropped and not claimed else None
 
 
 def _squash(text: str) -> str:
@@ -126,11 +135,18 @@ def check_find(
 
 
 def recall(
-    store: Any, norm_: str, asked_by: str, now: datetime | str | float
+    store: Any,
+    norm_: str,
+    asked_by: str,
+    now: datetime | str | float,
+    *,
+    lookup: Callable[[str], dict[str, Any] | None],
 ) -> ArchiveRequest | None:
     """Rule 15: the newest answered request for this question that may be served again, within
     `archivist_memory_days`, not `partial`; an `ask`-tier `nothing_found` does not serve the
-    `keeper` tier, which searches more."""
+    `keeper` tier, which searches more. An answer whose finds are not all in the brain any more
+    (`lookup`, e.g. after `make archive-clear` and a rebuild) is not served: the run happens
+    again."""
     if isinstance(now, datetime):
         at = now.astimezone(UTC)
     else:
@@ -139,4 +155,10 @@ def recall(
     rows = store.read(
         "ledger/archive_recall", {"norm": norm_, "asked_by": asked_by, "since": since}
     )
-    return ArchiveRequest(**rows[0]) if rows else None
+    if not rows:
+        return None
+    earlier = ArchiveRequest(**rows[0])
+    finds = store.read("ledger/archive_finds", {"requests": [earlier.uid]})
+    if any(lookup(f["uid"]) is None for f in finds):
+        return None
+    return earlier

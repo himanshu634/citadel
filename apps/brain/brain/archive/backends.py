@@ -492,6 +492,9 @@ class LinearBackend:
 # --- canonical_jsonl --------------------------------------------------------------------------
 
 
+_HASH_NUMBER = re.compile(r"#(\d+)")
+
+
 class JsonlArchiveBackend:
     """The `archive/` subfolder of a canonical_jsonl source: the same files as the source,
     holding items older than the window. Search is a case-insensitive all-terms match on the
@@ -516,8 +519,18 @@ class JsonlArchiveBackend:
         return {r.uid: r for r in self._all() if isinstance(r, (WorkItem, Document))}
 
     def parse_ref(self, ref: str) -> str | None:
+        """The uid of the archive item `ref` names: its uid, its url, or "#<n>" (the item with
+        that number, of any kind)."""
         ref = ref.strip()
-        return ref if ref in self._items() else None
+        items = self._items()
+        if ref in items:
+            return ref
+        if m := _HASH_NUMBER.fullmatch(ref):
+            number = int(m.group(1))
+            hit = (u for u, i in items.items() if getattr(i, "number", None) == number)
+        else:
+            hit = (u for u, i in items.items() if i.url and i.url == ref)
+        return next(hit, None)
 
     def match(self, item_id: str) -> dict[str, Any]:
         return {"uid": item_id}

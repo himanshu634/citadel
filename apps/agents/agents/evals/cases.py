@@ -78,13 +78,18 @@ def load(slug: str, path: Path | None = None) -> list[Case]:
 
 
 DRAFT = "draft"  # a case made from a thumbs-down (evals/drafts.py) that nobody finished yet
+# a case that makes the Archivist load into the brain: it changes the data later runs read, so
+# it runs only on its own, after `make archive-clear SLUG=synthetic CONFIRM=1` and a rebuild
+ARCHIVE = "archive"
+SKIPPED = frozenset({DRAFT, ARCHIVE})
 
 
 def select(cases: list[Case], only: list[str]) -> list[Case]:
     """Cases whose id or a tag matches one of `only`. With `only` empty: every case but drafts,
-    whose expectations are still unwritten (`--case draft` runs them)."""
+    whose expectations are still unwritten (`--case draft` runs them), and archive cases, which
+    write to the brain (`--case archive` runs them)."""
     if not only:
-        return [c for c in cases if DRAFT not in c.tags]
+        return [c for c in cases if not SKIPPED & set(c.tags)]
     return [c for c in cases if c.id in only or set(c.tags) & set(only)]
 
 

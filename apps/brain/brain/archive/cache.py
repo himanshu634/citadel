@@ -11,6 +11,7 @@ request, superseded_by), then one `{"type": "<RecordClass>", ...fields}` line pe
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,8 @@ from pydantic import TypeAdapter
 from brain import canonical as c
 from brain.adapters.canonical_jsonl import FILES
 from brain.config import raw_dir
+
+_log = logging.getLogger(__name__)
 
 CLASSES: dict[str, type[c.Record]] = {model.__name__: model for model in FILES.values()}
 
@@ -89,13 +92,13 @@ def _read_entry(path: Path) -> ArchiveEntry:
 
 def read_entries(slug: str) -> list[ArchiveEntry]:
     """Every archived item of the company, in file-name order. A file that cannot be read is
-    skipped (one bad file must not stop a build)."""
+    skipped with a warning naming it (one bad file must not stop a build)."""
     entries = []
     for path in sorted(archive_dir(slug).glob("*/*.jsonl")):
         try:
             entries.append(_read_entry(path))
-        except (OSError, ValueError, KeyError, TypeError):
-            continue
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            _log.warning("skipped unreadable archive file %s: %s", path, e)
     return entries
 
 

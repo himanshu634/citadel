@@ -20,6 +20,7 @@ import type {
 	AskLlmEvent,
 	AskStepDoneEvent,
 	AskStepEvent,
+	ChatStep,
 	ChatTurn,
 	Rating,
 	WalkStep
@@ -78,24 +79,30 @@ export function turnFromChat(t: ChatTurn): Turn {
 				error: s.error,
 				result: s.result
 			}));
+	const toWalk = (s: ChatStep, n: number | null): WalkStep => ({
+		id: s.id,
+		n,
+		tool: s.tool,
+		input: s.input,
+		call: s.call,
+		status: s.status === 'running' ? 'running' : 'done',
+		ms: s.ms,
+		count: s.count,
+		error: s.error,
+		rows: s.rows,
+		nodes: s.nodes,
+		rels: s.rels
+	});
 	const turn: Turn = {
 		question: t.question,
 		model: t.answer?.model ?? t.calls.at(-1)?.model ?? null,
 		calls: t.calls.map((c) => ({ ...c, calls: asked(c.seq) })),
-		steps: walk.map((s) => ({
-			id: s.id,
-			n: s.n,
-			tool: s.tool,
-			input: s.input,
-			call: s.call,
-			status: s.status === 'running' ? 'running' : 'done',
-			ms: s.ms,
-			count: s.count,
-			error: s.error,
-			rows: s.rows,
-			nodes: s.nodes,
-			rels: s.rels
-		})),
+		steps: walk.map((s) => {
+			const step = toWalk(s, s.n);
+			// The Archivist's own calls, under the ask_archivist call they ran in (as live).
+			if (s.steps?.length) step.children = s.steps.map((c) => toWalk(c, null));
+			return step;
+		}),
 		answer: t.answer,
 		error: t.error,
 		status: t.status,
