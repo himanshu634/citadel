@@ -3,9 +3,13 @@
 Why: an adapter is the only code that knows about one kind of source (GitHub, a docs folder,
 a JSONL export). It has two halves:
 - `fetch` does network I/O and writes raw responses under data/raw/<slug>/<adapter>/
-  (resumable, cached). Sources without a network step make it a no-op.
+  (resumable, cached; `full` ignores what an earlier fetch already pulled and starts at the
+  window). Sources without a network step make it a no-op.
 - `records` is a pure transform from that cache (or a local folder) to canonical records.
   No network, so re-running ingestion costs no API calls and tests can use fixture files.
+- `incomplete` (optional) says when the cache is not all the source holds for the window: a
+  fetch run that never finished, or one not run yet. Ingest then loads what there is but keeps
+  its cursor, so the records still to come are not skipped as "already seen" later.
 """
 
 from __future__ import annotations
@@ -41,12 +45,20 @@ class Adapter(Protocol):
         """Stable id of one configured source, e.g. 'github:FalkorDB/FalkorDB'. Keys SyncState."""
         ...
 
-    def fetch(self, company: CompanyConfig, source: Any, cache_dir: Path) -> None: ...
+    def fetch(
+        self, company: CompanyConfig, source: Any, cache_dir: Path, full: bool = False
+    ) -> None:
+        """Pull the source into the cache. `full` ignores the earlier fetches' progress and
+        pulls the whole window again (the records already cached are kept)."""
+        ...
 
-    # Optional (pipeline.configured_sources reads them with getattr):
+    # Optional (the pipeline reads them with getattr):
     # downloads: bool  -- True when `fetch` does network I/O (default False)
     # def check(self, company, source, cache_dir) -> SourceProblem | None
     #     A cheap look (a folder, an env var) at what would stop the next build reading it.
+    # def incomplete(self, company, source, cache_dir) -> str | None
+    #     A sentence saying what `records` cannot yet read (a fetch run still unfinished), or
+    #     None when the cache is complete. Ingest keeps its cursor while it is not.
 
     def records(
         self, company: CompanyConfig, source: Any, cache_dir: Path
@@ -62,7 +74,9 @@ class FolderAdapter:
     def key(self, source: PathSource) -> str:
         return f"{self.name}:{source.path.as_posix()}"
 
-    def fetch(self, company: CompanyConfig, source: PathSource, cache_dir: Path) -> None:
+    def fetch(
+        self, company: CompanyConfig, source: PathSource, cache_dir: Path, full: bool = False
+    ) -> None:
         """Nothing to download: the files are already local."""
 
     def check(

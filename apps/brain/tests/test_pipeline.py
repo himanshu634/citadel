@@ -2,8 +2,11 @@
 
 from datetime import UTC, datetime
 
-from brain import config, loader, pipeline
+import pytest
+from brain import adapters, config, loader, pipeline
 from brain.canonical import Change, Document, Person, WorkItem
+from brain.embeddings import EmbedReport
+from brain.events import BuildEvent
 from brain.pipeline import next_cursor, select_new
 from brain.testing import synthetic_company, write_company
 
@@ -57,3 +60,73 @@ def test_ingest_passes_source_key_as_origin(tmp_path, monkeypatch):
     monkeypatch.setattr(loader, "load", fake_load)
     pipeline.ingest("test_origin")
     assert len(origins) == 1 and origins[0].startswith("canonical_jsonl:")
+
+
+class SyncStateSpy:
+    """Stands in for the loader: a fixed cursor in, every written cursor recorded."""
+
+    def __init__(self, monkeypatch, cursor: datetime | None) -> None:
+        self.written: list[datetime | None] = []
+        monkeypatch.setattr(loader, "get_cursor", lambda *a: cursor)
+        monkeypatch.setattr(loader, "set_sync_state", lambda *a: self.written.append(a[3]))
+        monkeypatch.setattr(loader, "load", lambda slug, records, origin=None: loader.LoadReport())
+        monkeypatch.setattr(pipeline, "embed", lambda slug, on_event=None: EmbedReport())
+
+
+class PartialAdapter:
+    """A source whose cache holds some records but whose fetch has not finished."""
+
+    name = "canonical_jsonl"
+    source_model = adapters.REGISTRY["canonical_jsonl"].source_model
+    reason: str | None = "work_items: fetch run 20261018T000000 stopped at page 3"
+
+    def key(self, source):
+        return f"partial:{source.path.as_posix()}"
+
+    def fetch(self, company, source, cache_dir, full=False):
+        pass
+
+    def incomplete(self, company, source, cache_dir):
+        return self.reason
+
+    def records(self, company, source, cache_dir):
+        yield item("newer", "2026-09-01T00:00:00Z")
+
+
+@pytest.fixture
+def partial_company(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    (tmp_path / "companies").mkdir()
+    write_company(synthetic_company("test_partial"))
+    adapter = PartialAdapter()
+    monkeypatch.setitem(adapters.REGISTRY, "canonical_jsonl", adapter)
+    return adapter
+
+
+def test_an_incomplete_fetch_loads_what_there_is_but_keeps_the_cursor(partial_company, monkeypatch):
+    spy = SyncStateSpy(monkeypatch, CURSOR)
+    seen: list[BuildEvent] = []
+
+    report = pipeline.ingest("test_partial", on_event=seen.append)
+
+    assert spy.written == [CURSOR]  # not 2026-09-01: the records still to come must pass it
+    [result] = report.sources
+    assert result.loaded == 1 and result.incomplete == partial_company.reason
+    done = [e for e in seen if e.stage == "records" and e.status == "done"]
+    assert done and partial_company.reason in done[0].message
+
+
+def test_a_complete_fetch_moves_the_cursor(partial_company, monkeypatch):
+    partial_company.reason = None
+    spy = SyncStateSpy(monkeypatch, CURSOR)
+
+    report = pipeline.ingest("test_partial")
+
+    assert spy.written == [datetime(2026, 9, 1, tzinfo=UTC)]
+    assert report.sources[0].incomplete is None
+
+
+def test_a_full_ingest_of_an_incomplete_fetch_leaves_no_cursor(partial_company, monkeypatch):
+    spy = SyncStateSpy(monkeypatch, CURSOR)
+    pipeline.ingest("test_partial", full=True)
+    assert spy.written == [None]  # nothing is known to be complete; the next ingest reloads all

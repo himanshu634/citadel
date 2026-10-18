@@ -308,3 +308,19 @@ def test_removed_ticket_loses_assignee_and_blocks(tmp_path):
         assert after == [{"cat": "canceled", "assigned": 0, "blocks": 0}]
     finally:
         db.delete_graph(slug)
+
+
+def test_incomplete_while_the_issue_run_is_unfinished(tmp_path):
+    cache = fixture_copy(tmp_path)
+    adapter = REGISTRY["linear"]
+    assert adapter.incomplete(company(), SOURCE, tmp_path) is None
+
+    state_file = cache / "issues" / "state.json"
+    state = json.loads(state_file.read_text())
+    state["run"] = {"id": NEWER_RUN, "lower": "x", "cursor": "c", "page": 1}
+    state_file.write_text(json.dumps(state))
+    reason = adapter.incomplete(company(), SOURCE, tmp_path)
+    assert reason and NEWER_RUN in reason
+
+    shutil.rmtree(cache / "issues")  # never fetched
+    assert adapter.incomplete(company(), SOURCE, tmp_path) == "issues: not fetched yet"
