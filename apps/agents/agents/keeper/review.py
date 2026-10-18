@@ -28,10 +28,10 @@ The run ends early, between jobs:
 - anything else -> `failed`, its message in `stop`.
 
 Steps (the Systems page's activity trail, `agents/activity.py`): every graph-tool call a pm, qa or
-keeper job makes is written to the ledger as a `ReviewStep` (`ledger/write_step`) `running` when
-it starts and finished (`ledger/finish_step`) `done` or `failed`, with its row count and the brain
-uids it touched (`agents.walk.subgraph`); each job then adds one `submit` step, `failed` when it
-wrote nothing. The pick records the picked gaps and the first one's text on the Review
+keeper job makes is written to the ledger as a `ReviewStep` by the review's `StepTrail`
+(`agents/keeper/steps.py`): `running` when it starts, then `done` or `failed` with its row count
+and the brain uids it touched; each job then adds one `submit` step, `failed` when it wrote
+nothing. The pick records the picked gaps and the first one's text on the Review
 (`ledger/review_picked`). Step writes are best effort: a ledger hiccup never changes a job.
 
 Whatever the end, the gaps this run moved to in_review and left undecided (still in_review, no
@@ -45,11 +45,8 @@ LogEntry `review_<state>`.
 
 from __future__ import annotations
 
-import json
-import logging
-import threading
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any, Literal, Protocol
 
 from brain.config import get_settings
@@ -69,14 +66,13 @@ from agents.keeper.model import Gap, Review, review_uid
 from agents.keeper.notice import notice
 from agents.keeper.project import reproject
 from agents.keeper.rules import pick_order
+from agents.keeper.steps import StepTrail
 from agents.roles import ROLES
 from agents.roles.base import Ctx, Job, Subject
 from agents.runner import RunResult, run_job
 from agents.toolset import Runner
 from agents.walk import subgraph
 from agents.work.store import WorkStore
-
-_log = logging.getLogger(__name__)
 
 GAP_LIMIT = 10_000  # open gaps read for picking (pick_order needs all of them)
 CONSULTED_BY = ("pm", "qa")
@@ -230,10 +226,16 @@ class _Run:
     should_stop: Callable[[], bool]
     now: Callable[[], str]
     uid: str  # the Review's
-    _n: int = 0  # the last step's number
-    _n_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def __post_init__(self) -> None:
+        # `subgraph` is looked up on each call, so this module's name is the one in use
+        self.trail = StepTrail(
+            self.store,
+            self.uid,
+            DB_USER,
+            self.now,
+            draw=lambda tool, params, rows: subgraph(tool, params, rows),
+        )
         self.picked: dict[str, int] = {}  # gap uid -> its attempts when picked, in pick order
         self.brain_error: Exception | None = None  # raised inside a job's write, re-raised after
 
@@ -399,35 +401,12 @@ class _Run:
     # --- steps on the activity trail ----------------------------------------------------------
 
     def tracked(self, role: str) -> Runner:
-        """The graph-tool runner for one job of `role`: each call is a step, written `running`
-        before it runs and finished with what it returned (or its error, which is re-raised so
-        the loop still reports it to the model)."""
+        """The graph-tool runner for one job of `role`: each call is a step (`StepTrail.wrap`)."""
         if self.graph_run is not None:
-            base = self.graph_run
-        else:
-            from brain import tools as graph_tools
+            return self.trail.wrap(self.graph_run, role)
+        from brain import tools as graph_tools
 
-            base = graph_tools.call
-
-        def run(slug: str, name: str, **params: Any) -> list[Any]:
-            n = self.step(role, name, "graph", params, "running")
-            try:
-                rows = base(slug, name, **params)
-            except Exception as e:
-                self.finish(n, "failed", error=f"{type(e).__name__}: {e}"[:300])
-                raise
-            try:  # drawing the step must never change what the job sees
-                data = [r.model_dump(mode="json", by_alias=True) if hasattr(r, "model_dump")
-                        else r for r in rows]  # fmt: skip
-                nodes, _ = subgraph(name, params, data)
-                touched = list(dict.fromkeys(nd["uid"] for nd in nodes if nd.get("uid")))
-            except Exception:
-                _log.warning("could not draw step %s of %s", n, self.uid, exc_info=True)
-                touched = []
-            self.finish(n, "done", count=len(rows), touched=touched)
-            return rows
-
-        return run
+        return self.trail.wrap(graph_tools.call, role)
 
     def submit_step(self, role: str, tool: str, subject: Subject, result: RunResult) -> None:
         """The job's submit as one step: `done` when it wrote, else `failed` with why."""
@@ -437,31 +416,7 @@ class _Run:
                      None)  # fmt: skip
         if claim:
             summary["claim"] = claim
-        status = "done" if result.rows else "failed"
-        self.step(role, tool, "submit", summary, status,
-                  error=None if result.rows else (result.stop or "no_write"))  # fmt: skip
-
-    def step(self, actor: str, tool: str, kind: str, params: dict[str, Any], status: str,
-             **ended: Any) -> int:  # fmt: skip
-        with self._n_lock:
-            self._n += 1
-            n = self._n
-        row = {"review": self.uid, "n": n, "actor": actor, "tool": tool, "kind": kind,
-               "input": json.dumps(params, default=str, ensure_ascii=False), "status": status,
-               "at": self.now(), **ended}  # fmt: skip
-        self._write_step("ledger/write_step", row)
-        return n
-
-    def finish(self, n: int, status: str, **ended: Any) -> None:
-        row = {"review": self.uid, "n": n, "status": status, "at": self.now(), **ended}
-        self._write_step("ledger/finish_step", row)
-
-    def _write_step(self, name: str, row: dict[str, Any]) -> None:
-        """A step write, best effort."""
-        try:
-            self.store.write(name, DB_USER, row)
-        except Exception:  # best effort: the trail must never change a job's outcome
-            _log.warning("could not write a step of %s", self.uid, exc_info=True)
+        self.trail.submit_step(role, tool, summary, result)
 
     def ctx(self, role: str) -> Ctx:
         """Ledger timestamps are ISO text; `iso()` passes them through (as decide._ctx does)."""

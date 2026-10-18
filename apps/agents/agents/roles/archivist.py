@@ -15,6 +15,7 @@ follows what loaded, never just what the model said.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -26,7 +27,9 @@ from agents.keeper.model import ArchiveRequest, gap_uid, iso
 from agents.roles.base import Ctx, Job, Role, Subject, write
 from agents.roles.keeper import log
 from agents.work.store import Row, WorkStore
-from agents.work.submits import SubmitArchiveAnswer
+from agents.work.submits import FindIn, SubmitArchiveAnswer
+
+_log = logging.getLogger(__name__)
 
 ACTOR = "archivist"
 QUEUE_LIMIT = 20  # open requests read per queue pass
@@ -87,37 +90,57 @@ def apply(
 
     superseded = {f.uid: f.superseded_by for f in kept if f.superseded_by}
     loaded: list[str] = []
+    no_room = None
     if kept:
         try:
             loaded = session.load(request.uid, [f.uid for f in kept], superseded=superseded)
         except BudgetSpent as e:  # no room at all: items or the daily cap
             run.trouble.spent.add(e.budget)
+            no_room = f"Nothing could be loaded: the {e.budget} budget is spent."
 
     rows: list[Row] = []
     for f in (f for f in kept if f.uid in loaded):
-        c = session.fetched[f.uid].candidate
-        rows += write(
-            store, ctx, "ledger/archive_write_find", request=request.uid, uid=f.uid, url=c.url,
-            title=c.title, date=iso(c.date.timestamp()) if c.date else None, why=f.why,
-            quote=f.quote, verdict=f.verdict, evidence=f.evidence, superseded_by=f.superseded_by,
-        )  # fmt: skip
-        if f.verdict == "conflicts":
-            _conflict(store, ctx, request, f.uid, c.title, f.why, f.evidence)
+        # The item is loaded: recording it is best effort, so one failed write never loses the
+        # others or the answer.
+        try:
+            rows += _record(store, ctx, request, f, session)
+        except Exception:
+            _log.warning("could not record find %s of %s", f.uid, request.uid, exc_info=True)
 
     if loaded:
         outcome, summary = "found", sub.summary
+        if len(loaded) < len(kept):
+            summary += f" Loaded {len(loaded)} of {len(kept)}; the rest hit a budget."
     elif sub.outcome == "already_in_brain":
         outcome, summary = "already_in_brain", sub.summary
     else:
         outcome = "nothing_found"
-        summary = f"Nothing could be loaded: {dropped[0]}" if dropped else sub.summary
-    partial = len(loaded) < len(kept) or bool(run.trouble.spent)
+        summary = no_room or (f"Nothing could be loaded: {dropped[0]}" if dropped else sub.summary)
+    partial = len(loaded) < len(kept) or run.trouble.partial
     action = "archive_loaded" if loaded else "archive_nothing"
     log(store, ctx, ACTOR, action, gap=request.gap, why=_why(request, summary), evidence=loaded)
     rows += write(
         store, ctx, "ledger/archive_set_request", uid=request.uid, to="answered", outcome=outcome,
         summary=summary, partial=partial, calls=session.calls_used, **{"from": ["running"]},
     )  # fmt: skip
+    return rows
+
+
+def _record(
+    store: WorkStore, ctx: Ctx, request: ArchiveRequest, f: FindIn, session: ArchiveSession
+) -> list[Row]:
+    """One loaded find on the ledger, and its conflict gap when it conflicts."""
+    c = session.fetched[f.uid].candidate
+    rows = write(
+        store, ctx, "ledger/archive_write_find", request=request.uid, uid=f.uid, url=c.url,
+        title=c.title, date=iso(c.date.timestamp()) if c.date else None, why=f.why,
+        quote=f.quote, verdict=f.verdict, evidence=f.evidence, superseded_by=f.superseded_by,
+    )  # fmt: skip
+    if f.verdict == "conflicts":
+        try:
+            _conflict(store, ctx, request, f.uid, c.title, f.why, f.evidence)
+        except Exception:
+            _log.warning("could not open the conflict gap of %s", f.uid, exc_info=True)
     return rows
 
 

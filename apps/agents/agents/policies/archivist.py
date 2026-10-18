@@ -1,5 +1,6 @@
 """Archivist policy: a reference request looks its refs up and fetches the ones the brain lacks;
-a topic request searches every source for its text and fetches the top hits. Each fetched item
+a topic request (or a reference with no refs) searches every source for its text and fetches the
+top hits; with no sources it has nothing to fetch and reports nothing found. Each fetched item
 becomes a find with verdict `holds`, its quote the start of the fetched text, its evidence the
 item the request came from (re-read with get_entity) or else the first related work item."""
 
@@ -15,10 +16,10 @@ QUOTE_CHARS = 40  # characters of the fetched text a find quotes
 
 def answer_request(context: dict[str, Any], results: Results) -> list[Call] | dict[str, Any]:
     req, sources = context["request"], context.get("sources") or []
-    if not (results.called("archive_lookup") or results.called("archive_search")):
+    if not results.calls:  # the first turn always calls something, so this ends
         return _first(req, sources)
     in_brain = [r for r in results.rows("archive_lookup") if r.get("in_brain")]
-    if req["kind"] == "reference":
+    if _by_refs(req):
         wanted = [(s["source"], s["id"]) for r in results.rows("archive_lookup")
                   if not r.get("in_brain") for s in r.get("sources") or []]  # fmt: skip
     else:
@@ -58,9 +59,14 @@ def _first(req: dict[str, Any], sources: list[str]) -> list[Call]:
         calls.append(("get_entity", {"uid": req["from_uid"]}))
     else:
         calls.append(("related_work_items", {"text": req["text"]}))
-    if req["kind"] == "reference":
-        return calls + [("archive_lookup", {"ref": r}) for r in req.get("refs") or []]
+    if _by_refs(req):
+        return calls + [("archive_lookup", {"ref": r}) for r in req["refs"]]
     return calls + [("archive_search", {"source": s, "terms": req["text"]}) for s in sources]
+
+
+def _by_refs(req: dict[str, Any]) -> bool:
+    """A reference request with refs looks them up; any other request searches its text."""
+    return req["kind"] == "reference" and bool(req.get("refs"))
 
 
 def _evidence(req: dict[str, Any], results: Results) -> str | None:

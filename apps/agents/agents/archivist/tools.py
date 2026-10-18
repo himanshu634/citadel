@@ -12,7 +12,12 @@ to the brain loop's toolset:
 Rows carry `uid`, so the loop's `seen` holds every searched and fetched item and the submit may
 name them. A spent budget is an ordinary tool error naming it (rule 11), so the run can still
 submit. What the job must act on after the run is noted in `Trouble`: a source that refused
-(PermissionError), one that kept failing (`SourceFailed`) and the budgets that ran out.
+(PermissionError), one that kept failing (`SourceFailed`), the budgets that ran out, and
+whether the soft deadline cut the run short.
+
+The soft deadline (rule 8): once `wrap_up()` is true every archive tool refuses with
+`WRAP_UP`, so the model submits what it has fetched; its finds are still checked and loaded.
+The hard stop is the job's `should_stop` (nothing is applied).
 """
 
 from __future__ import annotations
@@ -28,6 +33,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from agents.toolset import Toolset
 
 FETCH_CHARS = 6000  # characters of a fetched item's text the model reads
+WRAP_UP = "Time is nearly up: call submit_archive_answer now with what you have fetched."
+
+
+class TimeUp(Exception):
+    """The soft deadline passed: the archive tools refuse, the model should submit."""
 
 
 class _Params(BaseModel):
@@ -86,6 +96,12 @@ class Trouble:
     refused: str | None = None  # a source refused (PermissionError): the request is refused
     failed: str | None = None  # a source kept failing: the request fails (rule 20)
     spent: set[str] = field(default_factory=set)  # budgets that ran out: the answer is partial
+    wrapped_up: bool = False  # the soft deadline refused a call: the answer is partial
+
+    @property
+    def partial(self) -> bool:
+        """The run was cut short by a budget or the deadline (never served from memory)."""
+        return bool(self.spent) or self.wrapped_up
 
     @property
     def halt(self) -> bool:
@@ -101,6 +117,7 @@ def _candidate(c: Candidate, in_brain: bool) -> dict[str, Any]:
 class ArchiveTools:
     session: ArchiveSession
     trouble: Trouble = field(default_factory=Trouble)
+    wrap_up: Callable[[], bool] | None = None
 
     def lookup(self, ref: str) -> list[dict[str, Any]]:
         if node := self.session.lookup(ref):
@@ -127,6 +144,9 @@ class ArchiveTools:
 
     def run(self, name: str, **params: Any) -> list[dict[str, Any]]:
         handler: Callable[..., list[dict[str, Any]]] = getattr(self, name.removeprefix("archive_"))
+        if self.wrap_up is not None and self.wrap_up():
+            self.trouble.wrapped_up = True
+            raise TimeUp(WRAP_UP)
         try:
             return handler(**params)
         except BudgetSpent as e:
@@ -141,11 +161,15 @@ class ArchiveTools:
 
 
 def archive_toolset(
-    session: ArchiveSession, graph: Toolset, *, trouble: Trouble | None = None
+    session: ArchiveSession,
+    graph: Toolset,
+    *,
+    trouble: Trouble | None = None,
+    wrap_up: Callable[[], bool] | None = None,
 ) -> Toolset:
     """`graph` (the role's read tools) plus the three archive tools on `session`; what goes
-    wrong at the sources is noted in `trouble`."""
-    archive = ArchiveTools(session, trouble if trouble is not None else Trouble())
+    wrong at the sources is noted in `trouble`; past `wrap_up()` the archive tools refuse."""
+    archive = ArchiveTools(session, trouble if trouble is not None else Trouble(), wrap_up)
 
     def run(slug: str, name: str, **params: Any) -> list[Any]:
         if name in TOOLS:

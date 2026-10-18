@@ -47,6 +47,7 @@ class RunResult:
     submit: dict[str, Any] | None = None  # the accepted submit input
     stop: str | None = None  # why nothing was written: write_refused, no_answer, ...
     tools_called: list[str] = field(default_factory=list)
+    submitted: bool = False  # the run called its submit tool (accepted or not)
     episode: str | None = None
     model: str | None = None
 
@@ -213,13 +214,15 @@ def _think_and_write(
     state = _run_loop(g, inputs, follow)
 
     result.model = state.get("model")
-    result.tools_called = [
+    uses = [
         b["name"]
         for m in state.get("messages", [])
         if m["role"] == "assistant"
         for b in m["content"]
-        if b.get("type") == "tool_use" and b["name"] != job.submit.name
+        if b.get("type") == "tool_use"
     ]
+    result.tools_called = [u for u in uses if u != job.submit.name]
+    result.submitted = job.submit.name in uses
     answer = state.get("answer")
     if answer:
         result.submit = answer

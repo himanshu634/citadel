@@ -23,7 +23,7 @@ from agents.roles import ROLES, Ctx, Subject
 from agents.runner import run_job
 from agents.work.submits import SUBMITS, SubmitArchiveAnswer
 from brain import config, db, tools
-from brain.archive.backends import lookup_node
+from brain.archive.backends import SourceFailed, lookup_node
 from brain.archive.session import ArchiveSession, Budget
 from brain.config import get_settings
 from brain.testing import SYNTHETIC, falkordb_up, load_company, synthetic_company, write_company
@@ -209,6 +209,7 @@ def test_policy_over_item_cap_is_capped(store, slug):
     assert done.status == "answered" and done.outcome == "found"
     assert done.partial is True  # capped: never served from memory
     assert sorted(finds(store, req.uid)) == sorted(olds[:3])
+    assert done.summary == "five Loaded 3 of 5; the rest hit a budget."
     assert lookup_node(slug, {"uid": olds[3]}) is None
 
 
@@ -335,6 +336,8 @@ def test_stop_between_steps_is_partial(store, slug):
     assert done.status == "answered" and done.outcome == "nothing_found" and done.partial
     assert done.reason == "stopped"
     assert lookup_node(slug, {"uid": OLD}) is None
+    # stopped before the first model call: no tool call, no submit attempted, so no steps
+    assert store.read("ledger/review_steps", {"reviews": [req.uid]}) == []
 
 
 def test_steps_written_to_ledger(store, slug):
@@ -365,3 +368,147 @@ def test_run_job_should_stop_skips_apply():
     result = run_job(store, role, job, subject, ctx, client=offline_client("qa", "consult"),
                      graph_run=lambda slug, name, **p: [], should_stop=lambda: True)  # fmt: skip
     assert result.stop == "stopped" and result.rows == [] and result.submit is None
+
+
+# --- fix round 1 ------------------------------------------------------------------------------
+
+
+def test_wrap_up_submits_what_was_fetched(store, slug):
+    """Rule 8, soft deadline: once wrap_up() is true the archive tools refuse with a sentence
+    asking for the submit; the run submits and its verified find loads."""
+    fetched: list[str] = []
+
+    def on_event(e):
+        if e.get("kind") == "step_done" and e.get("tool") == "archive_fetch" and not e["error"]:
+            fetched.append(e["id"])
+
+    def two_fetches(context, results):
+        source = context["sources"][0]
+        if not results.called("archive_fetch"):
+            return [("get_entity", {"uid": ASKER}), ("archive_fetch", {"source": source,
+                                                                       "id": OLD})]  # fmt: skip
+        if len(results.calls) < 3:
+            return [("archive_fetch", {"source": source, "id": POLICY})]
+        [r] = results.rows("archive_fetch")
+        find = {"uid": r["uid"], "why": "old", "quote": " ".join(r["text"].split())[:40],
+                "verdict": "holds", "evidence": [ASKER]}  # fmt: skip
+        uid = context["request"]["uid"]
+        return {"request": uid, "outcome": "found", "summary": "one", "finds": [find]}
+
+    req = open_request(store)
+    done = answer(store, slug, req, client=ScriptedClient(two_fetches), on_event=on_event,
+                  wrap_up=lambda: bool(fetched))  # fmt: skip
+    assert done.status == "answered" and done.outcome == "found" and done.partial is True
+    assert list(finds(store, req.uid)) == [OLD] and done.calls == 1
+    [late] = [s for s in store.read("ledger/review_steps", {"reviews": [req.uid]})
+              if s["status"] == "failed"]  # fmt: skip
+    assert "Time is nearly up: call submit_archive_answer now" in late["error"]
+
+
+@pytest.fixture
+def no_item_room(monkeypatch):
+    monkeypatch.setenv("ARCHIVIST_ITEMS_ASK", "0")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+def test_nothing_loadable_has_a_fixed_summary(store, slug, no_item_room):
+    done = answer(store, slug, open_request(store))
+    assert done.status == "answered" and done.outcome == "nothing_found" and done.partial
+    assert done.summary == "Nothing could be loaded: the items budget is spent."
+    assert finds(store, done.uid) == {}
+
+
+class FindWritesFail(MemoryKeeperStore):
+    """A ledger that cannot record the find for OLD."""
+
+    def write(self, name, db_user, params):
+        if name == "ledger/archive_write_find" and params.get("uid") == OLD:
+            raise RuntimeError("ledger hiccup")
+        return super().write(name, db_user, params)
+
+
+def test_find_writes_are_best_effort(slug):
+    store = FindWritesFail(slug)
+
+    def two(context, results):
+        source = context["sources"][0]
+        if not results.called("archive_fetch"):
+            return [("get_entity", {"uid": ASKER})] + [
+                ("archive_fetch", {"source": source, "id": u}) for u in (OLD, POLICY)
+            ]
+        finds_ = [
+            {"uid": r["uid"], "why": "old", "quote": " ".join(r["text"].split())[:40],
+             "verdict": "holds", "evidence": [ASKER]}
+            for r in results.rows("archive_fetch")
+        ]  # fmt: skip
+        uid = context["request"]["uid"]
+        return {"request": uid, "outcome": "found", "summary": "two", "finds": finds_}
+
+    req = open_request(store, "topic", "old things", from_uid=None)
+    done = answer(store, slug, req, client=ScriptedClient(two))
+    assert done.status == "answered" and done.outcome == "found"
+    assert list(finds(store, req.uid)) == [POLICY]
+    assert lookup_node(slug, {"uid": OLD}) and lookup_node(slug, {"uid": POLICY})
+
+
+class BrokenLedger(MemoryKeeperStore):
+    def read(self, name, params, db_user=None):
+        raise RuntimeError("ledger down")
+
+    def write(self, name, db_user, params):
+        raise RuntimeError("ledger down")
+
+
+def test_never_raises_even_when_the_ledger_is_down(slug):
+    req = ArchiveRequest(uid=archive_uid(), kind="topic", text="t", asked_by="ask", norm="t",
+                         created_at=NOW, updated_at=NOW)  # fmt: skip
+    done = answer(BrokenLedger(slug), slug, req)
+    assert done.uid == req.uid and done.status == "failed"
+    assert done.reason == "error: RuntimeError: ledger down"
+
+
+def test_reference_without_refs_searches_its_text(store, slug):
+    req = open_request(store, "reference", "sessions JWT", refs=(), from_uid=ASKER)
+    done = answer(store, slug, req)
+    assert done.status == "answered" and done.outcome == "found"
+    assert OLD in finds(store, req.uid)
+
+
+def test_topic_without_sources_finds_nothing(store, slug):
+    req = open_request(store, "topic", "old auth system", from_uid=None)
+    done = answer(store, slug, req, backends={})
+    assert done.status == "answered" and done.outcome == "nothing_found"
+    assert not done.partial
+
+
+class FailingBackend(RefusingBackend):
+    key = "github:acme/flaky"
+
+    def parse_ref(self, ref):
+        return ref if ref.startswith("github:acme/flaky#") else None
+
+    def fetch(self, item_id):
+        raise SourceFailed("GitHub archive_item for acme/flaky failed: 502")
+
+
+def test_source_failed_fails_the_request(store, slug):
+    req = open_request(store, text="see #5", refs=["github:acme/flaky#5"])
+    done = answer(store, slug, req, backends={FailingBackend.key: FailingBackend()})
+    assert done.status == "failed"
+    assert done.reason == "GitHub archive_item for acme/flaky failed: 502"
+
+
+def test_step_limit_is_partial(store, slug):
+    def forever(context, results):
+        return [("get_entity", {"uid": ASKER})]
+
+    done = answer(store, slug, open_request(store), client=ScriptedClient(forever))
+    assert done.status == "answered" and done.outcome == "nothing_found" and done.partial
+    assert done.reason == "step_limit"
+
+
+def test_no_answer_fails(store, slug):
+    done = answer(store, slug, open_request(store), client=ScriptedClient(lambda c, r: None))
+    assert done.status == "failed" and done.reason == "no_answer"
