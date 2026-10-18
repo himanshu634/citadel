@@ -249,7 +249,7 @@ describe('propRows', () => {
 		expect(rows.is_bot).toBe('no');
 		expect(rows.files).toBe('a.py, b.py');
 		expect(rows.labels).toBe('—');
-		expect(rows.count).toBe('1,200');
+		expect(rows.count).toBe('1200');
 		expect(rows.state).toBe('—');
 	});
 

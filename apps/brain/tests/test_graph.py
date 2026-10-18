@@ -487,6 +487,7 @@ def test_a_chunk_uid_opens_its_passage_and_its_source(synthetic_graph):
 # Node.uid range index: a label-less `MATCH (n {uid: $uid})` is an All Node Scan, which on a
 # real company graph walks every chunk of text for each lookup.
 UID_LOOKUPS = {
+    "graph/link": {"a": "person:erin", "b": "synthetic:pr:4"},
     "graph/node": {"uid": "synthetic:pr:4"},
     "tools/get_entity": {"uid": "synthetic:pr:4", "limit": 25},
     "tools/path_between": {

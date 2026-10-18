@@ -466,7 +466,7 @@ function formatValue(key: string, value: unknown): string {
 	if (typeof value === 'number') {
 		// `*_ts` fields are epoch seconds.
 		if (key.endsWith('_ts') || key === 'ts') return formatDate(new Date(value * 1000));
-		return value.toLocaleString('en');
+		return String(value);
 	}
 	if (Array.isArray(value)) {
 		return value.length ? value.map((v) => formatValue('', v)).join(', ') : '—';

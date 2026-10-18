@@ -6,10 +6,10 @@ between them. Drag to pan, scroll or use the buttons to zoom, click a node to se
 selection lights the node's neighbours and links and dims everything else, and outlines the
 territories it reaches in ink.
 
-Given `details`, hovering shows what is stored (`GraphHoverCard`): a node's every property, read
-through `details` once the pointer rests on it, and, once zoomed in to `LINK_ZOOM` times the
-fitted scale, a drawn link's relationships with their properties. Without it (the Systems page),
-hover only names the node.
+Given `details` and zoomed in to `DETAIL_ZOOM` times the fitted scale, hovering shows what is
+stored (`GraphHoverCard`): a node's every property, or every relationship between the two ends of
+a drawn link with what each stores, read through `details` once the pointer rests there. Zoomed
+out, or without `details` (the Systems page), hover only names the node.
 
 A `trail` (the Systems page) draws an agent's run over the map: an ink line through the node each
 step sat on, numbered in order, the nodes it touched kept bright and the rest dimmed. While the
@@ -42,6 +42,8 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		type GraphLabel,
 		type GraphNode,
 		type GraphView,
+		type LinkDetails,
+		type MapDetails,
 		type NodeDetails
 	} from '$lib/types';
 
@@ -59,12 +61,13 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		trail?: Trail | null;
 		/** What the agent is doing now, beside its ring (only while `trail.current` is set). */
 		here?: string | null;
-		/** Reads everything a node stores; given, hovering a node or link shows it in a card. */
-		details?: ((uid: string) => Promise<NodeDetails>) | null;
+		/** Reads what a node or link stores; given, hovering one shows it in a card. */
+		details?: MapDetails | null;
 	};
 
-	/** Links can be pointed at from this many times the fitted scale: below it they are a haze. */
-	const LINK_ZOOM = 2;
+	/** Hover shows what is stored from this many times the fitted scale: below it nodes are
+	 *  specks a sweep of the pointer crosses by the dozen, and links are a haze. */
+	const DETAIL_ZOOM = 2;
 	/** How long the pointer rests on a node before its properties are read. */
 	const REST_MS = 150;
 	/** Room between the pointer, the hover card and the map's edges, in pixels. */
@@ -91,8 +94,11 @@ summary instead; the page's search and list are the keyboard way in (see design-
 	let hoverLinks = $state<number[]>([]);
 	/** The pointer on the map, where the hover card hangs. */
 	let pointer = $state({ x: 0, y: 0 });
-	/** What each hovered node stores, by uid: read once, kept while the map lives. */
-	let stored = $state<Record<string, { value: NodeDetails | null; error: string | null }>>({});
+	/** What each hovered node or pair of linked nodes stores, by `restKey`: read once, kept
+	 *  until the view changes. */
+	let stored = $state<
+		Record<string, { node?: NodeDetails; links?: LinkDetails[]; error: string | null }>
+	>({});
 	let palette = $state<Record<string, string>>({});
 
 	const index = $derived(new Map(view.nodes.map((n, i) => [n.uid, i])));
@@ -135,7 +141,7 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		};
 	});
 	const transform = $derived(moved ?? fitted);
-	const linksPointable = $derived(details !== null && transform.k >= fitted.k * LINK_ZOOM);
+	const detailed = $derived(details !== null && transform.k >= fitted.k * DETAIL_ZOOM);
 
 	function fit() {
 		moved = null;
@@ -216,7 +222,7 @@ summary instead; the page's search and list are the keyboard way in (see design-
 	let frame = 0;
 	$effect(() => {
 		// Read everything the drawing depends on, then draw once per animation frame.
-		const deps = [canvas, size.width, size.height, transform, palette, view, layout, pos, shown, keptView, roads, hood, reached, hover, hoverLinks, selected, trail, trailing, hereTerritory];
+		const deps = [canvas, size.width, size.height, transform, palette, view, layout, pos, shown, keptView, roads, hood, reached, hover, hoverLinks, detailed, selected, trail, trailing, hereTerritory];
 		void deps;
 		cancelAnimationFrame(frame);
 		frame = requestAnimationFrame(draw);
@@ -299,7 +305,7 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		}
 
 		// The links under the pointer: ink, so it is clear which line the card is about.
-		if (hoverLinks.length) {
+		if (detailed && hoverLinks.length) {
 			const e = view.edges[hoverLinks[0]];
 			const a = at(e.source);
 			const b = at(e.target);
@@ -409,7 +415,7 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		pointer = { x: sx, y: sy };
 		hover = nodeAt(event);
 		const links =
-			!hover && linksPointable
+			!hover && detailed
 				? edgesAt(view.edges, drawnLink, (uid) => pos.get(uid), wx, wy, 5 / transform.k)
 				: [];
 		if (links.join() !== hoverLinks.join()) hoverLinks = links;
@@ -421,21 +427,31 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		stored = {};
 	});
 
-	// Read what a hovered node stores once the pointer rests on it; a reply for a node the pointer
+	/** The hovered link's two ends, sorted, so either direction is one pair. */
+	const pair = $derived.by(() => {
+		if (hover || !detailed || !hoverLinks.length) return null;
+		const e = view.edges[hoverLinks[0]];
+		return [e.source, e.target].sort() as [string, string];
+	});
+	/** What the pointer rests on: `node <uid>` or `link <a> <b>`. */
+	const restKey = $derived(
+		!detailed ? null : hover ? `node ${hover}` : pair ? `link ${pair.join(' ')}` : null
+	);
+
+	// Read what the pointer rests on once it has stayed REST_MS; a reply for something the pointer
 	// has left is still kept for the next time.
 	$effect(() => {
-		const uid = hover;
+		const key = restKey;
 		const read = details;
-		if (!uid || !read || untrack(() => uid in stored)) return;
+		const uid = hover;
+		const ends = pair;
+		if (!key || !read || untrack(() => key in stored)) return;
+		const failed = (e: unknown) =>
+			(stored[key] = { error: e instanceof Error ? e.message : 'Could not read the graph.' });
 		const timer = setTimeout(() => {
-			read(uid).then(
-				(value) => (stored[uid] = { value, error: null }),
-				(e: unknown) =>
-					(stored[uid] = {
-						value: null,
-						error: e instanceof Error ? e.message : 'Could not read this node.'
-					})
-			);
+			if (uid) read.node(uid).then((node) => (stored[key] = { node, error: null }), failed);
+			else if (ends)
+				read.link(...ends).then((links) => (stored[key] = { links, error: null }), failed);
 		}, REST_MS);
 		return () => clearTimeout(timer);
 	});
@@ -496,29 +512,29 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		return { left: fit(left, size.width - w), top: fit(top, size.height - h) };
 	});
 	const card = $derived.by(() => {
-		if (!details) return null;
+		if (!details || !restKey) return null;
+		const got = stored[restKey];
+		const state = { loading: !got, error: got?.error ?? null };
 		if (under) {
-			const got = stored[under.uid];
 			return {
+				...state,
 				node: { name: nodeName(under), label: under.label, kind: kindWord(under) },
 				link: null,
-				sections: got?.value ? [{ rows: propRows(got.value.props) }] : [],
-				loading: !got,
-				error: got?.error ?? null
+				sections: got?.node ? [{ rows: propRows(got.node.props) }] : []
 			};
 		}
-		if (!hoverLinks.length) return null;
+		if (!pair) return null;
 		const first = view.edges[hoverLinks[0]];
+		// Name the ends as the drawn link runs; each relationship says its own direction.
+		const from = got?.links?.[0]?.source ?? first.source;
 		return {
+			...state,
 			node: null,
-			link: { from: end(first.source), to: end(first.target) },
-			sections: hoverLinks.map((i) => {
-				const e = view.edges[i];
-				const back = e.source !== first.source;
-				return { heading: back ? `← ${e.rel}` : `${e.rel} →`, rows: propRows(e.props) };
-			}),
-			loading: false,
-			error: null
+			link: { from: end(from), to: end(from === pair[0] ? pair[1] : pair[0]) },
+			sections: (got?.links ?? []).map((e) => ({
+				heading: e.source === from ? `${e.rel} →` : `← ${e.rel}`,
+				rows: propRows(e.props)
+			}))
 		};
 	});
 	const picked = $derived(selected ? view.nodes[index.get(selected) ?? -1] : null);

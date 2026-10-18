@@ -51,7 +51,6 @@ class GraphEdge(BaseModel):
     source: str
     rel: str
     target: str
-    props: dict[str, Any] = {}  # what the relationship stores (source, count, pattern, ...)
 
 
 class NodeDetails(BaseModel):
@@ -59,6 +58,12 @@ class NodeDetails(BaseModel):
 
     uid: str
     label: str
+    props: dict[str, Any]
+
+
+class LinkDetails(GraphEdge):
+    """One relationship between two nodes and what it stores (source, count, pattern, ...)."""
+
     props: dict[str, Any]
 
 
@@ -194,12 +199,7 @@ def build(
     return GraphView(
         slug=slug,
         nodes=nodes,
-        edges=[
-            GraphEdge(
-                source=r["source"], rel=r["rel"], target=r["target"], props=r.get("props") or {}
-            )
-            for r in links
-        ],
+        edges=[GraphEdge(source=r["source"], rel=r["rel"], target=r["target"]) for r in links],
         territories=terr,
         bots=len(bot_uids),
         bots_shown=bots,
@@ -227,3 +227,12 @@ def node_details(slug: str, uid: str) -> NodeDetails | None:
     row = rows[0]
     props = {k: v for k, v in (row["props"] or {}).items() if k not in HIDDEN_PROPS}
     return NodeDetails(uid=row["uid"], label=row["label"], props=props)
+
+
+def link_details(slug: str, a: str, b: str) -> list[LinkDetails]:
+    """Every relationship between nodes `a` and `b`, either way round; empty when not linked."""
+    rows = db.run(slug, "graph/link", {"a": a, "b": b}, read_only=True)
+    return [
+        LinkDetails(source=r["source"], rel=r["rel"], target=r["target"], props=r["props"] or {})
+        for r in rows
+    ]

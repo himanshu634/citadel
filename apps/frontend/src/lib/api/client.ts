@@ -22,6 +22,7 @@ import type {
 	GapStatus,
 	GithubRepoCheck,
 	GithubTokenCheck,
+	LinkDetails,
 	Entity,
 	GraphView,
 	LogEntry,
@@ -172,6 +173,12 @@ export const api = {
 	/** Everything one node stores, for the map's hover card. 404 when the graph has no such node. */
 	graphNode: (slug: string, uid: string) =>
 		request<NodeDetails>('GET', `${company(slug)}/graph/node?uid=${encodeURIComponent(uid)}`),
+	/** Every relationship between two nodes, either way round. 404 when they are not linked. */
+	graphLink: (slug: string, a: string, b: string) =>
+		request<LinkDetails[]>(
+			'GET',
+			`${company(slug)}/graph/link?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`
+		),
 	/** One node's fields (the `get_entity` tool); null when the graph has no such node. */
 	entity: (slug: string, uid: string) =>
 		request<{ rows: Entity[] }>('POST', `${company(slug)}/tools/get_entity`, {

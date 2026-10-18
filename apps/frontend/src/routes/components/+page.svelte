@@ -75,7 +75,7 @@
 		type Company,
 		type CompanyConfig,
 		type CompanyStatus,
-		type NodeDetails,
+		type MapDetails,
 		type NodeType,
 		type RepoLookup,
 		type SourceConfig,
@@ -466,11 +466,20 @@
 		source: 'canonical_jsonl',
 		url: 'https://example.com/synthetic/app/pull/4'
 	};
-	const sampleDetails = (uid: string): Promise<NodeDetails> => {
-		const n = syntheticGraph.nodes.find((x) => x.uid === uid);
-		if (!n) return Promise.reject(new Error('This node is no longer in the graph.'));
-		const { degree: _d, territory: _t, comments: _c, label, ...props } = n;
-		return new Promise((done) => setTimeout(() => done({ uid, label, props }), 400));
+	const later = <T,>(value: T) => new Promise<T>((done) => setTimeout(() => done(value), 400));
+	const sampleDetails: MapDetails = {
+		node: (uid) => {
+			const n = syntheticGraph.nodes.find((x) => x.uid === uid);
+			if (!n) return Promise.reject(new Error('This node is no longer in the graph.'));
+			const { degree: _d, territory: _t, comments: _c, label, ...props } = n;
+			return later({ uid, label, props });
+		},
+		link: (a, b) =>
+			later(
+				syntheticGraph.edges
+					.filter((e) => [e.source, e.target].sort().join() === [a, b].sort().join())
+					.map((e) => ({ ...e, props: { source: 'canonical_jsonl' } }))
+			)
 	};
 	const graphNode = (uid: string) => syntheticGraph.nodes.find((n) => n.uid === uid);
 	const territoryOf = (uid: string) =>
@@ -1284,8 +1293,8 @@
 		<p class="note">
 			What a node or link of the map stores, while the pointer is on it. A node lists every
 			property it was loaded with (read when the pointer rests on it); a link lists each
-			relationship between its two ends. Links can be pointed at once zoomed in twice. Hover the
-			map above to see it live.
+			relationship between its two ends. The map shows it once zoomed in twice: zoom the map
+			above in and hover a dot or a line to see it live.
 		</p>
 		<div class="hover-cards">
 			<GraphHoverCard

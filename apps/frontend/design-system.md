@@ -146,10 +146,11 @@ Rules:
 - **Selected is an ink ring**, never accent (the Graph nav item holds the accent). A selection
   lights its node, neighbours and links, outlines the territories it reaches in ink, and dims
   everything else. Hover is a thinner ink ring and a raised name label.
-- On the Graph page hover also says what is stored (`GraphHoverCard`, in place of the name
-  label): a node's every property, read from the API once the pointer rests on it (150ms), and,
-  once zoomed in to twice the fitted scale, a link's: the hovered line turns ink and the card
-  lists every relationship between its two ends with what each stores. Only links drawn as their
+- On the Graph page, zoomed in to twice the fitted scale, hover says what is stored
+  (`GraphHoverCard`, in place of the name label): a node's every property, or for a link (the
+  hovered line turns ink) every relationship between its two ends with what each stores, read
+  from the API once the pointer rests there (150ms). Zoomed out the dots are too dense for a card
+  that follows the pointer, so hover stays the name label. Only links drawn as their
   own line can be pointed at (inside a territory, or the selection's own); the routes between
   territories bundle many links and name none. The card sits beside the pointer, turns away from
   the map's edges and never takes the pointer. The Systems page keeps the plain name label.

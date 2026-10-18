@@ -39,7 +39,7 @@ the pointer (it is read, not used), so long values are cut and the card does not
 		</p>
 		<p class="title">{node.name}</p>
 	{:else if link}
-		<p class="kicker">{sections.length === 1 ? 'Link' : `${sections.length} links`}</p>
+		<p class="kicker">{sections.length > 1 ? `${sections.length} links` : 'Link'}</p>
 		<p class="ends">
 			<span class="end"><span class="dot" style:--node={dot(link.from.label)} aria-hidden="true"></span>{link.from.name}</span>
 			<span class="end"><span class="dot" style:--node={dot(link.to.label)} aria-hidden="true"></span>{link.to.name}</span>
