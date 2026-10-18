@@ -14,12 +14,15 @@ readable copy, written beside them in agent_<slug> as the run happens:
 A graph cannot link into another graph, so a `Ref` stands for a brain_<slug> node by uid; it
 answers "which chats touched System Auth" (`ref_threads`). ToolCall.kind is `graph` (a named
 graph tool), `submit` (the answer check), `mcp` (a tool on an MCP server, through the API's MCP
-connector) or `server` (an Anthropic server tool). Every node also carries `thread_id`, so a
+connector), `server` (an Anthropic server tool) or `archive` (a step of the Archivist's run
+inside an `ask_archivist` call: its `parent` is that call's id, its `n` its place in that run,
+and a reopened thread nests it under the call). Every node also carries `thread_id`, so a
 thread reads (and deletes) in a few indexed queries. Times are epoch ms.
 
 `Recorder` turns one run's events (`agents.ask.run_events`) into writes: `start` opens a turn,
-`llm` adds a response and its calls, `step_done` stores a call's result, and the answer (or the
-error) closes the turn. Writes are best effort, like traces: a failed write is logged and never
+`llm` adds a response and its calls, `step_done` stores a call's result, an `archive_step`
+whose event is `step_done` stores one of the Archivist's calls, and the answer (or the error)
+closes the turn. Writes are best effort, like traces: a failed write is logged and never
 stops the answer. Only the Ask API and the CLI record; `ask` and evals never do.
 Queries live in queries/chat/; `MemoryChatStore` is the test double with the same behaviour.
 """
@@ -43,7 +46,7 @@ from agents.loop import SUBMIT
 log = logging.getLogger(__name__)
 
 Status = Literal["running", "done", "stopped", "failed"]
-Kind = Literal["graph", "submit", "mcp", "server"]
+Kind = Literal["graph", "submit", "mcp", "server", "archive"]
 TITLE_CHARS = 80
 NEVER = 2**62  # `before` for the first page of the chat list
 
@@ -95,7 +98,9 @@ class ChatLlmCall(BaseModel):
 
 class ChatStep(BaseModel):
     """One tool call, in the Ask page's step shape plus where it came from. `call` is the seq of
-    the response that asked for it; `result` is set for MCP and server calls only."""
+    the response that asked for it; `result` is set for MCP and server calls only. An
+    `ask_archivist` call holds the Archivist's calls in `steps` (kind `archive`, `parent` its
+    id, `n` their order)."""
 
     id: str
     call: int | None = None
@@ -112,6 +117,8 @@ class ChatStep(BaseModel):
     rows: list[Any] = []
     nodes: list[dict[str, Any]] = []
     rels: list[dict[str, Any]] = []
+    parent: str | None = None
+    steps: list[ChatStep] = []
 
 
 class ChatTurn(BaseModel):
@@ -192,10 +199,14 @@ def assemble(
             )
         )
     by_turn_steps: dict[str, list[ChatStep]] = {}
+    nested: dict[tuple[str, str], list[ChatStep]] = {}  # (turn, parent id) -> archive steps
     # MCP and server calls have no step number `n` (the Ask page numbers graph steps only).
     order = lambda s: (s.get("call") or 0, s.get("kind") == "submit", s.get("n") or 0)  # noqa: E731
     for s in sorted(steps, key=order):
-        by_turn_steps.setdefault(s["turn"], []).append(
+        parent = s.get("parent")
+        into = nested.setdefault((s["turn"], parent), []) if parent else (
+            by_turn_steps.setdefault(s["turn"], []))  # fmt: skip
+        into.append(
             ChatStep(
                 id=s["id"],
                 call=s.get("call"),
@@ -212,8 +223,12 @@ def assemble(
                 rows=_loads(s.get("rows_json"), []),
                 nodes=_loads(s.get("nodes_json"), []),
                 rels=_loads(s.get("rels_json"), []),
+                parent=parent,
             )
         )
+    for turn, outer in by_turn_steps.items():
+        for step in outer:
+            step.steps = nested.get((turn, step.id), [])
     return Thread(
         id=header["id"],
         title=header["title"] or header["id"],
@@ -442,6 +457,7 @@ class Recorder:
         self.turn: str | None = None
         self.started = time.perf_counter()
         self.closed = False
+        self.archive_steps: dict[str, int] = {}  # ask_archivist call id -> its steps so far
 
     def _try(self, name: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         try:
@@ -470,6 +486,8 @@ class Recorder:
             self._llm(event)
         elif kind == "step_done":
             self._step_done(event)
+        elif kind == "archive_step" and event.get("event") == "step_done" and event.get("parent"):
+            self._archive_done(event)
 
     def _llm(self, e: dict[str, Any]) -> None:
         usage = e.get("usage") or {}
@@ -507,18 +525,35 @@ class Recorder:
             },
         )
 
-    def _step_done(self, e: dict[str, Any]) -> None:
+    def _archive_done(self, e: dict[str, Any]) -> None:
+        """One of the Archivist's calls, under the `ask_archivist` call it ran in. Its id is
+        the Archivist's own (it may repeat across runs), so its uid also holds the parent's."""
+        parent = e["parent"]
+        n = self.archive_steps[parent] = self.archive_steps.get(parent, 0) + 1
+        self._step_done(e, uid=f"{self.turn}:{parent}:{e['id']}", kind="archive", n=n,
+                        parent=parent)  # fmt: skip
+
+    def _step_done(
+        self,
+        e: dict[str, Any],
+        *,
+        uid: str | None = None,
+        kind: str | None = None,
+        n: int | None = None,
+        parent: str | None = None,
+    ) -> None:
         nodes = e.get("nodes") or []
         self._try(
             "tool_done",
             {
                 "turn": self.turn,
                 "thread_id": self.thread_id,
-                "uid": f"{self.turn}:{e['id']}",
+                "uid": uid or f"{self.turn}:{e['id']}",
                 "id": e["id"],
                 "tool": e["tool"],
-                "kind": "submit" if e["tool"] == SUBMIT else "graph",
-                "n": e.get("n"),
+                "kind": kind or ("submit" if e["tool"] == SUBMIT else "graph"),
+                "parent": parent,
+                "n": n if n is not None else e.get("n"),
                 "input_json": _json(e.get("input") or {}),
                 "status": "failed" if e.get("error") else "done",
                 "error": e.get("error"),

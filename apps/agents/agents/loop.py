@@ -20,6 +20,7 @@ The graph owns the loop (not the SDK tool runner), so every step is checkpointed
 
 from __future__ import annotations
 
+import contextvars
 import json
 import operator
 import re
@@ -95,6 +96,12 @@ class AgentState(TypedDict, total=False):
 
 
 ENTRY = "call_claude"  # where a turn enters this loop
+
+# The id of the tool call run_tools is running: a tool that streams steps of its own (Ask's
+# `ask_archivist`) hangs them off it.
+CURRENT_STEP: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "CURRENT_STEP", default=None
+)
 
 
 Check = Callable[[dict[str, Any], dict[str, Any]], str | None]  # (input, seen) -> problem
@@ -179,7 +186,11 @@ def add_brain_loop(
             if use["name"] == submit:
                 continue
             started = time.perf_counter()
-            out = toolset.call(state["slug"], use["name"], use.get("input"))
+            token = CURRENT_STEP.set(use["id"])
+            try:
+                out = toolset.call(state["slug"], use["name"], use.get("input"))
+            finally:
+                CURRENT_STEP.reset(token)
             ms = round((time.perf_counter() - started) * 1000)
             new_seen.update(out.seen)
             results.append(result_block(use["id"], out.content, out.is_error))
@@ -207,7 +218,7 @@ def add_brain_loop(
             else:
                 answer = use["input"]
                 results.append(result_block(use["id"], "Answer recorded.", False))
-            record({"id": use["id"], "tool": SUBMIT, "input": {}, "error": problem})
+            record({"id": use["id"], "tool": submit, "input": {}, "error": problem})
         return {
             "messages": [{"role": "user", "content": results}],
             "seen": new_seen,

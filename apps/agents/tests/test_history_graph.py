@@ -108,3 +108,30 @@ def test_delete_removes_the_history_and_unused_refs(store):
 
 def test_reading_a_company_with_no_chats_is_empty(store):
     assert store.list_threads(history.NEVER, 10) == [] and store.get_thread("nope") is None
+
+
+def test_archive_steps_read_back_nested_under_their_call(store):
+    """The Archivist's calls inside ask_archivist (kind archive) keep their parent; a reopened
+    thread nests them under it, in order, even when their ids repeat another run's."""
+    rec = history.Recorder(store, "Why JWT?")
+    call = {"id": "t1", "tool": "ask_archivist", "kind": "graph", "input": {"kind": "topic"}}
+    llm = {"kind": "llm", "seq": 1, "usage": {}, "calls": [call]}
+    inner = [("p1_0", "archive_lookup"), ("p2_0", "archive_fetch"), ("p3_0", "submit_answer")]
+    rec.on({"kind": "start", "thread_id": "th_archive"})
+    rec.on(llm)
+    for id_, tool in inner:
+        rec.on({"kind": "archive_step", "parent": "t1", "event": "step", "id": id_, "tool": tool})
+        rec.on({"kind": "archive_step", "parent": "t1", "event": "step_done", "id": id_,
+                "tool": tool, "input": {}, "ms": 3, "count": 1,
+                "uids": ["synthetic:issue:900"]})  # fmt: skip
+    rec.on({"kind": "step_done", "id": "t1", "n": 1, "tool": "ask_archivist", "input": {},
+            "ms": 9, "count": 1})  # fmt: skip
+    rec.answer({"kind": "answer", "text": "x", "sources": [], "stop": "end_turn"})
+    [turn] = store.get_thread("th_archive").turns
+    [outer] = turn.steps
+    assert (outer.tool, outer.kind, outer.parent) == ("ask_archivist", "graph", None)
+    assert [(s.id, s.tool, s.kind, s.parent, s.n) for s in outer.steps] == [
+        ("p1_0", "archive_lookup", "archive", "t1", 1),
+        ("p2_0", "archive_fetch", "archive", "t1", 2),
+        ("p3_0", "submit_answer", "archive", "t1", 3)]  # fmt: skip
+    assert [t.id for t in store.ref_threads("synthetic:issue:900", 5)] == ["th_archive"]

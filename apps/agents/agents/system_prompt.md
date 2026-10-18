@@ -53,6 +53,24 @@ Relationships:
 - Answer from the sources first. Use Keeper notes (`keeper_notes`, `Claim` neighbours) only for
   what the sources don't say, and say that this part comes from the Keeper.
 
+## Older history (the Archivist)
+
+The graph holds only a window of recent work. Older items can be fetched with `ask_archivist`.
+- Call it when an item you need is referred to but missing: `get_entity` lists it in
+  `unresolved_refs`, or a text points at an issue, PR or ticket the graph does not have. Pass
+  `kind` "reference", the refs as `text` (as written in `unresolved_refs`) and the item they
+  were found in as `from_uid`.
+- Call it with `kind` "topic" when the question is about history older than the window and the
+  graph tools found nothing on it. Do not call it for things the graph already answers.
+- Call it at most once per missing item. It is slow; do not retry with other wordings.
+- Its `finds` are loaded into the graph: cite them by `uid` like any other node. When you cite
+  one, give its date ("in March 2025, #900 decided…").
+- A newer item inside the window wins over an archived one when they disagree. When a find's
+  `verdict` is "superseded", say so and name the newer item: open its `superseded_by` uid with
+  `get_entity` to cite it.
+- A row with a `reason` and no finds (failed, refused, timeout, out of scope) means the archive
+  could not be reached for this. Answer with what you have and say what you could not check.
+
 ## When the person offers to answer questions
 
 The brain also learns from people. When someone asks you to ask them questions, says "interview

@@ -1,8 +1,9 @@
 """What one tool call touched in the graph, as a small subgraph the UI can draw.
 
 Why: the Ask page draws the agent's walk through the company graph, one tool call at a time.
-Only `path_between`, `get_entity` and `keeper_notes` return relationships; the other tools
-return rows whose fields name nodes (a person's teams, an expert's system). `subgraph` turns any
+Only `path_between`, `get_entity` and `keeper_notes` return relationships (`ask_archivist` its
+finds, each MENTIONed by the item that referred to it); the other tools return rows whose
+fields name nodes (a person's teams, an expert's system). `subgraph` turns any
 tool's rows into nodes and relationships with the graph's own uids, so the steps of one answer
 merge into one picture. A relationship the rows only imply (an expert "works on" a system, two
 systems change together) is marked `inferred`, and the UI draws it differently from a stored one.
@@ -240,7 +241,23 @@ def _keeper_notes(b: _Builder, params: Row, rows: list[Row]) -> None:
             b.rel(claim, ev, "EVIDENCE")
 
 
+def _item_label(uid: str) -> str:
+    return "Document" if ":doc:" in uid else "Change" if ":commit:" in uid else "WorkItem"
+
+
+def _ask_archivist(b: _Builder, params: Row, rows: list[Row]) -> None:
+    """The items the Archivist loaded, each MENTIONed by the item the reference was found in
+    (`from_uid`); for a topic request that link is only implied."""
+    finds = [f for r in rows for f in r.get("finds") or [] if f.get("uid")]
+    origin = params.get("from_uid")
+    asker = b.node(origin, _item_label(origin)) if origin and finds else None
+    for f in finds:
+        found = b.node(f["uid"], _item_label(f["uid"]), f.get("title"), f.get("url"))
+        b.rel(asker, found, "MENTIONS", inferred=params.get("kind") != "reference")
+
+
 _BY_TOOL: dict[str, Callable[[_Builder, Row, list[Row]], None]] = {
+    "ask_archivist": _ask_archivist,
     "collaborators": _collaborators,
     "experts_for_system": _experts_for_system,
     "get_entity": _get_entity,

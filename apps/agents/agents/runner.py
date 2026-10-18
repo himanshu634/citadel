@@ -179,7 +179,9 @@ def _run_loop(g: StateGraph, inputs: dict[str, Any], follow: _Follow) -> dict[st
     go to `on_event`, and `should_stop` is asked after each saved step while there is no answer
     (a run whose submit was accepted is complete)."""
     config = {"recursion_limit": follow.recursion_limit}
-    graph = g.compile()
+    # No checkpoints, not even a parent's: a job run inside another graph's node (Ask's
+    # ask_archivist) must never save into that graph's thread.
+    graph = g.compile(checkpointer=False)
     if follow.on_event is None and follow.should_stop is None:
         try:
             return graph.invoke(inputs, config)
