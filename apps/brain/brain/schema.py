@@ -2,7 +2,9 @@
 
 Why: indexes make MERGE-on-uid and the named tools fast, and the full-text and vector
 indexes enable search. Setup must be safe to re-run, so "already indexed" errors are skipped.
-The statements live in queries/schema/*.cypher; this module only runs them in order.
+The statements live in queries/schema/*.cypher; this module only runs them in order. After the
+indexes it labels every node `Node` (schema/node_label): the loads do that as they write, so
+this only touches a graph loaded before the label existed, and nothing the second time.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ class SchemaReport:
     created: list[str] = field(default_factory=list)
     existing: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    backfilled: int = 0  # nodes that lacked the Node label and were given it
 
 
 def apply_schema(slug: str, on_event: OnEvent | None = None) -> SchemaReport:
@@ -42,6 +45,7 @@ def apply_schema(slug: str, on_event: OnEvent | None = None) -> SchemaReport:
                 if "already indexed" not in str(e):
                     raise
                 report.existing.append(stmt)
+    report.backfilled = db.run(slug, "schema/node_label")[0]["n"]
     report.warnings.extend(_check_vector_dim(slug, dim))
     emit(BuildEvent(slug, "prepare", "done"))
     return report

@@ -5,7 +5,8 @@
 // example: loader.load("falkordb", [Change(uid="github:FalkorDB/FalkorDB:commit:abc123", ...)])
 UNWIND $rows AS row
 MERGE (c:Change {uid: row.uid})
-SET c.company = $company,
+SET c:Node,
+    c.company = $company,
     c.sha = row.sha,
     c.date = row.date,
     c.ts = row.ts,
