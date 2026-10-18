@@ -1,8 +1,9 @@
 """What one tool call touched in the graph, as a small subgraph the UI can draw.
 
 Why: the Ask page draws the agent's walk through the company graph, one tool call at a time.
-Only `path_between`, `get_entity` and `keeper_notes` return relationships (`ask_archivist` its
-finds, each MENTIONed by the item that referred to it); the other tools return rows whose
+Only `path_between`, `get_entity`, `keeper_notes` and `run_cypher` return relationships
+(`ask_archivist` its finds, each MENTIONed by the item that referred to it); the other tools
+return rows whose
 fields name nodes (a person's teams, an expert's system). `subgraph` turns any
 tool's rows into nodes and relationships with the graph's own uids, so the steps of one answer
 merge into one picture. A relationship the rows only imply (an expert "works on" a system, two
@@ -243,7 +244,13 @@ def _bottlenecks(b: _Builder, params: Row, rows: list[Row]) -> None:
         b.item(r)
 
 
-_LABEL_BY_PREFIX = {"system": "System", "person": "Person", "team": "Team"}
+_LABEL_BY_PREFIX = {
+    "system": "System",
+    "person": "Person",
+    "team": "Team",
+    "chunk": "Chunk",
+    "claim": "Claim",
+}
 
 
 def _keeper_notes(b: _Builder, params: Row, rows: list[Row]) -> None:
@@ -285,6 +292,36 @@ def _ask_archivist(b: _Builder, params: Row, rows: list[Row]) -> None:
         b.rel(asker, found, "MENTIONS", inferred=not _named(f, refs))
 
 
+def _run_cypher(b: _Builder, params: Row, rows: list[Row]) -> None:
+    """A query the agent wrote returns any shape: draw every node it names (a returned node
+    with its `label`, else a `uid` or `*_uid` value, labelled from the uid) and every returned
+    relationship whose two ends are drawn (`type`, `from`, `to`)."""
+    rels: list[Row] = []
+
+    def visit(v: Any) -> None:
+        if isinstance(v, list):
+            for x in v:
+                visit(x)
+            return
+        if not isinstance(v, dict):
+            return
+        if isinstance(v.get("type"), str) and "from" in v and "to" in v:
+            rels.append(v)
+        uid = v.get("uid")
+        if isinstance(uid, str) and uid:
+            title = v.get("title") or v.get("name") or v.get("login") or v.get("subject")
+            b.node(uid, v.get("label") or _label_of(uid), title, v.get("url"))
+        for k, x in v.items():
+            if k.endswith("_uid") and isinstance(x, str) and x:
+                b.node(x, _label_of(x))
+            else:
+                visit(x)
+
+    visit([r.get("rows") for r in rows])
+    for r in rels:
+        b.rel(r.get("from"), r.get("to"), r["type"])
+
+
 _BY_TOOL: dict[str, Callable[[_Builder, Row, list[Row]], None]] = {
     "ask_archivist": _ask_archivist,
     "bottlenecks": _bottlenecks,
@@ -303,6 +340,7 @@ _BY_TOOL: dict[str, Callable[[_Builder, Row, list[Row]], None]] = {
     "recent_work_items": _recent_work_items,
     "related_documents": _related_documents,
     "related_work_items": _related_work_items,
+    "run_cypher": _run_cypher,
     "semantic_search": _semantic_search,
     "work_history": _work_history,
 }

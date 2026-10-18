@@ -1,9 +1,11 @@
 """Named query tools: the only way the CLI, the agents and the UI read the graph.
 
-Why: answers must be deterministic and explainable, so there is no LLM-generated Cypher. Each
-tool is one file in queries/tools/<name>.cypher plus, here, a pydantic model for its parameters
+Why: answers must be deterministic and explainable, so the tools are named queries. Each tool
+is one file in queries/tools/<name>.cypher plus, here, a pydantic model for its parameters
 (what a caller may pass, with defaults and descriptions) and one for its result rows (always
-with uids, and urls where the node has one, so every answer can cite its sources).
+with uids, and urls where the node has one, so every answer can cite its sources). The one
+exception is `run_cypher` (`brain/cypher.py`): a read-only query the agent writes, for a
+question no named tool fits, run with its own guards.
 
     TOOLS["experts_for_system"].params.model_json_schema()   # input schema for an agent tool
     call("falkordb", "experts_for_system", system="CI")      # -> list[Expert]
@@ -24,7 +26,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from brain import db
+from brain import cypher, db
 from brain.canonical import person_uid
 from brain.embeddings import EmbeddingUnavailable, get_embedder
 
@@ -572,6 +574,8 @@ class Tool:
     prepare: Callable[[dict[str, Any]], dict[str, Any] | None] = lambda p: p
     # run when the query returns no rows, with the query params (e.g. to raise why)
     on_empty: Callable[[str, dict[str, Any]], None] | None = None
+    # runs the tool instead of its named query file: (slug, query params) -> rows
+    run: Callable[[str, dict[str, Any]], list[dict[str, Any]]] | None = None
 
     @property
     def query(self) -> str:
@@ -724,6 +728,15 @@ TOOLS: dict[str, Tool] = {
             BottleneckParams,
             Bottleneck,
         ),
+        Tool(
+            "run_cypher",
+            "Run one read-only Cypher query you write on the company graph, for a question no "
+            "other tool fits (an unusual filter, count or pattern). Follow the Cypher guide in "
+            "the system prompt; a failed query comes back as an error to fix.",
+            cypher.CypherParams,
+            cypher.CypherResult,
+            run=cypher.run,
+        ),
         Tool("graph_stats", "Node and relationship counts in the company graph.", NoParams, Stat),
         Tool(
             "keeper_notes",
@@ -744,7 +757,10 @@ def call(slug: str, name: str, **params: Any) -> list[_Model]:
     query_params = tool.prepare(tool.params.model_validate(params).model_dump())
     if query_params is None:  # nothing to search (no usable words, a blank question)
         return []
-    rows = db.run(slug, tool.query, query_params, read_only=True)
+    if tool.run is not None:
+        rows = tool.run(slug, query_params)
+    else:
+        rows = db.run(slug, tool.query, query_params, read_only=True)
     if not rows and tool.on_empty:
         tool.on_empty(slug, query_params)
     return [tool.row.model_validate(_plain(r)) for r in rows]
@@ -856,3 +872,9 @@ def graph_stats(slug: str) -> list[Stat]:
 
 def keeper_notes(slug: str, uid: str) -> list[KeeperNote]:
     return call(slug, "keeper_notes", uid=uid)
+
+
+def run_cypher(
+    slug: str, query: str, params: dict[str, Any] | None = None, limit: int = 50
+) -> cypher.CypherResult:
+    return call(slug, "run_cypher", query=query, params=params or {}, limit=limit)[0]

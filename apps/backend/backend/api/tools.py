@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from brain import db, tools
+from brain.cypher import CypherError
 from brain.embeddings import EmbeddingUnavailable
 from fastapi import APIRouter, Body, HTTPException
 from pydantic import ValidationError
@@ -52,6 +53,8 @@ def call_tool(
         rows = tools.call(slug, name, **validated.model_dump()) if db.graph_exists(slug) else []
     except EmbeddingUnavailable as exc:  # semantic search without usable vectors: say why
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CypherError as exc:  # run_cypher: a refused or broken query is the caller's mistake
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return ToolResult(
         slug=slug, tool=name, rows=[r.model_dump(mode="json", by_alias=True) for r in rows]
     )

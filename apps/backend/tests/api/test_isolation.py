@@ -26,6 +26,7 @@ ARGS = {
         "text": "sessions",
         "from_uid": "person:alice",
         "to_uid": "system:Auth",
+        "query": "MATCH (n:Node) RETURN n.uid AS uid LIMIT 200",
     },
     "second": {
         "system": "Engine",
@@ -34,6 +35,7 @@ ARGS = {
         "text": "engine",
         "from_uid": "person:mira",
         "to_uid": "system:Engine",
+        "query": "MATCH (n:Node) RETURN n.uid AS uid LIMIT 200",
     },
 }
 

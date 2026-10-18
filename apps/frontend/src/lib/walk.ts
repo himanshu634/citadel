@@ -480,6 +480,7 @@ const SAID: Record<string, (p: Record<string, unknown>) => Said> = {
 	},
 	bottlenecks: () => ['Finding the work everything else goes through', 'Found the work everything else goes through'],
 	graph_stats: () => ['Counting what the graph holds', 'Counted what the graph holds'],
+	run_cypher: () => ['Running a query it wrote on the graph', 'Ran a query it wrote on the graph'],
 	submit_answer: () => ['Checking the answer against what was found', 'Checked the answer against what was found'],
 	// Ask interviewing the person about the brain's gaps.
 	open_gaps: () => ['Reading what the brain could not answer', 'Read what the brain could not answer'],
