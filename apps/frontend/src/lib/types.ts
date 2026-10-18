@@ -840,6 +840,48 @@ export interface Review {
 	archive_reopened: string[];
 }
 
+/** One role's answer to one gap: a draft claim citing uids it saw, or `can_ground` false. */
+export interface Consult {
+	uid: string;
+	gap: string;
+	role: 'pm' | 'qa';
+	attempt: number;
+	status: 'open' | 'answered';
+	can_ground: boolean | null;
+	kind: ClaimKind | null;
+	subject: string | null;
+	statement: string | null;
+	value: string | null;
+	cites: string[];
+	created_at: string;
+	answered_at: string | null;
+}
+
+/** One job of a review: an actor's graph steps, then its submit (agents/keeper/trail.py). */
+export interface TrailJob {
+	actor: string;
+	/** The submit tool, e.g. submit_consult, submit_keeper_decision. */
+	tool: string;
+	steps: ActivityStep[];
+	/** The submit's input: subject, and outcome, kind, can_ground or claim as it had them. */
+	submit: Record<string, unknown>;
+	/** False when the submit wrote nothing. */
+	wrote: boolean;
+	error: string | null;
+	/** A pm or qa job's answer. */
+	consult: Consult | null;
+}
+
+/** What pm, qa and the Keeper did on the way to one claim. */
+export interface ClaimTrail {
+	claim: string;
+	/** The review that wrote it; null for a claim no review picked (an Ask interview). */
+	review: Review | null;
+	jobs: TrailJob[];
+	/** Every log line about the claim's gap, oldest first. */
+	log: LogEntry[];
+}
+
 /** A lead's approve or reject. `by` is 1..80 characters once trimmed, `why` at most 500. */
 export interface ApprovalIn {
 	by: string;

@@ -8,12 +8,15 @@
 
 SLUG ?= falkordb
 API_PORT ?= 8000
+FE_PORT ?= 5173
+# The frontend's Vite proxy reads API_PORT from the environment.
+export API_PORT
 BRAIN := uv run brain
 AGENTS := uv run agents
 BACKEND := uv run backend
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs ps browser init schema fetch ingest embed sync stats query tools ask chat eval eval-drafts traces reset archive-clear linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
+.PHONY: help start setup up down logs ps browser init schema fetch ingest embed sync stats query tools ask chat eval eval-report eval-drafts traces reset archive-clear linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
@@ -22,6 +25,9 @@ help: ## Show this help
 	@echo "  Variables: SLUG=$(SLUG)  TOOL=<name>  P="k=v ..."  JSON=1  SOURCE=<type>  FULL=1  NAME=<display name>  CONFIRM=1  ARGS=\"...\"  API_PORT=$(API_PORT)"
 
 # --- Environment ------------------------------------------------------------------------------
+
+start: ## One command from a fresh clone: checks tools/.env/ports first, then deps, FalkorDB, demo brain, API + app
+	@API_PORT=$(API_PORT) FE_PORT=$(FE_PORT) bash scripts/start.sh
 
 setup: ## Install deps (uv sync) and create .env from .env.example if missing
 	@test -f .env || (cp .env.example .env && echo "Created .env from .env.example")
@@ -50,8 +56,8 @@ init: ## Write companies/$(SLUG).yaml template (NAME="Display Name" optional)
 schema: ## Create indexes on graph brain_$(SLUG) (safe to re-run)
 	$(BRAIN) schema $(SLUG)
 
-fetch: ## Pull raw data for $(SLUG) into data/raw/ (SOURCE=github to limit)
-	$(BRAIN) fetch $(SLUG) $(if $(SOURCE),--source $(SOURCE))
+fetch: ## Pull raw data for $(SLUG) into data/raw/ (SOURCE=github to limit; FULL=1 pulls the whole window again)
+	$(BRAIN) fetch $(SLUG) $(if $(filter 1 yes,$(FULL)),--full) $(if $(SOURCE),--source $(SOURCE))
 
 ingest: ## Load cached data into brain_$(SLUG), then embed (FULL=1 ignores sync cursors)
 	$(BRAIN) ingest $(SLUG) $(if $(filter 1 yes,$(FULL)),--full) $(if $(SOURCE),--source $(SOURCE))
@@ -93,6 +99,9 @@ eval: ## Agent evals (calls the API; SLUG defaults to synthetic): CASE=id|tag RE
 		$(if $(REPEAT),--repeat $(REPEAT)) $(if $(MODEL),--model $(MODEL)) \
 		$(if $(EFFORT),--effort $(EFFORT)) $(if $(BASELINE),--baseline $(abspath $(BASELINE)))
 
+eval-report: ## Markdown pass-rate tables from eval result files: FILES="base.jsonl other.jsonl ..." (per company, baseline first)
+	uv run python -m agents.evals.report $(FILES)
+
 chats-backfill: ## Chat history for $(SLUG)'s threads asked before it existed (from checkpoints + traces); ALL=1 adds untraced ones
 	$(AGENTS) chats-backfill $(SLUG) $(if $(ALL),--all)
 
@@ -130,8 +139,8 @@ FE := pnpm --dir apps/frontend
 fe-install: ## Install frontend deps
 	$(FE) install
 
-fe-dev: ## Frontend dev server on http://localhost:5173
-	$(FE) dev --port 5173
+fe-dev: ## Frontend dev server on http://localhost:5173 (FE_PORT moves it)
+	$(FE) dev --port $(FE_PORT) --strictPort
 
 fe-check: ## Type-check the frontend (svelte-check)
 	$(FE) check

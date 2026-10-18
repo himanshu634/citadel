@@ -28,6 +28,7 @@
 		GraphWalk,
 		Input,
 		KeeperLog,
+		KeeperTrail,
 		Menu,
 		ModelPicker,
 		NodeChip,
@@ -58,6 +59,8 @@
 	import { syntheticGraph } from './graph-samples';
 	import { archivistRun, doneRun, failedRun, runningRun } from './activity-samples';
 	import * as keeper from './keeper-samples';
+	import { evidenceRefs } from '$lib/keeper';
+	const galleryRefs = (uids: string[]) => evidenceRefs(uids, () => null);
 	import { doingNow, hereLabel, trailOf } from '$lib/activity';
 	import * as walks from './walk-samples';
 	import * as chatSamples from './chat-samples';
@@ -80,7 +83,7 @@
 	// The Ask walk: citation 1 stays lit unless another is hovered.
 	let walkHover = $state<number | null>(null);
 	let liveRating = $state<'up' | 'down' | null>(null);
-	let liveModel = $state('claude-haiku-5-5');
+	let liveModel = $state('claude-sonnet-5-5');
 	let liveNote = $state<string | null>(null);
 	const walkActive = $derived(walkHover ?? 1);
 	const walkLit = $derived(highlightFor(walks.answer.sources[walkActive - 1], walks.done));
@@ -440,6 +443,7 @@
 	const archivistTrail = trailOf(archivistRun, drawnUid);
 	// The approval card's live sample: any name approves after a short wait.
 	let approverName = $state('');
+	let approverError = $state<string | null>(null);
 	const approveLater = () => new Promise<null>((done) => setTimeout(() => done(null), 900));
 	const neverDecides = () => new Promise<null>(() => {});
 	let mapSelected = $state<string | null>('person:alice');
@@ -767,7 +771,7 @@
 		</div>
 	</Card>
 
-	<Card title="Source row">
+	<Card title="Source row" id="source-row">
 		<p class="note">
 			One source on the Sources page (direction A, the source ledger), a <code>tbody</code> inside
 			the page's table: synced and open (GitHub), two folders sharing one count (the first one's
@@ -1117,13 +1121,13 @@
 				<ModelPicker
 					models={chatSamples.models}
 					selected={liveModel}
-					defaultId="claude-haiku-5-5"
+					defaultId="claude-sonnet-5-5"
 					onpick={(id) => (liveModel = id)}
 				/>
-				<figcaption>Live: open it, pick a model; Haiku 5.5 is the default, Fable 5.1 is slow</figcaption>
+				<figcaption>Live: open it, pick a model; Sonnet 5.5 is the default, Fable 5.1 is slow</figcaption>
 			</figure>
 			<figure>
-				<ModelPicker models={chatSamples.models} selected="claude-opus-5-5" defaultId="claude-haiku-5-5" disabled onpick={() => {}} />
+				<ModelPicker models={chatSamples.models} selected="claude-opus-5-5" defaultId="claude-sonnet-5-5" disabled onpick={() => {}} />
 				<figcaption>Locked while an answer runs</figcaption>
 			</figure>
 		</div>
@@ -1283,7 +1287,7 @@
 		</div>
 	</Card>
 
-	<Card title="Agent run">
+	<Card title="Agent run" id="agent-run">
 		<p class="note">
 			The Systems page's rail: one run's steps, numbered as on the map. A ring is the step
 			running now; a dash is a step with nothing on the map.
@@ -1322,59 +1326,102 @@
 		</div>
 	</Card>
 
-	<Card title="Claim approval">
+	<Card title="Claim approval" id="claim-approval">
 		<p class="note">
-			A Keeper claim waiting for a lead, in the Systems page's rail: why it needs one in words, the
-			gap it answers, its evidence, then a typed name (no sign-in), an optional reason, and Approve or
-			Reject. Type a name and press Approve; an empty name says what is missing.
+			A Keeper claim waiting for a lead, as the review page's detail pane shows it: its kind and
+			subject, the statement, why it needs a lead (one row per reason), the gap it answers, its
+			evidence, then an optional reason with Reject and Approve. The name is typed once in the
+			page's header; with none, the page says so under that field. Type a name and press Approve.
 		</p>
-		<div class="runs">
+		<div class="claim-name">
+			<Input label="Deciding as" placeholder="Your name" bind:value={approverName} error={approverError ?? undefined} oninput={() => (approverError = null)} />
+		</div>
+		<div class="claims">
 			<div>
 				<h3 class="sub">Waiting (try it)</h3>
-				<ClaimApproval
-					claim={keeper.pendingClaim}
-					gapText={keeper.gapTexts.get('gap:refunds')}
-					evidence={keeper.pendingEvidence}
-					bind:name={approverName}
-					ondecide={approveLater}
-				/>
+				<div class="claim-box">
+					<ClaimApproval
+						claim={keeper.pendingClaim}
+						gapText={keeper.gapTexts.get('gap:refunds')}
+						evidence={keeper.pendingEvidence}
+						name={approverName}
+						onnameerror={(m) => (approverError = m)}
+						ondecide={approveLater}
+					>
+						{#snippet work()}<KeeperTrail trail={keeper.pendingTrail} refsOf={galleryRefs} />{/snippet}
+					</ClaimApproval>
+				</div>
 			</div>
 			<div>
 				<h3 class="sub">Sending the approval</h3>
-				<ClaimApproval claim={keeper.pendingClaim} evidence={keeper.pendingEvidence} name="Dana Lee" busy="approve" ondecide={neverDecides} />
+				<div class="claim-box"><ClaimApproval claim={keeper.pendingClaim} evidence={keeper.pendingEvidence} name="Dana Lee" busy="approve" ondecide={neverDecides} /></div>
 			</div>
 			<div>
 				<h3 class="sub">Someone decided first (409)</h3>
-				<ClaimApproval
-					claim={keeper.pendingClaim}
-					evidence={keeper.pendingEvidence}
-					name="Dana Lee"
-					failure={{ message: 'Someone already decided this claim. The list now shows where it stands.', gone: true }}
-					ondecide={approveLater}
-				/>
+				<div class="claim-box">
+					<ClaimApproval
+						claim={keeper.pendingClaim}
+						evidence={keeper.pendingEvidence}
+						name="Dana Lee"
+						failure={{ message: 'Someone already decided this claim. The list now shows where it stands.', gone: true }}
+						ondecide={approveLater}
+					/>
+				</div>
 			</div>
 			<div>
 				<h3 class="sub">Brain unavailable (503)</h3>
-				<ClaimApproval
-					claim={keeper.pendingClaim}
-					evidence={keeper.pendingEvidence}
-					name="Dana Lee"
-					failure={{ message: 'The brain of synthetic is not there (brain_synthetic is missing). Build the company, then approve again.' }}
-					ondecide={approveLater}
-				/>
+				<div class="claim-box">
+					<ClaimApproval
+						claim={keeper.pendingClaim}
+						evidence={keeper.pendingEvidence}
+						name="Dana Lee"
+						failure={{ message: 'The brain of synthetic is not there (brain_synthetic is missing). Build the company, then approve again.' }}
+						ondecide={approveLater}
+					/>
+				</div>
 			</div>
 			<div>
-				<h3 class="sub">Name refused (422)</h3>
-				<ClaimApproval
-					claim={keeper.pendingClaim}
-					evidence={keeper.pendingEvidence}
-					failure={{ field: 'by', message: 'Type your name, up to 80 characters.' }}
-					ondecide={approveLater}
-				/>
+				<h3 class="sub">Reason refused (422)</h3>
+				<div class="claim-box">
+					<ClaimApproval
+						claim={keeper.pendingClaim}
+						evidence={keeper.pendingEvidence}
+						name="Dana Lee"
+						failure={{ field: 'why', message: 'Keep the reason to 500 characters.' }}
+						ondecide={approveLater}
+					/>
+				</div>
 			</div>
 			<div>
 				<h3 class="sub">Every reason, no evidence, long text</h3>
-				<ClaimApproval claim={keeper.longClaim} gapText="Why do invoice emails go out from a queue now and not from checkout?" evidence={[]} ondecide={approveLater} />
+				<div class="claim-box"><ClaimApproval claim={keeper.longClaim} gapText="Why do invoice emails go out from a queue now and not from checkout?" evidence={[]} name="Dana Lee" ondecide={approveLater} /></div>
+			</div>
+		</div>
+	</Card>
+
+	<Card title="Keeper trail">
+		<p class="note">
+			How the Keeper got to a claim, inside the claim's detail: the review that wrote it, then pm,
+			qa and the Keeper in the order they worked, each with what it drafted, what it cited and its
+			graph reads (open them). A claim from a person's reply in Ask has no review, so the gap's log
+			stands in.
+		</p>
+		<div class="runs">
+			<div>
+				<h3 class="sub">A review's jobs</h3>
+				<KeeperTrail trail={keeper.pendingTrail} refsOf={galleryRefs} />
+			</div>
+			<div>
+				<h3 class="sub">From Ask (log only)</h3>
+				<KeeperTrail trail={keeper.interviewTrail} refsOf={galleryRefs} />
+			</div>
+			<div>
+				<h3 class="sub">Loading</h3>
+				<KeeperTrail trail={null} refsOf={galleryRefs} />
+			</div>
+			<div>
+				<h3 class="sub">Can't read it</h3>
+				<KeeperTrail trail={null} failed="The API did not answer." refsOf={galleryRefs} />
 			</div>
 		</div>
 	</Card>
@@ -1468,6 +1515,21 @@
 	}
 	.map-sample.short {
 		height: 18rem;
+	}
+	.claim-name {
+		max-width: 16rem;
+		margin-bottom: var(--space-4);
+	}
+	.claims {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 34rem), 1fr));
+		gap: var(--space-6);
+	}
+	.claim-box {
+		height: 34rem;
+		overflow: hidden;
+		border: var(--border-hair) solid var(--color-line);
+		border-radius: var(--radius-md);
 	}
 	.runs {
 		display: grid;

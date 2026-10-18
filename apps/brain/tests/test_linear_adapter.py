@@ -192,6 +192,32 @@ def test_no_cache_raises_source_unavailable(tmp_path):
         list(records(company(), SOURCE, tmp_path / "nothing"))
 
 
+def no_completed_run(cache: Path) -> None:
+    """A run that started but never completed: its page is on disk, state.json lists nothing."""
+    folder = cache / "issues"
+    for page in folder.glob("*_*.json"):
+        page.unlink()
+    (folder / "20261017T000000_0000.json").write_text("[]")
+    (folder / "state.json").write_text(
+        json.dumps({"complete_until": None, "completed_runs": [], "run": "20261017T000000"})
+    )
+
+
+@pytest.mark.parametrize(
+    "leave",
+    [lambda cache: shutil.rmtree(cache / "issues"), no_completed_run],
+    ids=["issues folder cleared", "run not completed"],
+)
+def test_no_completed_issues_run_is_unavailable(tmp_path, leave):
+    """No completed issues run (the folder was cleared for a team change and the fetch after
+    it failed, or a first run never completed): records raises, so ingest skips the source.
+    Loading the teams alone would make the loader prune every Linear BLOCKS edge."""
+    cache = fixture_copy(tmp_path)
+    leave(cache)
+    with pytest.raises(SourceUnavailable, match="no completed"):
+        list(records(company(), SOURCE, cache))
+
+
 def test_registered_and_yaml_validates():
     adapter = REGISTRY["linear"]
     assert isinstance(adapter, LinearAdapter) and adapter.name == "linear"
@@ -315,3 +341,19 @@ def test_relation_to_uncached_issue_is_unresolved_ref(recs):
     blocker = next(r for r in recs if isinstance(r, WorkItem) and r.uid == "linear:issue:i-3")
     assert blocker.unresolved_refs == ["linear:issue:i-9"]
     assert all(w.unresolved_refs == [] for w in items.values() if w.uid != "linear:issue:i-3")
+
+
+def test_incomplete_while_the_issue_run_is_unfinished(tmp_path):
+    cache = fixture_copy(tmp_path)
+    adapter = REGISTRY["linear"]
+    assert adapter.incomplete(company(), SOURCE, tmp_path) is None
+
+    state_file = cache / "issues" / "state.json"
+    state = json.loads(state_file.read_text())
+    state["run"] = {"id": NEWER_RUN, "lower": "x", "cursor": "c", "page": 1}
+    state_file.write_text(json.dumps(state))
+    reason = adapter.incomplete(company(), SOURCE, tmp_path)
+    assert reason and NEWER_RUN in reason
+
+    shutil.rmtree(cache / "issues")  # never fetched
+    assert adapter.incomplete(company(), SOURCE, tmp_path) == "issues: not fetched yet"

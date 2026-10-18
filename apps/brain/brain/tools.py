@@ -403,6 +403,42 @@ class SystemIssues(_Model):
     examples: list[LinkRef]  # latest issues, mentioned first
 
 
+class CentralParams(_Model):
+    label: Literal["System", "WorkItem", "Document"] = Field(
+        "System",
+        description="What to rank: systems, work items (PRs, issues, tickets, threads) or "
+        "documents. People are not ranked: PageRank gives every person the same score.",
+    )
+    limit: int = Field(10, ge=1, le=50)
+
+
+class CentralNode(_Model):
+    uid: str
+    label: str
+    name: str | None  # system name, or the work item's or document's title
+    number: int | None
+    kind: str | None  # the work item's kind, 'document' or 'system'
+    state: str | None
+    url: str | None
+    score: float  # PageRank, higher is more central
+
+
+class BottleneckParams(_Model):
+    open_only: bool = Field(False, description="Only open work items.")
+    limit: int = Field(10, ge=1, le=50)
+
+
+class Bottleneck(_Model):
+    uid: str
+    kind: str
+    number: int | None
+    key: str | None  # a ticket's key, e.g. 'PAY-2'
+    title: str
+    state: str
+    url: str | None
+    score: float  # betweenness (sampled estimate, rank only), higher sits on more chains
+
+
 class NoParams(_Model):
     pass
 
@@ -453,9 +489,10 @@ def _since(p: dict[str, Any]) -> dict[str, Any]:
 def fulltext_query(text: str) -> str:
     """Plain text -> RediSearch query: words OR-ed, so any word matches and more is better.
 
-    Only word characters survive, so user text can never inject RediSearch syntax.
+    Only word characters survive, so user text can never inject RediSearch syntax. Words of
+    one character are dropped; two-letter ones stay (system names such as CI or DB).
     """
-    words = dict.fromkeys(w.lower() for w in re.findall(r"\w+", text) if len(w) > 2)
+    words = dict.fromkeys(w.lower() for w in re.findall(r"\w+", text) if len(w) > 1)
     return "|".join(words)
 
 
@@ -672,6 +709,21 @@ TOOLS: dict[str, Tool] = {
             IssuesBySystemParams,
             SystemIssues,
         ),
+        Tool(
+            "central_nodes",
+            "The most central systems, work items or documents in the company graph "
+            "(PageRank): what the most other things lead to. Use for what matters most.",
+            CentralParams,
+            CentralNode,
+        ),
+        Tool(
+            "bottlenecks",
+            "Work items that sit on the most dependency chains between other work "
+            "(betweenness over BLOCKS, CLOSES and MENTIONS): the tickets, issues and PRs "
+            "everything else waits on or points through. No rows means no such chains.",
+            BottleneckParams,
+            Bottleneck,
+        ),
         Tool("graph_stats", "Node and relationship counts in the company graph.", NoParams, Stat),
         Tool(
             "keeper_notes",
@@ -788,6 +840,14 @@ def collaborators(
 
 def issues_by_system(slug: str, state: str | None = None, limit: int = 10) -> list[SystemIssues]:
     return call(slug, "issues_by_system", state=state, limit=limit)
+
+
+def central_nodes(slug: str, label: str = "System", limit: int = 10) -> list[CentralNode]:
+    return call(slug, "central_nodes", label=label, limit=limit)
+
+
+def bottlenecks(slug: str, open_only: bool = False, limit: int = 10) -> list[Bottleneck]:
+    return call(slug, "bottlenecks", open_only=open_only, limit=limit)
 
 
 def graph_stats(slug: str) -> list[Stat]:

@@ -207,3 +207,22 @@ def test_blocks_cycle_is_not_its_own_blocker():
         assert [(r.ticket.key, r.blocker.key, r.depth) for r in rows] == [("B", "A", 1)]
     finally:
         db.delete_graph(slug)
+
+
+# --- path_between over the ticket relationships -------------------------------------------------
+
+
+@needs_graph
+def test_path_between_person_and_assigned_ticket(ticket_graph):
+    """ASSIGNED_TO is one hop: a person reaches the ticket they are assigned to."""
+    paths = tools.path_between(ticket_graph, "person:carol", "synthetic:ticket:IDN-2")
+    assert paths and paths[0].length == 1
+    assert [r.type for r in paths[0].rels] == ["ASSIGNED_TO"]
+
+
+@needs_graph
+def test_path_between_blocked_tickets(ticket_graph):
+    """BLOCKS is one hop: a ticket reaches its blocker."""
+    paths = tools.path_between(ticket_graph, "synthetic:ticket:IDN-2", "synthetic:ticket:IDN-1")
+    assert paths and paths[0].length == 1
+    assert [r.type for r in paths[0].rels] == ["BLOCKS"]

@@ -5,14 +5,19 @@ No network: the fixtures are a cache directory exactly as `fetch` writes it.
 
 import json
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from brain import config, loader, pipeline
+from brain.adapters import REGISTRY
 from brain.adapters.github import codeowners
 from brain.adapters.github.transform import actor_login, records
 from brain.canonical import Change, Comment, Document, Link, Ownership, Review, WorkItem
 from brain.config import CompanyConfig
+from brain.embeddings import EmbedReport
 from brain.normalize import normalize
+from brain.testing import write_company
 from pydantic import ValidationError
 
 FIXTURE = Path(__file__).parent / "fixtures" / "github" / "FalkorDB__FalkorDB"
@@ -186,3 +191,111 @@ def test_unresolved_refs_for_uncached_numbers(company, tmp_path):
     assert not any(isinstance(r, Link) and "99" in r.to_uid for r in recs)  # no Link for them
     other = next(r for r in recs if r.uid == f"{REPO}:pr:{BOT_PR}")
     assert other.unresolved_refs == []  # cached numbers are links, not unresolved refs
+
+
+def test_git_error_never_carries_the_auth_header(tmp_path):
+    """A failing git call run with `-c http.extraHeader=...` (private repos) names the git
+    command, not the header: the message reaches build events and data/jobs/<slug>.json."""
+    from brain.adapters.github import fetch
+
+    header = "http.extraHeader=Authorization: Basic c2VjcmV0LXRva2Vu"
+    with pytest.raises(RuntimeError) as err:
+        fetch._git("-c", header, "rev-parse", "--verify", "HEAD", cwd=tmp_path)
+    message = str(err.value)
+    assert message.startswith("git rev-parse --verify failed:")
+    assert "c2VjcmV0LXRva2Vu" not in message and "extraHeader" not in message
+
+
+# --- an unfinished fetch run must not move the repo's one sync cursor -------------------------
+
+
+def github_cache(tmp_path) -> Path:
+    cache = tmp_path / "github"  # the adapter's cache_dir; the repo folder sits under it
+    shutil.copytree(FIXTURE, cache / "FalkorDB__FalkorDB")
+    return cache
+
+
+def break_run(cache: Path, name: str, how: str) -> None:
+    state_file = cache / "FalkorDB__FalkorDB" / name / "state.json"
+    state = json.loads(state_file.read_text())
+    if how == "unfinished":  # a second run that stopped after two pages
+        state["run"] = {"id": "20261017T000000", "lower": "x", "cursor": "c", "page": 2}
+    elif how == "never":  # the list was never fetched (nothing completed)
+        state["completed_runs"] = []
+    state_file.write_text(json.dumps(state))
+
+
+def test_a_complete_cache_is_not_incomplete(company, tmp_path):
+    adapter = REGISTRY["github"]
+    assert adapter.incomplete(company, company.sources[0], github_cache(tmp_path)) is None
+
+
+@pytest.mark.parametrize("how", ["unfinished", "never"])
+def test_an_unfinished_issue_run_is_reported_and_prs_still_read(company, tmp_path, how):
+    cache = github_cache(tmp_path)
+    break_run(cache, "issues", how)
+    adapter = REGISTRY["github"]
+    source = company.sources[0]
+
+    reason = adapter.incomplete(company, source, cache)
+    assert reason and reason.startswith("issues:")
+    if how == "unfinished":
+        assert "20261017T000000" in reason and "page 2" in reason
+
+    kinds = {r.kind for r in adapter.records(company, source, cache) if isinstance(r, WorkItem)}
+    # only completed runs are read: with the first run done its issues are there, but not the
+    # unfinished run's newer ones; a list never fetched has none at all. That is the hole: the
+    # PRs alone would move the cursor past the issues still to come.
+    assert kinds == ({"pull_request", "issue"} if how == "unfinished" else {"pull_request"})
+
+
+def test_only_the_included_lists_count(company, tmp_path):
+    cache = github_cache(tmp_path)
+    break_run(cache, "issues", "unfinished")
+    break_run(cache, "history", "unfinished")  # commits are never filtered by the cursor
+    source = company.sources[0].model_copy(update={"include": ["pull_requests", "commits"]})
+    assert REGISTRY["github"].incomplete(company, source, cache) is None
+
+
+def test_ingest_keeps_the_cursor_while_the_issue_run_is_unfinished(company, tmp_path, monkeypatch):
+    """The scenario: the PR run completed, the issue run stopped halfway, someone runs
+    `make ingest`. The PRs are loaded, but the cursor must not move to their newest updatedAt,
+    or every issue and comment older than that is dropped when the issue run completes."""
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    (tmp_path / "companies").mkdir()
+    write_company(company)
+    raw = tmp_path / "data" / "raw" / company.slug
+    raw.mkdir(parents=True)
+    cache = github_cache(tmp_path)
+    cache.rename(raw / "github")
+    break_run(raw / "github", "issues", "unfinished")
+
+    old_cursor = datetime(2026, 5, 1, tzinfo=UTC)
+    written: list[datetime | None] = []
+    loaded: list[list] = []
+
+    def fake_load(slug, records, origin=None):
+        loaded.append(list(records))
+        return loader.LoadReport()
+
+    monkeypatch.setattr(loader, "get_cursor", lambda *a: old_cursor)
+    monkeypatch.setattr(loader, "set_sync_state", lambda *a: written.append(a[3]))
+    monkeypatch.setattr(loader, "load", fake_load)
+    monkeypatch.setattr(loader, "mark_archived", lambda *a: 0)  # no archive, no graph
+    monkeypatch.setattr(loader, "resolve_refs", lambda *a: 0)
+    monkeypatch.setattr(pipeline, "embed", lambda slug, on_event=None: EmbedReport())
+
+    report = pipeline.ingest(company.slug)
+
+    assert written == [old_cursor]
+    assert any(isinstance(r, WorkItem) and r.kind == "pull_request" for r in loaded[0])
+    assert report.sources[0].incomplete.startswith("issues:")
+
+    # the issue run completes: the next ingest sees every issue, and the cursor moves on
+    state_file = raw / "github" / "FalkorDB__FalkorDB" / "issues" / "state.json"
+    state = json.loads(state_file.read_text())
+    state["run"] = None
+    state_file.write_text(json.dumps(state))
+    written.clear()
+    pipeline.ingest(company.slug)
+    assert written and written[0] > old_cursor

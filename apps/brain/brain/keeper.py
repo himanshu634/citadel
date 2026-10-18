@@ -7,9 +7,9 @@ run after every accept and after every build (a rebuild deletes the brain). Inge
 the `Claim` label.
 
 The reads here are the facts the Keeper checks a claim against ("sources win"): which uids exist,
-who is declared to own a system and who does most of its work, which systems are high impact, and
-the noticing queries that open gaps on their own. Every query is a named file in
-queries/keeper/, run through `db.run`.
+who is declared to own a system and who does most of its work, which systems are high impact (the
+top quarter by PageRank), and the noticing queries that open gaps on their own. Every query is a
+named file in queries/keeper/, run through `db.run`.
 
     keeper.project("synthetic", [claim])          # -> uids not projected (subject/evidence gone)
     keeper.notice("synthetic", "stale_owner", 10)  # -> [{subject, about, text}]
@@ -25,7 +25,7 @@ from brain import db, tools
 
 NOTICING_KINDS: tuple[str, ...] = ("stale_owner", "unowned_hot_system")
 HOT_DAYS = 90  # unowned_hot_system: activity in the last N days
-HIGH_IMPACT_SHARE = 0.25  # the top quarter of coupled systems is high impact
+HIGH_IMPACT_SHARE = 0.25  # the top quarter of systems by PageRank is high impact
 
 
 @dataclass
@@ -61,12 +61,16 @@ def source_facts(slug: str, subject: str) -> SourceFacts:
 
 
 def high_impact_systems(slug: str) -> set[str]:
-    """Systems in the top quarter by distinct co-changing systems; ties at the cut are kept."""
+    """Systems in the top quarter by PageRank over the whole graph; ties at the cut are kept.
+
+    Scores are compared rounded to 9 places, so systems the algorithm scores the same up to
+    float noise count as a tie."""
     rows = db.run(slug, "keeper/high_impact_systems", read_only=True)
     if not rows:
         return set()
-    cut = rows[math.ceil(len(rows) * HIGH_IMPACT_SHARE) - 1]["partners"]
-    return {r["uid"] for r in rows if r["partners"] >= cut}
+    scores = [(r["uid"], round(r["score"], 9)) for r in rows]
+    cut = scores[math.ceil(len(scores) * HIGH_IMPACT_SHARE) - 1][1]
+    return {uid for uid, score in scores if score >= cut}
 
 
 def project(slug: str, claims: list[dict[str, Any]]) -> list[str]:

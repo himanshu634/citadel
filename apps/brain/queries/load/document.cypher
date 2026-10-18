@@ -4,7 +4,8 @@
 // example: loader.load("falkordb", [Document(uid="github:FalkorDB/FalkorDB:doc:README.md", ...)])
 UNWIND $rows AS row
 MERGE (d:Document {uid: row.uid})
-SET d.company = $company,
+SET d:Node,
+    d.company = $company,
     d.path = row.path,
     d.title = row.title,
     d.body = row.body,

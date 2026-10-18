@@ -12,7 +12,8 @@ import re
 import time
 
 import pytest
-from brain import db, keeper, queries, tools
+from brain import db, keeper, loader, queries, tools
+from brain.canonical import Change, System
 from brain.testing import falkordb_up, needs_graph
 
 pytestmark = needs_graph
@@ -106,11 +107,32 @@ def test_project_reports_missing_evidence(brain):
 
 
 def test_high_impact_is_top_quarter(brain):
-    # Four systems have a co-change partner, so the cut is ceil(4 * 0.25) = 1 system. Web app
-    # and Billing each co-change with two systems (Auth and Infra with one): a tie at the cut,
-    # so both are in.
+    # PageRank over the whole graph scores all four systems, so the cut is ceil(4 * 0.25) = 1
+    # system. Infra ranks first: the most changes, docs and owners point at it (it was not in
+    # the top quarter by co-change, where Web app and Billing tied).
     assert math.ceil(len(tools.list_systems(brain)) * 0.25) == 1
-    assert keeper.high_impact_systems(brain) == {"system:Web app", "system:Billing"}
+    assert keeper.high_impact_systems(brain) == {"system:Infra"}
+    assert [r.uid for r in tools.central_nodes(brain)][:1] == ["system:Infra"]
+
+
+def test_high_impact_keeps_ties_at_the_cut():
+    slug = "test_high_impact_ties"
+    db.delete_graph(slug)
+    try:
+        # A and B are each touched by two commits, C by one, D by none: A and B score the same,
+        # the cut is ceil(4 * 0.25) = 1, and the tie keeps both.
+        def change(n: int, system: str) -> Change:
+            return Change(uid=f"t:commit:{n}", source="t", sha=f"{n:040d}", subject=f"c{n}",
+                          date=f"2026-05-0{n}T00:00:00Z",
+                          touches={system: [f"{n}.py"]})  # fmt: skip
+
+        records = [System(name=n) for n in "ABCD"]
+        records += [change(1, "A"), change(2, "A"), change(3, "B"), change(4, "B"), change(5, "C")]
+        loader.load(slug, records)
+        assert keeper.high_impact_systems(slug) == {"system:A", "system:B"}
+    finally:
+        db.delete_graph(slug)
+    assert keeper.high_impact_systems(slug) == set()  # no graph
 
 
 def test_notice_rows_shape(brain):

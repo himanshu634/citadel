@@ -72,6 +72,7 @@ READS: tuple[str, ...] = (
     "ledger/review_current",
     "ledger/recent_reviews",
     "ledger/review_steps",
+    "ledger/reviews_for_gap",
     "ledger/queue_consult",
     "ledger/consults_for_gap",
     "ledger/get_claim",
@@ -183,6 +184,7 @@ RECORDS: dict[str, type[BaseModel]] = {
     "ledger/review_current": Review,
     "ledger/recent_reviews": Review,
     "ledger/review_steps": ReviewStep,
+    "ledger/reviews_for_gap": Review,
     "ledger/queue_consult": Consult,
     "ledger/consults_for_gap": Consult,
     "ledger/get_claim": Claim,
@@ -531,6 +533,9 @@ class MemoryKeeperStore(_LedgerStore):
     def _r_recent_reviews(self, p: Mapping[str, Any]) -> list[Row]:
         shown = [r for r in reversed(self.reviews) if r.state != "skipped"]
         return [r.model_dump() for r in shown[: p["limit"]]]
+
+    def _r_reviews_for_gap(self, p: Mapping[str, Any]) -> list[Row]:
+        return [r.model_dump() for r in reversed(self.reviews) if p["gap"] in r.gaps]
 
     def _w_review_picked(self, p: Mapping[str, Any]) -> list[Row]:
         for r in self.reviews:

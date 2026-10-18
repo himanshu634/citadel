@@ -144,6 +144,7 @@ def run_job(
         "stop": None,
         "stop_details": None,
         "nudges": 0,
+        "refusals": 0,
     }
     follow = _Follow(on_event, should_stop, recursion_limit)
     try:

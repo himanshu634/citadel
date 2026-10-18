@@ -25,8 +25,10 @@ import type {
 	Rating,
 	WalkStep
 } from './types';
+import { WALK_STEP_MS } from './walk';
 
-export const REPLAY_STEP_MS = 700;
+/** A replay reveals one step as the walk plays one (GraphWalk), so the ledger keeps pace. */
+export const REPLAY_STEP_MS = WALK_STEP_MS;
 
 export interface Turn {
 	question: string;

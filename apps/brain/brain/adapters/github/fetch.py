@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from brain.adapters.github.client import GithubClient, graphql, token
-from brain.adapters.runs import fetch_paged, iso, write_json
+from brain.adapters.runs import fetch_paged, iso, unfinished, write_json
 from brain.config import CompanyConfig
 from brain.normalize import glob_match
 
@@ -68,8 +68,18 @@ def fetch_meta(client: GithubClient, owner: str, name: str, cache: Path) -> dict
 def _git(*args: str, cwd: Path | None = None, input: str | None = None) -> str:
     out = subprocess.run(["git", *args], cwd=cwd, input=input, capture_output=True, text=True)
     if out.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args[:2])} failed: {out.stderr.strip()[:300]}")
+        raise RuntimeError(f"git {_command(args)} failed: {out.stderr.strip()[:300]}")
     return out.stdout
+
+
+def _command(args: tuple[str, ...]) -> str:
+    """The git subcommand and its first argument, for error messages. Leading `-c <setting>`
+    pairs are left out: for private repos one carries the auth header, and the message
+    reaches build events and data/jobs/<slug>.json."""
+    rest = list(args)
+    while rest[:1] == ["-c"]:
+        rest = rest[2:]
+    return " ".join(rest[:2])
 
 
 def _auth_args(private: bool) -> list[str]:
@@ -211,10 +221,31 @@ def fetch_blobs(
     return texts
 
 
+# --- what the cache still lacks ---------------------------------------------------------------
+
+
+def incomplete(source, cache: Path) -> str | None:
+    """What `records` cannot read yet: a paged list the source includes with no completed run or
+    one still unfinished (see runs.unfinished). Only pull_requests/ and issues/ count: their
+    items carry GitHub's timestamps, which the ingest cursor filters, and one cursor covers both
+    lists. history/ does not: its run always covers the whole window again, and commits are
+    dated by client clocks, so the cursor never filters them."""
+    include = set(source.include)
+    lists = []
+    if include & {"pull_requests", "reviews"}:
+        lists.append("pull_requests")
+    if "issues" in include:
+        lists.append("issues")
+    reasons = [reason for name in lists if (reason := unfinished(cache / name))]
+    return "; ".join(reasons) or None
+
+
 # --- the whole fetch --------------------------------------------------------------------------
 
 
-def run(company: CompanyConfig, source, cache: Path, log=print) -> None:
+def run(company: CompanyConfig, source, cache: Path, full: bool = False, log=print) -> None:
+    """The whole fetch. `full` makes every paged run start at the window (see
+    brain.adapters.runs.fetch_paged)."""
     owner, name = source.repo.split("/")
     include = set(source.include)
     cache.mkdir(parents=True, exist_ok=True)
@@ -235,6 +266,7 @@ def run(company: CompanyConfig, source, cache: Path, log=print) -> None:
             window_start,
             stop_when_older="updatedAt",
             send_since=False,
+            full=full,
             log=log,
         )
     if "issues" in include:
@@ -245,6 +277,7 @@ def run(company: CompanyConfig, source, cache: Path, log=print) -> None:
             lambda d: d["repository"]["issues"],
             cache / "issues",
             window_start,
+            full=full,
             log=log,
         )
 

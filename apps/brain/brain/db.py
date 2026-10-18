@@ -75,6 +75,13 @@ def run(
     return rows(result)
 
 
+def explain(slug: str, name: str, params: dict[str, Any] | None = None) -> list[str]:
+    """The execution plan FalkorDB would use for the named query, one operation per line
+    (e.g. "Node By Index Scan | (n:Node)"), without running it. Tests use it to check that a
+    lookup is index-backed and not an "All Node Scan"."""
+    return list(graph(slug).explain(queries.get(name).body, params))
+
+
 def run_text(slug: str, cypher: str, params: dict[str, Any] | None = None):
     """Run a statement taken from a named query file (e.g. one schema statement).
 

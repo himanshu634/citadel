@@ -392,13 +392,31 @@ def test_joiner_times_out_on_a_frozen_clock(slug, store, monkeypatch):
     assert row["reason"] == "timeout" and row["summary"] == live.STILL_RUNNING
 
 
+class _Watched:
+    """A ledger that says when a request was first read back (the joiner has joined)."""
+
+    def __init__(self, inner):
+        self.inner, self.joined = inner, threading.Event()
+
+    def read(self, name, params):
+        rows = self.inner.read(name, params)
+        if name == "ledger/archive_get_request":
+            self.joined.set()
+        return rows
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+
 def test_joiner_says_the_run_it_joined_was_cut_short(slug, store):
     uid = _running(store)
     done = []
+    watched = _Watched(store)
     worker = threading.Thread(
-        target=lambda: done.append(_join(slug, store, stop=None)), daemon=True
+        target=lambda: done.append(_join(slug, watched, stop=None)), daemon=True
     )
     worker.start()
+    assert watched.joined.wait(5)  # ended before the joiner opened, it would be a new run
     ended = {"uid": uid, "from": ["running"], "to": "answered", "outcome": "nothing_found",
              "summary": "Stopped before it reported anything.", "reason": "timeout",
              "partial": True, "calls": 2, "now": NOW}  # fmt: skip

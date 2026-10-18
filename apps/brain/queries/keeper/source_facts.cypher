@@ -5,8 +5,8 @@
 // returns: label, name (a System's name, else null), declared_owners ([uid] of the people and
 //          teams that OWN it, sorted). No row: the subject is not in the brain.
 // example: keeper.source_facts("synthetic", "system:Auth")
-MATCH (n {uid: $uid})
+MATCH (n:Node {uid: $uid})
 OPTIONAL MATCH (o)-[:OWNS]->(n)
 WITH n, o ORDER BY o.uid
-RETURN labels(n)[0] AS label, n.name AS name,
+RETURN head([l IN labels(n) WHERE l <> 'Node']) AS label, n.name AS name,
        [x IN collect(o.uid) WHERE x IS NOT NULL] AS declared_owners

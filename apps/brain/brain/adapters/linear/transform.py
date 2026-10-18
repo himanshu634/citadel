@@ -212,6 +212,12 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
     if meta is None:
         raise SourceUnavailable(f"no Linear cache at {cache}; run `make fetch` first")
     check_permission(company)  # again here: the config may have changed since fetch
+    # Before the first record: a cache without one completed issues run (cleared for a team
+    # change and the fetch after it failed) would load the teams alone, and the loader would
+    # then prune every BLOCKS edge of this source as missing. Skipping the source keeps them.
+    issues, in_newest, newest = _latest_issues(cache / "issues")
+    if newest is None:
+        raise SourceUnavailable(f"no completed Linear issues run in {cache}; run `make fetch`")
 
     for team in read_json(cache / "teams.json", []):
         yield Team(name=team["name"], source=SOURCE)
@@ -234,12 +240,11 @@ def records(company: CompanyConfig, source, cache: Path) -> Iterator[CanonicalRe
     blocks: set[tuple[str, str]] = set()
     mentions: set[tuple[str, str]] = set()
     removed: set[str] = set()  # uids of tombstones: no links to or from them
-    issues, in_newest, newest = _latest_issues(cache / "issues")
     for node in issues.values():
         if source.teams and node["team"]["key"] not in source.teams:
             continue  # cached before the team set changed; the next fetch clears it
         ticket = _ticket(node)
-        if newest and node["id"] not in in_newest and ticket.status_category not in CLOSED_STATUS:
+        if node["id"] not in in_newest and ticket.status_category not in CLOSED_STATUS:
             removed.add(ticket.uid)
             yield _removed(ticket, newest)
             continue

@@ -102,6 +102,120 @@ def test_citing_an_unseen_uid_is_rejected_then_corrected():
     assert a.text == "Real [1]." and a.sources[0].title == "Session table load"
 
 
+def test_markers_with_empty_sources_get_the_uids_they_could_cite():
+    """Haiku sometimes writes its sources inside the answer text and leaves `sources` empty;
+    when cut_leak cannot read them (here: a cut-off list), the refusal names the empty field,
+    the seen uids, and the leaked part."""
+    leaked = 'Load [1].</answer>\n<parameter name="sources">["pr:1'
+    client = FakeClient(
+        reply(tool_use("t1", "related_work_items", {"text": "jwt"})),
+        reply(submit("t2", leaked, [])),
+        reply(submit("t3", "Load [1].", ["pr:1"])),
+    )
+    a = ask(client)
+    refusal = client.requests[2]["messages"][-1]["content"][0]
+    assert refusal["is_error"] is True
+    assert "sources is empty" in refusal["content"]
+    assert 'pr:1 "Switch sessions to JWT"' in refusal["content"]
+    assert '<parameter name="sources">' in refusal["content"]  # names the leaked part
+    assert a.text == "Load [1]." and [s.uid for s in a.sources] == ["pr:1"]
+
+
+def test_empty_sources_refusal_skips_the_leak_hint_without_a_leak():
+    problem = loop.check_answer(
+        {"answer": "Load [1].", "sources": [], "path": []},
+        {"pr:1": {"uid": "pr:1", "title": "Switch sessions to JWT"}},
+    )
+    assert "sources is empty" in problem and "pr:1" in problem and "<parameter" not in problem
+
+
+def test_repeated_refused_submits_end_the_question_without_an_answer():
+    """The degenerate loop from the Haiku evals: the same empty-sources submit again and
+    again. After MAX_REFUSALS refusals the turn ends; no further Claude call is made."""
+    saver = InMemorySaver()
+    client = FakeClient(
+        reply(tool_use("t1", "related_work_items", {"text": "jwt"})),
+        *[reply(submit(f"s{i}", "Load [1].", [])) for i in range(loop.MAX_REFUSALS)],
+        reply(submit("u1", "Load [1].", [])),  # second question: its count starts at 0
+        reply(submit("u2", "Load [1].", ["pr:1"])),
+    )
+    first = ask(client, checkpointer=saver)
+    assert first.text is None and first.stop == "no_answer"
+    assert len(client.requests) == 1 + loop.MAX_REFUSALS
+    # Every refused submit got its error result, so the thread stays valid for a follow-up.
+    last = saver.get_tuple({"configurable": {"thread_id": first.thread_id}})
+    final = last.checkpoint["channel_values"]["messages"][-1]
+    assert final["role"] == "user" and final["content"][0]["is_error"] is True
+
+    second = agent.ask(
+        "synthetic", "Sure?", first.thread_id, client=client, toolset=TOOLSET, checkpointer=saver
+    )
+    assert second.text == "Load [1]." and not client.replies
+
+
+def test_a_leaked_parameter_tail_is_cut_from_the_answer_but_not_from_the_history():
+    """Haiku sometimes writes the next parameter into the answer text; the Ask page must not
+    show it, and the replayed assistant content must stay exactly as returned."""
+    leaked = 'Load [1].</answer>\n<parameter name="sources">["pr:1"]'
+    saver = InMemorySaver()
+    client = FakeClient(
+        reply(tool_use("t1", "related_work_items", {"text": "jwt"})),
+        reply(submit("t2", leaked, ["pr:1"])),
+    )
+    a = ask(client, checkpointer=saver)
+    assert a.text == "Load [1]." and [s.uid for s in a.sources] == ["pr:1"]
+    assert len(client.requests) == 2  # accepted as is: no extra round trip
+    last = saver.get_tuple({"configurable": {"thread_id": a.thread_id}})
+    sent = last.checkpoint["channel_values"]["messages"][-2]
+    assert sent["role"] == "assistant" and sent["content"][0]["input"]["answer"] == leaked
+
+
+def test_leaked_sources_fill_an_empty_sources_field():
+    client = FakeClient(
+        reply(tool_use("t1", "related_work_items", {"text": "jwt"})),
+        reply(submit("t2", 'Load [1].</answer>\n<parameter name="sources">["pr:1"]', [])),
+    )
+    a = ask(client)
+    assert a.text == "Load [1]." and [s.uid for s in a.sources] == ["pr:1"]
+    assert len(client.requests) == 2
+
+
+def test_leaked_sources_are_checked_like_real_ones():
+    client = FakeClient(
+        reply(tool_use("t1", "related_work_items", {"text": "jwt"})),
+        reply(submit("t2", 'Load [1].</answer>\n<parameter name="sources">["pr:999"]', [])),
+        reply(submit("t3", "Load [1].", ["pr:1"])),
+    )
+    a = ask(client)
+    rejected = client.requests[2]["messages"][-1]["content"][0]
+    assert rejected["is_error"] is True and "pr:999" in rejected["content"]
+    assert a.text == "Load [1]."
+
+
+@pytest.mark.parametrize(
+    ("text", "sources", "path", "want"),
+    [
+        # The three shapes in the Haiku eval runs.
+        ('A [1].</answer>\n<parameter name="sources">["pr:2", "pr:1"]', ["pr:1", "pr:2"], [],
+         {"answer": "A [1].", "sources": ["pr:1", "pr:2"], "path": []}),  # real field wins
+        ("A.</answer>\n<parameter name=\"path\">[]", [], [],
+         {"answer": "A.", "sources": [], "path": []}),
+        ("A [1].</answer>\nsources and path follow.</answer>\n", ["pr:1"], ["pr:1"],
+         {"answer": "A [1].", "sources": ["pr:1"], "path": ["pr:1"]}),
+        # Path too, when the real field is empty.
+        ('A [1].\n<parameter name="sources">["pr:1"]\n<parameter name="path">["person:a"]', [],
+         [], {"answer": "A [1].", "sources": ["pr:1"], "path": ["person:a"]}),
+        # Markers that still cite nothing: left whole, so the refusal can name the leak.
+        ('A [1].</answer>\n<parameter name="sources">[pr:1', [], [], None),
+        ("A [1].", [], [], None),  # nothing leaked
+    ],
+)  # fmt: skip
+def test_cut_leak(text, sources, path, want):
+    given = {"answer": text, "sources": sources, "path": path}
+    assert loop.cut_leak(given) == (want or given)
+    assert given == {"answer": text, "sources": sources, "path": path}  # never edited in place
+
+
 def test_bad_tool_input_and_failing_query_come_back_as_error_results():
     client = FakeClient(
         reply(

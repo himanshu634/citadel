@@ -78,10 +78,7 @@ export interface Point {
 
 /** The stage's coordinate space; the component scales it to its box. */
 export const STAGE = { width: 640, height: 420 } as const;
-const MARGIN_X = 104; // node pills are wide: keep their centres this far from the sides
 const MARGIN_Y = 26;
-const SQUASH = 2; // lay out in a space this much narrower, so pills repel more sideways
-const ITERATIONS = 180;
 
 function hash(s: string): number {
 	let h = 2166136261;
@@ -89,128 +86,12 @@ function hash(s: string): number {
 	return (h >>> 0) / 4294967296;
 }
 
-/**
- * Positions for every node. Deterministic. Nodes in `prev` start where they were and move little,
- * so a new step adds to the picture instead of reshuffling it; new nodes start beside a neighbour.
- * `halfWidth` says how wide each node is drawn (see `pillHalfWidth`), so names never overlap.
- */
-export function layoutWalk(
-	walk: Walk,
-	prev: ReadonlyMap<string, Point> = new Map(),
-	halfWidth: (uid: string) => number = (uid) => pillHalfWidth(walk.nodes.find((n) => n.uid === uid)?.title ?? '')
-): Map<string, Point> {
-	const W = STAGE.width / SQUASH;
-	const H = STAGE.height;
-	const cx = W / 2;
-	const cy = H / 2;
-	const minX = MARGIN_X / SQUASH;
-	const maxX = W - minX;
-	const clampX = (x: number) => Math.min(maxX, Math.max(minX, x));
-	const clampY = (y: number) => Math.min(H - MARGIN_Y, Math.max(MARGIN_Y, y));
-
-	const pos = new Map<string, Point>();
-	const old = new Set<string>();
-	const neighbours = new Map<string, string[]>();
-	for (const r of walk.rels) {
-		neighbours.set(r.from, [...(neighbours.get(r.from) ?? []), r.to]);
-		neighbours.set(r.to, [...(neighbours.get(r.to) ?? []), r.from]);
-	}
-	walk.nodes.forEach((n, i) => {
-		const p = prev.get(n.uid);
-		if (p) {
-			pos.set(n.uid, { x: p.x / SQUASH, y: p.y });
-			old.add(n.uid);
-			return;
-		}
-		if (n.uid === walk.focus) {
-			pos.set(n.uid, { x: cx, y: cy });
-			return;
-		}
-		const angle = hash(n.uid) * Math.PI * 2;
-		const anchor = (neighbours.get(n.uid) ?? []).map((u) => pos.get(u)).find(Boolean);
-		const base = anchor ?? { x: cx, y: cy };
-		const r = anchor ? 110 : 90 + (i % 5) * 18;
-		pos.set(n.uid, { x: clampX(base.x + Math.cos(angle) * r / SQUASH), y: clampY(base.y + Math.sin(angle) * r) });
-	});
-
-	const ids = walk.nodes.map((n) => n.uid);
-	const start = new Map([...old].map((u) => [u, { ...pos.get(u)! }]));
-	const k =Math.sqrt((W * H) / Math.max(ids.length, 1)) * 0.85;
-	for (let it = 0; it < ITERATIONS; it++) {
-		const temp = (W / 8) * (1 - it / ITERATIONS) + 0.5;
-		const disp = new Map<string, Point>(ids.map((u) => [u, { x: 0, y: 0 }]));
-		for (let i = 0; i < ids.length; i++) {
-			for (let j = i + 1; j < ids.length; j++) {
-				const a = pos.get(ids[i])!;
-				const b = pos.get(ids[j])!;
-				let dx = a.x - b.x;
-				let dy = a.y - b.y;
-				let d = Math.hypot(dx, dy);
-				if (d < 0.01) {
-					dx = hash(ids[i] + ids[j]) - 0.5;
-					dy = 0.5;
-					d = Math.hypot(dx, dy);
-				}
-				const f = (k * k) / d;
-				const da = disp.get(ids[i])!;
-				const db = disp.get(ids[j])!;
-				da.x += (dx / d) * f;
-				da.y += (dy / d) * f;
-				db.x -= (dx / d) * f;
-				db.y -= (dy / d) * f;
-			}
-		}
-		for (const r of walk.rels) {
-			const a = pos.get(r.from);
-			const b = pos.get(r.to);
-			if (!a || !b) continue;
-			const dx = a.x - b.x;
-			const dy = a.y - b.y;
-			const d = Math.max(Math.hypot(dx, dy), 0.01);
-			const f = (d * d) / k;
-			const da = disp.get(r.from)!;
-			const db = disp.get(r.to)!;
-			da.x -= (dx / d) * f;
-			da.y -= (dy / d) * f;
-			db.x += (dx / d) * f;
-			db.y += (dy / d) * f;
-		}
-		for (const u of ids) {
-			if (u === walk.focus) continue; // the start stays in the middle
-			const p = pos.get(u)!;
-			const v = disp.get(u)!;
-			v.x += (cx - p.x) * GRAVITY * k; // a little gravity keeps islands on stage
-			v.y += (cy - p.y) * GRAVITY * k;
-			const len = Math.max(Math.hypot(v.x, v.y), 0.01);
-			const step = Math.min(len, old.has(u) ? temp * 0.2 : temp);
-			p.x = clampX(p.x + (v.x / len) * step);
-			p.y = clampY(p.y + (v.y / len) * step);
-			const from = start.get(u);
-			if (from) {
-				// A node already drawn may drift only a little from where the reader saw it.
-				const dx = (p.x - from.x) * SQUASH;
-				const dy = p.y - from.y;
-				const drift = Math.hypot(dx, dy);
-				if (drift > MAX_DRIFT) {
-					p.x = from.x + ((dx / drift) * MAX_DRIFT) / SQUASH;
-					p.y = from.y + (dy / drift) * MAX_DRIFT;
-				}
-			}
-		}
-	}
-	const out = new Map([...pos].map(([u, p]) => [u, { x: p.x * SQUASH, y: p.y }]));
-	separate(out, walk.focus, old, halfWidth);
-	return out;
-}
-
-const GRAVITY = 0.004;
-const MAX_DRIFT = 36; // stage units a drawn node may move when a step adds to the walk
 const NODE_HALF_HEIGHT = 15;
 const GAP = 6;
 
 /**
- * Push apart nodes whose boxes overlap, along the axis that needs the smaller move. Forces work on
- * centres; pills are wide, so this last pass is what keeps two names from printing on each other.
+ * Push apart nodes whose boxes overlap, along the axis that needs the smaller move. Fans place
+ * centres; pills are wide, so this pass is what keeps two names from printing on each other.
  */
 function separate(
 	pos: Map<string, Point>,
@@ -264,6 +145,233 @@ function separate(
 export function pillHalfWidth(title: string | null, maxChars = 26): number {
 	if (title === null) return 8; // a dot
 	return (Math.min(title.length, maxChars) * 7 + 34) / 2;
+}
+
+// --- following the agent (design direction P, round 5) -------------------------------------
+
+/**
+ * How one step plays, in ms. The mark glides to where the query starts (CALL, held while the tool
+ * still runs), links grow out of it (GROW, however many there are), then the step settles. A step
+ * that found nothing ripples for EMPTY instead of growing. Keep `WALK_STEP_MS` the sum: a replay
+ * reveals one ledger row per played step.
+ */
+export const WALK_MS = { call: 450, grow: 1400, settle: 350, empty: 800 } as const;
+export const WALK_STEP_MS = WALK_MS.call + WALK_MS.grow + WALK_MS.settle;
+
+/** Where a query starts: the node it was asked about (a system, a person, an opened uid), if any. */
+export function stepAnchor(step: Pick<WalkStep, 'tool' | 'input'>): string | null {
+	const about = subjectOf(step);
+	if (about) return about;
+	const p = step.input ?? {};
+	if (typeof p.login === 'string') return `person:${p.login.toLowerCase()}`;
+	if (typeof p.system === 'string') return `system:${p.system}`;
+	if (typeof p.uid === 'string') return p.uid;
+	if (typeof p.from_uid === 'string') return p.from_uid; // path_between walks from one end
+	return null;
+}
+
+/**
+ * Where steps start when their anchor is not drawn yet (or they have none): the middle first,
+ * then round it, so each query gets a place of its own and its finds fan out around it.
+ */
+const SPOTS: Point[] = [
+	{ x: 320, y: 210 },
+	{ x: 180, y: 140 },
+	{ x: 460, y: 280 },
+	{ x: 460, y: 140 },
+	{ x: 180, y: 280 },
+	{ x: 320, y: 100 },
+	{ x: 320, y: 320 },
+	{ x: 120, y: 210 },
+	{ x: 520, y: 210 }
+];
+/** A list with no links (list_systems) bigger than this goes round the edge, not into a fan. */
+const LIST_RING_MIN = 7;
+
+export interface FollowLayout {
+	pos: Map<string, Point>;
+	/** Where each graph step started (by step number): its anchor, or the spot it was given. */
+	spots: Map<number, Point>;
+}
+
+/** Hops from `start` over `rels`, both directions. */
+function hopsFrom(start: string | null, rels: readonly WalkRel[]): Map<string, number> {
+	const hop = new Map<string, number>();
+	if (!start) return hop;
+	const next = new Map<string, string[]>();
+	for (const r of rels) {
+		next.set(r.from, [...(next.get(r.from) ?? []), r.to]);
+		next.set(r.to, [...(next.get(r.to) ?? []), r.from]);
+	}
+	hop.set(start, 0);
+	let ring = [start];
+	while (ring.length) {
+		const out: string[] = [];
+		for (const u of ring)
+			for (const v of next.get(u) ?? [])
+				if (!hop.has(v)) {
+					hop.set(v, hop.get(u)! + 1);
+					out.push(v);
+				}
+		ring = out;
+	}
+	return hop;
+}
+
+/**
+ * Positions that read as the agent's walk: each step's new nodes fan out around where the step
+ * started, nearer for one hop, further for two. A step about a node an earlier step grew from
+ * grows from it in place; otherwise the anchor glides (or the step goes) to the next free spot,
+ * so a system found inside one fan does not grow its own fan on top of it. A long
+ * list with no links (the systems) sits round the edge. Deterministic and incremental: the layout
+ * of the first k steps is the first k steps of a longer walk, so a node never jumps when a step
+ * arrives. `carried` (context from earlier questions) sits beside the node it links to.
+ */
+export function layoutFollow(
+	steps: readonly WalkStep[],
+	halfWidth: (uid: string) => number = () => 8,
+	carried: { nodes: readonly WalkNode[]; rels: readonly WalkRel[] } = { nodes: [], rels: [] }
+): FollowLayout {
+	const pos = new Map<string, Point>();
+	const spots = new Map<number, Point>();
+	/** Nodes a step already grew from: a later step about them grows in place. */
+	const started = new Set<string>();
+	let spot = 0;
+	let listed = 0;
+	let last: Point = SPOTS[0];
+	const clamp = (p: Point): Point => ({
+		x: Math.min(STAGE.width - 30, Math.max(30, p.x)),
+		y: Math.min(STAGE.height - MARGIN_Y, Math.max(MARGIN_Y, p.y))
+	});
+	for (const s of steps) {
+		if (s.n === null) continue;
+		const nodes = s.nodes ?? [];
+		const rels = s.rels ?? [];
+		const ids = new Set(nodes.map((n) => n.uid));
+		const fresh = nodes.map((n) => n.uid).filter((u) => !pos.has(u));
+		const wanted = stepAnchor(s);
+		const anchor = wanted && (ids.has(wanted) || pos.has(wanted)) ? wanted : null;
+		if (nodes.length === 0) {
+			spots.set(s.n, anchor && pos.has(anchor) ? pos.get(anchor)! : last);
+			continue;
+		}
+		const old = new Set(pos.keys());
+		if (!anchor && rels.length === 0 && fresh.length >= LIST_RING_MIN) {
+			// A list: round the edge, in golden-angle steps so a second list fills the gaps.
+			for (const u of fresh) {
+				const a = -Math.PI / 2 + listed++ * 2.399963;
+				pos.set(u, { x: 320 + Math.cos(a) * 290, y: 210 + Math.sin(a) * 182 });
+			}
+			spots.set(s.n, SPOTS[0]);
+			last = SPOTS[0];
+		} else {
+			let c: Point;
+			if (anchor && pos.has(anchor) && started.has(anchor)) c = pos.get(anchor)!;
+			else {
+				c = SPOTS[spot++ % SPOTS.length];
+				if (anchor) pos.set(anchor, c);
+			}
+			spots.set(s.n, c);
+			last = c;
+			if (anchor) started.add(anchor);
+			const hop = hopsFrom(anchor, rels);
+			const rings = new Map<number, string[]>();
+			for (const u of fresh) {
+				if (u === anchor) continue;
+				const h = hop.get(u) ?? 1;
+				rings.set(h, [...(rings.get(h) ?? []), u]);
+			}
+			for (const [h, list] of rings) {
+				const turn = hash(`${s.n}:${h}`) * Math.PI * 2;
+				list.forEach((u, j) => {
+					const a = turn + (j / list.length) * Math.PI * 2;
+					const r = 46 + (h - 1) * 48 + (j % 3) * 12;
+					pos.set(u, clamp({ x: c.x + Math.cos(a) * r * 1.25, y: c.y + Math.sin(a) * r * 0.8 }));
+				});
+			}
+		}
+		separate(pos, anchor, old, halfWidth); // the place the step grew from stays put
+	}
+	const extra = carried.nodes.filter((n) => !pos.has(n.uid));
+	if (extra.length) {
+		const old = new Set(pos.keys());
+		for (const n of extra) {
+			const r = carried.rels.find((x) => (x.from === n.uid && pos.has(x.to)) || (x.to === n.uid && pos.has(x.from)));
+			const base = (r && pos.get(r.from === n.uid ? r.to : r.from)) || SPOTS[0];
+			const a = hash(n.uid) * Math.PI * 2;
+			pos.set(n.uid, clamp({ x: base.x + Math.cos(a) * 70, y: base.y + Math.sin(a) * 48 }));
+		}
+		separate(pos, null, old, halfWidth);
+	}
+	return { pos, spots };
+}
+
+export interface Growth {
+	/** Each link of the step: it grows from `src` (the end nearer the anchor) to `dst`. */
+	links: { key: string; src: string; dst: string; t0: number; t1: number }[];
+	/** When each node the step brings first appears: its first link reaches it. */
+	arrive: Map<string, number>;
+	/** Nodes no link reaches (a list, a search): a spoke from the mark brings them. */
+	spokes: { uid: string; t0: number; t1: number }[];
+}
+
+/**
+ * When each part of one step grows, in ms from the start of its grow phase, inside
+ * `WALK_MS.grow` however many links it has: hop 1 first, then hop 2, staggered within a hop.
+ * `drawn` holds the nodes earlier steps already show (they need no arrival).
+ */
+export function growSchedule(step: WalkStep, drawn: ReadonlySet<string>): Growth {
+	const nodes = (step.nodes ?? []).map((n) => n.uid);
+	const rels = step.rels ?? [];
+	const wanted = stepAnchor(step);
+	const anchor = wanted && (nodes.includes(wanted) || drawn.has(wanted)) ? wanted : null;
+	const hop = hopsFrom(anchor, rels);
+	const span = WALK_MS.grow * 0.8;
+	const deepest = Math.max(1, ...rels.map((r) => Math.max(hop.get(r.from) ?? 1, hop.get(r.to) ?? 1)));
+	const per = span / deepest;
+	const byHop = new Map<number, WalkRel[]>();
+	for (const r of rels) {
+		const h = Math.max(1, hop.get(r.from) ?? 1, hop.get(r.to) ?? 1);
+		byHop.set(h, [...(byHop.get(h) ?? []), r]);
+	}
+	const links: Growth['links'] = [];
+	for (const [h, list] of byHop)
+		list.forEach((r, j) => {
+			const a = hop.get(r.from) ?? 99;
+			const b = hop.get(r.to) ?? 99;
+			const t0 = (h - 1) * per + (j / list.length) * per * 0.55;
+			links.push({ key: relKey(r), src: a <= b ? r.from : r.to, dst: a <= b ? r.to : r.from, t0, t1: t0 + Math.max(260, per * 0.45) });
+		});
+	const arrive = new Map<string, number>();
+	if (anchor && !drawn.has(anchor)) arrive.set(anchor, 0);
+	for (const l of links) {
+		for (const [u, t] of [
+			[l.src, l.t0],
+			[l.dst, l.t1]
+		] as const)
+			if (!drawn.has(u) && (!arrive.has(u) || arrive.get(u)! > t)) arrive.set(u, t);
+	}
+	const lonely = nodes.filter((u) => !drawn.has(u) && !arrive.has(u));
+	const spokes = lonely.map((uid, j) => {
+		const t0 = (j / lonely.length) * span * 0.7;
+		arrive.set(uid, t0 + 320);
+		return { uid, t0, t1: t0 + 320 };
+	});
+	return { links, arrive, spokes };
+}
+
+/** "authored 30 · reviewed 22": the relationships a step read, busiest first. */
+export function relTypesLine(rels: readonly WalkRel[]): string {
+	const count = new Map<string, number>();
+	for (const r of rels) {
+		const t = (r.note ?? r.type).toLowerCase();
+		count.set(t, (count.get(t) ?? 0) + 1);
+	}
+	return [...count]
+		.sort((a, b) => b[1] - a[1])
+		.slice(0, 4)
+		.map(([t, n]) => `${t} ${n}`)
+		.join(' · ');
 }
 
 // --- what a citation lights up -----------------------------------------------------------
@@ -366,6 +474,11 @@ const SAID: Record<string, (p: Record<string, unknown>) => Said> = {
 			? [`Finding who works most with ${str(p.login)}`, `Found who works most with ${str(p.login)}`]
 			: ['Finding who works most closely together', 'Found who works most closely together'],
 	issues_by_system: () => ['Counting issues per system', 'Counted issues per system'],
+	central_nodes: (p) => {
+		const what = { WorkItem: 'work items', Document: 'documents' }[str(p.label)] ?? 'systems';
+		return [`Ranking the most central ${what}`, `Ranked the most central ${what}`];
+	},
+	bottlenecks: () => ['Finding the work everything else goes through', 'Found the work everything else goes through'],
 	graph_stats: () => ['Counting what the graph holds', 'Counted what the graph holds'],
 	submit_answer: () => ['Checking the answer against what was found', 'Checked the answer against what was found'],
 	// Ask interviewing the person about the brain's gaps.
@@ -730,12 +843,13 @@ export function rowViews(step: Pick<WalkStep, 'tool' | 'rows'>): RowView[] {
 		}
 		const nameKey = NAME_KEYS.find((k) => typeof row[k] === 'string');
 		let name = nameKey ? str(row[nameKey]) : '';
-		if (typeof row.number === 'number' && nameKey === 'title') name = `#${row.number} ${name}`;
+		if (typeof row.number === 'number' && (nameKey === 'title' || nameKey === 'name')) name = `#${row.number} ${name}`;
 		const numbers = NUMBER_KEYS.filter(([k]) => typeof row[k] === 'number')
 			.slice(0, 3)
 			.map(([k, label]) => {
 				const v = row[k] as number;
-				const n = Number.isInteger(v) ? String(v) : v.toFixed(2);
+				// PageRank scores are small: 0.0068 keeps two digits instead of reading 0.01
+				const n = Number.isInteger(v) ? String(v) : Math.abs(v) < 0.01 ? v.toPrecision(2) : v.toFixed(2);
 				return label ? `${label} ${n}` : n;
 			});
 		const url = refUrl(typeof row.uid === 'string' ? row.uid : null, typeof row.url === 'string' ? row.url : null);

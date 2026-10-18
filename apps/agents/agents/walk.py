@@ -227,6 +227,22 @@ def _issues_by_system(b: _Builder, params: Row, rows: list[Row]) -> None:
             b.rel(b.item(ex), sys, "MENTIONS", inferred=True)
 
 
+def _central_nodes(b: _Builder, params: Row, rows: list[Row]) -> None:
+    for r in rows:
+        label = r.get("label")
+        if label == "System":
+            b.system(r.get("name"), r.get("uid"))
+        elif label == "Document":
+            b.node(r.get("uid"), "Document", r.get("name"), r.get("url"))
+        else:
+            b.item({**r, "title": r.get("name")})
+
+
+def _bottlenecks(b: _Builder, params: Row, rows: list[Row]) -> None:
+    for r in rows:
+        b.item(r)
+
+
 _LABEL_BY_PREFIX = {"system": "System", "person": "Person", "team": "Team"}
 
 
@@ -271,6 +287,8 @@ def _ask_archivist(b: _Builder, params: Row, rows: list[Row]) -> None:
 
 _BY_TOOL: dict[str, Callable[[_Builder, Row, list[Row]], None]] = {
     "ask_archivist": _ask_archivist,
+    "bottlenecks": _bottlenecks,
+    "central_nodes": _central_nodes,
     "collaborators": _collaborators,
     "experts_for_system": _experts_for_system,
     "get_entity": _get_entity,

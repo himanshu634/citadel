@@ -64,7 +64,7 @@ class RecordingAdapter:
     def key(self, source):
         return self._real.key(source)
 
-    def fetch(self, company, source, cache_dir):
+    def fetch(self, company, source, cache_dir, full=False):
         self._fetched.append(self.key(source))
 
     def records(self, company, source, cache_dir):  # unused by fetch
@@ -152,7 +152,7 @@ def test_fetch_keys_filter(monkeypatch, two_source_company):
 
 def test_fetch_failure_emits_failed_and_reraises(monkeypatch, two_source_company):
     class Boom(RecordingAdapter):
-        def fetch(self, company, source, cache_dir):
+        def fetch(self, company, source, cache_dir, full=False):
             raise RuntimeError("rate limited")
 
     monkeypatch.setitem(adapters.REGISTRY, "local_docs", Boom("local_docs", []))

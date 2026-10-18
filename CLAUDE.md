@@ -27,7 +27,7 @@ make setup                     # uv sync + create .env from .env.example
 make up / make down            # FalkorDB in Docker; ports/password from .env (:6379, Browser UI :3000)
 make schema SLUG=synthetic     # create indexes on brain_synthetic (idempotent)
 make synthetic                 # regenerate synthetic JSONL, schema + full ingest (+ embed) into brain_synthetic
-make fetch | ingest | sync     # SOURCE=<type> limits to one source; FULL=1 ignores sync cursors; ingest also embeds
+make fetch | ingest | sync     # SOURCE=<type> limits to one source; FULL=1 ignores sync cursors (fetch: pulls the whole window again); ingest also embeds
 make embed SLUG=x              # embed new or changed chunk text (ALL=1: every chunk again)
 make stats                     # node/relationship counts
 make tools                     # list the named query tools and their params
@@ -61,7 +61,7 @@ Configuration comes from `.env` (see `.env.example`): FalkorDB host/port/credent
 `data/models/`, or `gemini-embedding-2`) and `EMBEDDING_DIM` (768; the vector index size, must
 equal the model's output size) drive the embed stage. `gemini` uses Google's Gemini embedding
 API (`GEMINI_API_KEY`) instead of the local model, and sends chunk text there.
-`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (default `claude-haiku-5-5`) and `ANTHROPIC_EFFORT`
+`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (default `claude-sonnet-5-5`) and `ANTHROPIC_EFFORT`
 (default `medium`) drive `agents ask` and the Keeper's jobs. `KEEPER_BUDGET` (5, gaps one
 on-demand review decides), `KEEPER_BUILD_BUDGET` (3, the review after a build) and
 `KEEPER_NOTICE_CAP` (10, max new gaps per noticing run) tune the Keeper. Settings live in
@@ -90,7 +90,10 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   all network I/O into the cache; `records` must read only the cache or local files, so re-ingest costs no API
   calls. Raise `SourceUnavailable` to make ingest skip a source. Optional `check()` (no network:
   a folder, an env var) returns a `SourceProblem` saying what would stop the next build; `blocks`
-  when the download fails (no token), else ingest just skips it. `downloads = True` marks a
+  when the download fails (no token), else ingest just skips it. Optional `incomplete()` returns
+  a sentence while the cache lacks records a fetch still has to bring (a run that stopped
+  halfway, a list never fetched): ingest loads what there is but keeps the source's cursor, so
+  those records are not dropped as already seen when they arrive. `downloads = True` marks a
   source with a network fetch. `pipeline.configured_sources` runs them for the Sources page.
 - **`normalize.py`** applies the company YAML: path → System rules (first match wins, then
   `fallback`, `ignore`), bot detection and login aliases, conventional-commit prefix →
@@ -103,7 +106,11 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   GraphQL documents in `queries/*.graphql`. Tests use recorded pages in
   `tests/fixtures/github/`.
 - **`adapters/runs.py`**: the resumable, incremental paging into a raw cache that GitHub and
-  Linear share (`fetch_paged`, `completed_pages`).
+  Linear share (`fetch_paged`, `completed_pages`, `unfinished`). A list's `state.json` keeps
+  `complete_until` (the last completed run's start; the next run goes back to it minus an hour)
+  and `window_start` (the window those runs were fetched under): a `window.since` moved earlier
+  (or a state written before the window was stored) makes the next run start at the window, and
+  so does `full` (`brain fetch --full`).
 - **`adapters/linear/`** (`LINEAR_API_KEY`; `own`/`synthetic` data only): `client.py`, `fetch.py`,
   `transform.py`, `seed.py` (`make linear-seed`, the only writer to Linear). Issues become
   WorkItem `kind: ticket`; ASSIGNED_TO is replaced on every load, BLOCKS edges of the source
@@ -159,7 +166,11 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   citations). `call(slug, name, **params)` is the one entry point; typed wrappers sit on top.
   `prepare` only converts params (days → epoch, text → RediSearch OR query, login → uid). No
   LLM-generated Cypher anywhere. `path_between` uses `algo.SPpaths` (FalkorDB's `shortestPath`
-  rejects undirected traversals). `semantic_search` sits beside the full-text tools
+  rejects undirected traversals). `central_nodes` ranks one label by `algo.pageRank(NULL, NULL)`
+  (whole graph; `algo.pageRank` follows only edges whose both ends have the label it is given,
+  so a System-only run is flat). `bottlenecks` sums 8 seeded runs of `algo.betweenness` over
+  WorkItem and BLOCKS/CLOSES/MENTIONS: FalkorDB's betweenness is directed only and samples its
+  start nodes with replacement, so one run can miss nodes on a small graph. `semantic_search` sits beside the full-text tools
   (`related_*`): it embeds the question (`prepare`), queries the `Chunk` vector index, keeps the
   best chunk per source and returns the source WorkItem/Document uid to cite; similarity is
   1 - cosine distance, `kinds` filters chunk kinds. With embeddings off it raises
@@ -190,6 +201,15 @@ including the embed stage's `chunks_to_embed`, `chunk_embedding`, `clear_embedde
 (the Keeper's ledger in keeper_<slug>, run by `agents.keeper.store`; its `archive_*` queries hold
 the Archivist's requests and finds).
 
+FalkorDB range indexes are per label, so a label-less `MATCH (n {uid: $uid})` scans every node.
+Every node with a uid carries the label `Node` beside its kind (the loads `SET x:Node` as they
+MERGE on the kind label; `schema/node_label`, run by `brain schema` and every build's prepare
+stage, backfills a graph loaded before it existed), and a lookup that takes any kind of node is
+`MATCH (n:Node {uid: $uid})` (get_entity, path_between, the Keeper's evidence, source_facts and
+project_claim; `test_graph.py` checks their plans with `db.explain`). FalkorDB lists a node's
+labels in the order the graph first saw them, so a query reads the kind as
+`head([l IN labels(n) WHERE l <> 'Node'])`, never `labels(n)[0]` (`test_queries.py` forbids it).
+
 The synthetic company (`apps/brain/examples/synthetic_company`, source type `canonical_jsonl`)
 is a small offline dataset for demos and tests; its JSONL is generated by `generate.py`.
 
@@ -207,6 +227,12 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
 - The answer comes through the `submit_answer` tool (forced `tool_choice` is a 400 on current
   models). It may cite only uids seen in tool results; anything else is sent back as an error.
   A plain-text reply gets one nudge to call it (`loop.MAX_NUDGES = 1`), then the turn ends.
+  A tail Haiku writes into the answer text (`</answer>` + `<parameter name="sources">...`) is
+  cut from the accepted answer (`loop.cut_leak`, a copy; the replayed tool_use keeps it), and a
+  leaked sources/path list fills that field only when it is empty.
+  A question ends with no answer after `loop.MAX_REFUSALS` (5) refused submits; markers with an
+  empty `sources` (after `cut_leak`) are refused with the latest seen uids (Haiku can repeat
+  that call until `max_tokens`).
 - Step limits (LangGraph `recursion_limit`; each tool round trip is two steps): 40 per Ask
   question (`ask.RECURSION_LIMIT`), 30 per role job (`runner.RECURSION_LIMIT`). Hitting one
   ends the run with stop `step_limit`.
@@ -269,11 +295,14 @@ follow the data. Each case runs `REPEAT` times and reports a pass rate; turns of
 thread. Case files: `synthetic.yaml` (the offline company, fixed answers) and `falkordb.yaml` (the
 live FalkorDB repo: rankings only as gold refs, literals only for merged PR/issue pairs and bot
 uids, several questions taken from real Ask traces). Results: `data/evals/<slug>/<time>-<model>-<effort>.jsonl`; `BASELINE=` diffs pass rates
-against an earlier file. The `[semantic]` cases ask in words with no full-text overlap (the
-graph must be embedded). The `[archive]` cases make the Archivist load into the brain, so a
-plain run skips them (`CASE=archive` runs them); run them after `make archive-clear
-SLUG=synthetic CONFIRM=1` and `make synthetic`, with `REPEAT=1`. It calls the API, so it is not
-part of `make test`;
+against an earlier file; `make eval-report FILES=...` (`evals/report.py`) turns result files into the
+Markdown tables of docs/evals.md (published runs: `docs/evals/<slug>/`). The `[semantic]` cases ask in words with no full-text overlap (the
+graph must be embedded). The `[falkordb]` cases (`CASE=falkordb`) ask one question per graph algorithm or
+FalkorDB feature behind a tool (SPpaths, PageRank, betweenness, variable-length BLOCKS, full-text,
+vector), plus one thread that chains three of them. The `[archive]` cases make the Archivist load
+into the brain, so a plain run skips them (`CASE=archive` runs them); run them after `make
+archive-clear SLUG=synthetic CONFIRM=1` and `make synthetic`, with `REPEAT=1`. It calls the API, so
+it is not part of `make test`;
 `apps/agents/tests/test_evals.py` checks the case files and the harness with the scripted client.
 `evals/drafts.py` (`make eval-drafts`) turns thumbs-down traces into cases `fb-<trace id>`: the
 earlier turns of the thread, then the bad one expecting only an answer, with the bad answer in
@@ -308,7 +337,7 @@ demo's agents are `brain`, `keeper`, `pm`, `qa` and `archivist` (below). Pieces:
   that opens no task is recorded (`ledger/follow_up_tried`, logged `follow_up_skipped`).
 - Fixed rules (`keeper/rules.py`, `keeper/decide.py`), never the model: evidence uids must exist;
   sources win (`conflicts_with_source`, never projected, pm follow-up); critical =
-  `replaces_claim`, `high_impact_system` (top quarter by co-change) or `no_source_evidence`, and
+  `replaces_claim`, `high_impact_system` (top quarter of systems by whole-graph PageRank) or `no_source_evidence`, and
   waits for a lead (`approve`/`reject`, guarded: a second decision raises `ClaimNotPending`, 409).
   A claim that goes stale when it is accepted uses an attempt (`needs_person` at 2, as a
   rejection); re-projection's stales after a build do not.
@@ -329,11 +358,15 @@ demo's agents are `brain`, `keeper`, `pm`, `qa` and `archivist` (below). Pieces:
   review the ledger shows `running` that this process is not running is gone: `recover` stops
   every one at startup and a start stops any left over first (`ledger/review_stop_running`,
   stop `restart`); there is no heartbeat. There is no Keeper CLI: the app and the API are its
-  only surfaces. No Keeper page: reviews show on the
-  Systems page's activity trail (`GET .../activity`), its controls in that page's rail.
-- Frontend: Review now in the Systems page's bar; in its rail the claims waiting for a lead
-  (`ClaimApproval`: typed name, optional why) and the log (`KeeperLog`), read again when a Keeper
-  run starts, steps or ends. Words for reasons, log actions, errors in `src/lib/keeper.ts`; Ask
+  only surfaces. Reviews show on the Systems page's activity trail (`GET .../activity`).
+- Frontend: Review now in the Systems page's bar and the log (`KeeperLog`) in its rail, read
+  again when a Keeper run starts, steps or ends. Claims waiting for a lead are decided on
+  `/c/<slug>/review` (list + detail, `ClaimApproval`: name typed once in the header, optional
+  why; the open claim in `?claim=`; beside it `KeeperTrail`, the work behind it from
+  `GET .../keeper/claims/{uid}/trail`, which `agents/keeper/trail.py` joins from the ledger: the
+  review that picked the claim's gap, its steps cut into pm/qa/keeper jobs at each submit, the
+  consults and the gap's log), opened from the sidebar's "Review claims", whose count comes
+  from `src/lib/pendingClaims.svelte.ts`. Words for reasons, log actions, errors in `src/lib/keeper.ts`; Ask
   marks a cited `Claim` source "Keeper" (`WalkAnswer`).
 
 ### The Archivist (`agents/archivist`, `roles/archivist.py`, `brain/archive/`)

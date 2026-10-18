@@ -38,13 +38,15 @@ class LocalDocsAdapter(FolderAdapter):
         self, company: CompanyConfig, source: LocalDocsSource, cache_dir: Path
     ) -> Iterator[CanonicalRecord]:
         folder = self.folder(company, source)
+        # The uid names the source folder: two folders may both hold a README.md.
+        prefix = f"{self.name}:{company.slug}:{source.path.as_posix()}"
         for path in sorted(folder.rglob("*")):
             if path.suffix.lower() not in SUFFIXES or not path.is_file():
                 continue
             rel = path.relative_to(folder).as_posix()
             body = path.read_text(errors="replace")
             yield Document(
-                uid=f"{self.name}:{company.slug}:{rel}",
+                uid=f"{prefix}:{rel}",
                 source=self.name,
                 path=rel,
                 title=doc_title(path, body),

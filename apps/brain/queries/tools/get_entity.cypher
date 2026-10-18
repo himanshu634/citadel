@@ -14,7 +14,7 @@
 //          by its own uid (a semantic_search chunk_uid) still works. A long comment is listed
 //          once, by its first piece (idx 0); its other pieces are left out the same way.
 // example: make query TOOL=get_entity P="uid=synthetic:pr:4"
-MATCH (n {uid: $uid})
+MATCH (n:Node {uid: $uid})
 OPTIONAL MATCH (n)-[r]-(m)
 WHERE NOT (m:Chunk AND (m.kind IN ['work_item', 'document'] OR coalesce(m.idx, 0) > 0))
   AND (NOT m:Claim OR (m.status = 'accepted' AND m.valid_to IS NULL))
@@ -22,10 +22,12 @@ WITH n, r, m ORDER BY type(r), m.uid
 WITH n, collect(CASE WHEN r IS NULL THEN NULL ELSE {
        rel: type(r),
        direction: CASE WHEN startNode(r) = n THEN 'out' ELSE 'in' END,
-       uid: m.uid, label: labels(m)[0],
+       uid: m.uid,
+       label: head([l IN labels(m) WHERE l <> 'Node']),
        title: coalesce(m.title, m.subject, m.name, m.login, m.path, left(m.text, 80)),
        url: m.url} END) AS all_neighbours
-RETURN n.uid AS uid, labels(n)[0] AS label,
+RETURN n.uid AS uid,
+       head([l IN labels(n) WHERE l <> 'Node']) AS label,
        coalesce(n.title, n.subject, n.name, n.login, n.path) AS title, n.kind AS kind,
        n.state AS state, n.url AS url,
        coalesce(n.created_at, n.merged_at, n.date, n.updated_at) AS date,

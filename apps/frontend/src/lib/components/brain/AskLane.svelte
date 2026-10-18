@@ -270,7 +270,7 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 				<span class="meta tabular">{plural(nodes, 'node')}</span>
 			</h3>
 			{#if drawn}
-				<GraphWalk steps={shown} {highlight} {fresh} {cited} {carried} />
+				<GraphWalk steps={shown} {highlight} {fresh} {cited} {carried} working={running} />
 			{:else}
 				<div class="placeholder" aria-hidden="true">
 					<div class="placeholder-canvas"></div>
@@ -298,6 +298,8 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 		gap: var(--space-3);
 		min-width: 0;
 		padding: var(--space-2) var(--space-6);
+		/* The border spans the walk column; the text stops before the splitter. */
+		padding-inline-end: calc(var(--space-6) + var(--splitter-hit) + var(--walk-width));
 		border-top: var(--border-hair) solid var(--color-line);
 	}
 	.title {

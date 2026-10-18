@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import pytest
 from agents.archivist import live
-from agents.evals import cases, run
+from agents.evals import cases, report, run
 from agents.evals.cases import Case, Expect, Gold, GoldResolver
 from agents.evals.graders import grade
 from agents.keeper import interview
@@ -282,3 +282,55 @@ def test_report_and_baseline(tmp_path, monkeypatch):
     assert "2/3 runs passed" in text
     assert "total in 300 (cached 240), out 15" in text  # cache reads and writes count as input
     assert "FAIL a #1" in text
+
+
+def test_markdown_report_compares_two_files_per_company(tmp_path):
+    def result(case, tags, passed, rep, error=None):
+        check = {"name": "cite_any", "ok": passed, "detail": "none of ['person:alice']"}
+        usage = {"input_tokens": 100, "output_tokens": 10, "cache_read_input_tokens": 0}
+        turn = {"tools": ["x", "y"], "rejected": [], "tool_errors": [], "ms": 2000,
+                "usage": usage, "checks": [check], "passed": passed,
+                "sources": ["system:Auth"]}  # fmt: skip
+        return {"kind": "run", "case": case, "tags": tags, "repeat": rep, "passed": passed,
+                "error": error, "turns": [] if error else [turn]}  # fmt: skip
+
+    def write(name, model, runs):
+        meta = {"kind": "meta", "slug": "acme", "model": model, "effort": "medium", "repeat": 2,
+                "cases": ["who", "why"], "started": "2026-10-17T00:00:00+00:00"}  # fmt: skip
+        path = tmp_path / name
+        path.write_text("\n".join(json.dumps(x) for x in [meta, *runs]) + "\n")
+        return path
+
+    base = write("a.jsonl", "claude-haiku-5-5", [
+        result("who", ["experts"], True, 0), result("who", ["experts"], False, 1),
+        result("why", ["live", "history"], True, 0), result("why", ["live", "history"], True, 1),
+    ])  # fmt: skip
+    other = write("b.jsonl", "claude-sonnet-5-5", [
+        result("who", ["experts"], True, 0), result("who", ["experts"], True, 1),
+        result("why", ["live", "history"], True, 0),
+        result("why", ["live", "history"], False, 1, error="APIStatusError: overloaded"),
+    ])  # fmt: skip
+
+    text = report.render([base, other])
+    lines = text.splitlines()
+    assert lines[0] == "| Company | Cases | haiku-5-5 medium | sonnet-5-5 medium | Δ |"
+    assert lines[2] == "| acme | 2 | 3/4 (75%) | 3/4 (75%) | = |"
+    assert "commit not recorded" in text  # older files have no commit in their meta
+    assert "| experts | 1 | 1/2 (50%) | 2/2 (100%) | +50 pt |" in text
+    assert "| history | 1 | 2/2 (100%) | 1/2 (50%) | -50 pt |" in text  # `live` is not a group
+    assert "| runs that errored (API or graph) | 0 | 1 |" in text
+    assert "| cases passed every run | 1/2 | 1/2 |" in text
+    assert "| graph tool calls | 2.0 | 1.5 |" in text  # an errored run made no calls
+    assert "| `why` | history | 2/2 | 1/2 (1 err) | -50 pt |" in text
+    assert (
+        "- `who` #1 (haiku-5-5 medium): turn 1 cite_any: none of ['person:alice'] "
+        "(cited system:Auth)"
+    ) in text
+    assert "- `why` #1 (sonnet-5-5 medium): error: APIStatusError: overloaded" in text
+
+    # The same model before and after a change: the two columns get told apart.
+    again = write("c.jsonl", "claude-haiku-5-5", [result("who", ["experts"], True, 0)])
+    lines = report.render([base, again]).splitlines()
+    head = "| Company | Cases | haiku-5-5 medium (before) | haiku-5-5 medium (after) | Δ |"
+    assert lines[0] == head
+    assert lines[2] == "| acme | 2 | 3/4 (75%) | 1/1 (100%) | +25 pt |"

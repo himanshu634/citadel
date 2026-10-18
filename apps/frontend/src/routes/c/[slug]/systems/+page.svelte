@@ -10,35 +10,29 @@ one look, on the map people already know. Runs come from GET .../activity (Ask t
 reviews), read again every few seconds while one is going and less often when not.
 The map is laid out once per graph; only the trail moves.
 
-The Keeper's controls live here too (design direction A2): Review now in the bar, and in the rail
-the claims waiting for a lead (Approve or Reject with a typed name) and the Keeper's log. They are
-read again when a Keeper run starts or ends, after Review now and after each decision.
+The Keeper's controls live here too (design direction A2): Review now in the bar, and the
+Keeper's log in the rail, read again when a Keeper run starts, steps or ends and after Review now.
+Claims waiting for a lead are decided on the review page (`/c/<slug>/review`, the sidebar's
+"Review claims"); a logged claim that still waits links there.
 -->
 <script lang="ts">
 	import { CloudOff, LoaderCircle } from '@lucide/svelte';
 	import { resolve } from '$app/paths';
-	import { AgentRun, Banner, Button, ClaimApproval, EmptyState, KeeperLog, TerritoryMap } from '$lib';
+	import { AgentRun, Banner, Button, EmptyState, KeeperLog, TerritoryMap } from '$lib';
 	import { actorName, featured, hereLabel, shownRun, trailOf, type Pick } from '$lib/activity';
 	import { api, describeError } from '$lib/api/client';
 	import { getCompanies } from '$lib/companies.svelte';
 	import type { MapLayout } from '$lib/graph';
 	import { cachedLayout, computeLayout } from '$lib/graphLayout';
-	import {
-		decidedLine,
-		decisionError,
-		evidenceRefs,
-		keeperRunning,
-		keeperRunsKey,
-		railLog,
-		reviewNote,
-		type DecisionError
-	} from '$lib/keeper';
+	import { keeperRunning, keeperRunsKey, railLog, reviewNote } from '$lib/keeper';
 	import { buildingTitle, viewOf } from '$lib/overview';
+	import { getPendingClaims } from '$lib/pendingClaims.svelte';
 	import { ago } from '$lib/time';
-	import type { Activity, Claim, Gap, GraphView, LogEntry } from '$lib/types';
+	import type { Activity, Gap, GraphView, LogEntry } from '$lib/types';
 
 	let { data } = $props();
 	const companies = getCompanies();
+	const pendingClaims = getPendingClaims();
 
 	const company = $derived(companies.byslug(data.slug));
 	const status = $derived(company ? viewOf(company) : null);
@@ -137,8 +131,8 @@ read again when a Keeper run starts or ends, after Review now and after each dec
 	const chatHref = (threadId: string | null) =>
 		threadId ? `${askPath}?${new URLSearchParams({ thread: threadId })}` : null;
 
-	// The Keeper: its pending claims, its gaps (for their text) and its log, read together.
-	type Ledger = { slug: string; claims: Claim[] | null; gaps: Gap[] | null; log: LogEntry[] | null; error: string | null };
+	// The Keeper: its gaps (for their text) and its log, read together.
+	type Ledger = { slug: string; gaps: Gap[] | null; log: LogEntry[] | null; error: string | null };
 	let ledger = $state.raw<Ledger | null>(null);
 	let readLedgerNow = $state(0);
 	const keeperKey = $derived(keeperRunsKey(runs ?? []));
@@ -146,9 +140,9 @@ read again when a Keeper run starts or ends, after Review now and after each dec
 	const LOG_READ = 60;
 	const LOG_SHOWN = 20;
 	const mine = $derived(ledger?.slug === data.slug ? ledger : null);
-	const pending = $derived(mine?.claims ?? null);
 	const gapText = $derived(new Map((mine?.gaps ?? []).map((g) => [g.uid, g.text])));
-	const pendingIds = $derived(new Set((pending ?? []).map((c) => c.uid)));
+	const pendingIds = $derived(pendingClaims.uids(data.slug));
+	const reviewPath = $derived(resolve('/c/[slug]/review', { slug: data.slug }));
 
 	$effect(() => {
 		const slug = data.slug;
@@ -156,17 +150,14 @@ read again when a Keeper run starts or ends, after Review now and after each dec
 		void readLedgerNow;
 		if (!fetchable) return;
 		let live = true;
-		void Promise.allSettled([
-			api.keeper.claims(slug, 'pending_approval'),
-			api.keeper.gaps(slug),
-			api.keeper.log(slug, LOG_READ)
-		]).then(([claims, gaps, log]) => {
+		// A Keeper step may have queued a claim: the sidebar's count follows at once.
+		void pendingClaims.refresh(slug);
+		void Promise.allSettled([api.keeper.gaps(slug), api.keeper.log(slug, LOG_READ)]).then(([gaps, log]) => {
 			if (!live) return;
-			const failed = [claims, gaps, log].find((r) => r.status === 'rejected');
+			const failed = [gaps, log].find((r) => r.status === 'rejected');
 			const before = ledger?.slug === slug ? ledger : null;
 			ledger = {
 				slug,
-				claims: claims.status === 'fulfilled' ? claims.value : (before?.claims ?? null),
 				gaps: gaps.status === 'fulfilled' ? gaps.value : (before?.gaps ?? null),
 				log: log.status === 'fulfilled' ? railLog(log.value, LOG_SHOWN) : (before?.log ?? null),
 				error: failed ? describeError(failed.reason) : null
@@ -200,48 +191,8 @@ read again when a Keeper run starts or ends, after Review now and after each dec
 		}
 	}
 
-	// A lead's decision. The typed name is kept in this browser, so it is typed once.
-	const NAME_KEY = 'citadel-keeper-name';
-	let approver = $state(readName());
-	let decided = $state<{ slug: string; text: string } | null>(null);
-	const decidedNote = $derived(decided?.slug === data.slug ? decided.text : null);
-	function readName(): string {
-		try {
-			return localStorage.getItem(NAME_KEY) ?? '';
-		} catch {
-			return '';
-		}
-	}
-	async function decide(claim: Claim, decision: 'approve' | 'reject', by: string, why: string): Promise<DecisionError | null> {
-		const slug = data.slug;
-		let result: Claim;
-		try {
-			result = await api.keeper[decision](slug, claim.uid, { by, why });
-		} catch (e) {
-			const err = decisionError(e);
-			if (err.gone) {
-				decided = { slug, text: err.message };
-				readLedgerNow++;
-			}
-			return err;
-		}
-		try {
-			localStorage.setItem(NAME_KEY, by);
-		} catch {
-			// Private window or blocked storage: the name is typed again next time.
-		}
-		decided = { slug, text: decidedLine(decision, by, result) };
-		readLedgerNow++;
-		readRunsNow++;
-		return null;
-	}
-	const known = $derived(new Map((graph?.nodes ?? []).map((n) => [n.uid, n])));
-	const evidenceOf = (claim: Claim) =>
-		evidenceRefs(claim.evidence, (uid) => {
-			const n = known.get(uid);
-			return n ? { label: n.label, title: n.title, url: n.url } : null;
-		});
-	const claimHref = (uid: string) => (pendingIds.has(uid) ? `#keeper-${uid}` : null);
+	const claimHref = (uid: string) =>
+		pendingIds.has(uid) ? `${reviewPath}?${new URLSearchParams({ claim: uid })}` : null;
 
 	const statusLine = $derived(
 		working
@@ -320,23 +271,6 @@ read again when a Keeper run starts or ends, after Review now and after each dec
 					<TerritoryMap view={graph} {layout} {trail} {here} />
 				</div>
 				<aside class="side" aria-label="Agent runs and the Keeper">
-					{#if decidedNote}<p class="note" role="status">{decidedNote}</p>{/if}
-					{#if pending?.length}
-						<section class="keeper" aria-labelledby="waiting-h">
-							<h2 id="waiting-h">Waiting for you · {pending.length}</h2>
-							{#each pending as claim (claim.uid)}
-								<div id="keeper-{claim.uid}">
-									<ClaimApproval
-										{claim}
-										gapText={claim.gap ? (gapText.get(claim.gap) ?? null) : null}
-										evidence={evidenceOf(claim)}
-										bind:name={approver}
-										ondecide={(decision, by, why) => decide(claim, decision, by, why)}
-									/>
-								</div>
-							{/each}
-						</section>
-					{/if}
 					{#if activityError && !runs}
 						<p class="note">Can't read the agents' runs: {activityError}</p>
 					{:else if !runs}
@@ -499,7 +433,10 @@ read again when a Keeper run starts or ends, after Review now and after each dec
 		min-height: 0;
 		overflow: hidden;
 	}
+	/* Positioned so the rail's absolute children (the chips' .sr-only labels) are laid out in its
+	   scroll box; anchored to <body>, they stretched the document past the frame. */
 	.side {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-6);

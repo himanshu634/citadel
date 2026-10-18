@@ -191,6 +191,7 @@ def _run(slug, question, thread_id, client, toolset, checkpointer, stop, model) 
         "stop": None,
         "stop_details": None,
         "nudges": 0,
+        "refusals": 0,
         "ask_model": model,
     }
     yield {"kind": "start", "thread_id": thread_id}

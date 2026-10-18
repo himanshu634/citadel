@@ -10,7 +10,7 @@ of a kind not listed in `_MODELS` is logged and skipped. Payloads are the Ask* m
 - The run is checkpointed per thread (graph agent_<slug>); `thread_id` in the body asks a
   follow-up. One run per thread at a time (409).
 - `model` in the body picks the Claude model for this question, one of GET /api/models
-  (`agents.llm.MODELS`; anything else is a 422). Omitted: ANTHROPIC_MODEL, Haiku 5.5 by default.
+  (`agents.llm.MODELS`; anything else is a 422). Omitted: ANTHROPIC_MODEL, Sonnet 5.5 by default.
   Follow-ups in one thread may each use a different model.
 - When the browser goes away (or presses Stop, which closes the stream), the run stops at its
   next step and the thread stays valid for the next question.

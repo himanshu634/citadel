@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { AskThread, NOT_RUN, turnFromChat } from './ask.svelte';
+import { AskThread, NOT_RUN, REPLAY_STEP_MS, turnFromChat } from './ask.svelte';
 import type { ChatTurn, Thread } from './types';
 
 afterEach(() => {
@@ -123,7 +123,7 @@ describe('AskThread', () => {
 		vi.useFakeTimers();
 		t.replay(0);
 		expect(t.revealed).toBe(0);
-		vi.advanceTimersByTime(800);
+		vi.advanceTimersByTime(REPLAY_STEP_MS + 100);
 		expect(t.revealed).toBeNull(); // one graph step: done after the first tick
 		t.replay(0, true);
 		expect(t.revealed).toBeNull();

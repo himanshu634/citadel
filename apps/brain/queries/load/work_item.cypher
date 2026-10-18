@@ -11,7 +11,8 @@
 // example: loader.load("falkordb", [WorkItem(uid="github:FalkorDB/FalkorDB:pr:3330", ...)])
 UNWIND $rows AS row
 MERGE (w:WorkItem {uid: row.uid})
-SET w.company = $company,
+SET w:Node,
+    w.company = $company,
     w.kind = row.kind,
     w.number = row.number,
     w.title = row.title,

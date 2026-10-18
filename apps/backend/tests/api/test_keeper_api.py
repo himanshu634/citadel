@@ -440,6 +440,21 @@ def test_approve_twice_409(kclient, company, ledger, brain):
     assert f["claim"] == uid
 
 
+def test_claim_trail_shows_the_review_jobs(kclient, company, ledger):
+    gap = seed_gap(ledger)
+    kclient.post(f"{BASE}/review")
+    review = wait_review(ledger)
+    [claim] = kclient.get(f"{BASE}/claims").json()
+    r = kclient.get(f"{BASE}/claims/{claim['uid']}/trail")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["claim"], body["review"]["uid"]) == (claim["uid"], review.uid)
+    assert [j["actor"] for j in body["jobs"]] == ["pm", "qa", "keeper"]
+    assert body["jobs"][0]["consult"]["role"] == "pm" and body["jobs"][0]["steps"]
+    assert {e["gap"] for e in body["log"]} == {gap}
+    assert kclient.get(f"{BASE}/claims/claim:nope/trail").status_code == 404
+
+
 def test_approve_unknown_claim_404(kclient, company):
     r = kclient.post(f"{BASE}/claims/claim:nope/approve", json={"by": "Dana"})
     assert r.status_code == 404

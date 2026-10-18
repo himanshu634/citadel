@@ -65,6 +65,8 @@ Rules:
   `--color-text-muted`; ready and empty = no badge. The icon repeats what the accessible name says in
   words ("building", "last build failed", "config invalid", "graph unreachable").
 - `-soft` tints are for selected rows and citation chips, with text in the matching strong colour.
+  One exception: a sidebar item where something waits for the user ("Review claims") takes
+  `--color-warning-soft` and a count pill in `--color-warning`, never the accent.
   `--color-accent-soft` is also the fill of the user's question bubble on the Ask page, with ink text.
 - Node colours are for marks (dots, bars, avatar initials), never for body text or buttons.
 - Work item state maps to badges as: open = success, merged = accent, closed = neutral.
@@ -178,11 +180,31 @@ Rules:
   did. A Keeper review on the map is labelled by the step's own agent ("qa · Asking who knows
   Billing best"); in the rail it is "Keeper review", titled by its first gap, each step naming pm,
   qa or Keeper.
-- The rail, top to bottom: "Waiting for you · n" (claims in `pending_approval`, `ClaimApproval`),
-  the run, the Keeper log (`KeeperLog`, 20 lines, the runner's `episode` lines left out), then
-  Other runs. Claims and log are read again when a Keeper run starts, takes a step or ends, after
-  Review now and after each decision. The approver's name is kept in this browser
-  (`citadel-keeper-name`). Approve and Reject are secondary: the bar's Review now is the primary.
+- The rail, top to bottom: the run, the Keeper log (`KeeperLog`, 20 lines, the runner's
+  `episode` lines left out), then Other runs. The log is read again when a Keeper run starts,
+  takes a step or ends and after Review now. Claims waiting for a lead are not in the rail: a
+  logged claim that still waits links to the review page.
+
+### The review page (design direction D, list and detail)
+
+- `/c/<slug>/review`, opened from the sidebar's Keeper group, "Review claims", which shows the
+  count of claims in `pending_approval` (read every 20 s, 60 s in a hidden tab, and at once
+  after a decision or a Keeper step; `src/lib/pendingClaims.svelte.ts`). A bleed page.
+- The bar: title, one line on what waits, "n waiting · m decided here", and "Deciding as": the
+  approver's name, typed once for every claim and kept in this browser (`citadel-keeper-name`).
+  A missing or refused name is said under that field.
+- Left, the list: "Waiting · n", each claim as its kind, subject and statement (two lines); the
+  open one has the accent-soft fill and an accent edge. Under it "Decided here · n" for this
+  visit, each with a badge (Approved = success, Rejected = neutral, approved but the sources differ
+  or not added = warning). Right, the open claim (`ClaimApproval`). The open claim is in the URL
+  (`?claim=<uid>`); a link to a claim that no longer waits says so and opens the first one.
+- Beside the claim, a 24rem column on the surface fill: "The Keeper's work" (`KeeperTrail`,
+  design direction H), so the lead sees which agents worked it out while deciding. Below 80rem
+  it follows the claim and both scroll together; the decide footer spans both.
+- A decision opens the next claim and says what it did on a success-soft line (warning-soft when
+  it failed because someone decided first or the claim is gone). Approve is the page's primary.
+- Nothing waiting: an empty state that links to Systems, and the recent decisions from the log.
+  Below 64rem the list stacks above the claim.
 
 ### The Sources page (design direction A, the source ledger)
 
@@ -278,7 +300,7 @@ not add another component library.
 | `RefLink`    | A reference that opens where it lives (a PR or issue number, commit, document, file path), always in a new tab. Keeps the surrounding text colour with a hairline underline that turns accent on hover, so a sentence full of refs reads calmly; `code` sets a path in mono on the sunken fill; `icon` is a small arrow square beside a name that already selects something in the app. Never inside a button. Urls come only from `src/lib/links.ts` (http(s) only): a record's own url wins, a GitHub uid makes a github.com url, nothing else is guessed. |
 | `RefText`    | Text with its refs linked (`textRuns`, `labelRuns` in `src/lib/links.ts`): `#12`, `owner/name#12` and paths with a `/`. `&#12;`, `page#3` and urls stay text. |
 | `Avatar`     | Initials on the node colour of what it stands for. Always next to the name.                    |
-| `Card`       | A titled panel. Title in wide type, optional description and actions. No nesting, no shadow.   |
+| `Card`       | A titled panel. Title in wide type, optional description and actions; `id` for in-page links. No nesting, no shadow. |
 | `Input`      | Always has a label (`hideLabel` keeps it for screen readers). `hint` explains; `error` says what is wrong and how to fix it. Disabled: sunken fill, muted text, no hover change, `not-allowed` cursor. `prefix` shows fixed mono text before the value (`brain_`, `github.com/`); `mono` sets the field in the mono face. |
 | `Select`     | Pick one of a short list (bits-ui). Label always visible; `hint` explains, `error` says what to fix. Two or three options that need explaining are `ChoiceCard`s instead. |
 | `ChoiceCard` | One option of a few that need a sentence each. A real radio in a label: selected = accent border, `--color-accent-soft` fill and a filled dot. Wrap the set in a `fieldset` with a `legend`. |
@@ -292,7 +314,7 @@ not add another component library.
 | `Stat`       | A count with its label, inside a `<dl>`. For summaries, not decoration.                        |
 | `EmptyState` | Says what will appear and how to get it, with one action.                                      |
 | `CitedAnswer`, `GraphPath` | The answer pattern from section 1. Citation chips link to the numbered source.   |
-| `GraphWalk`  | The agent's walk for one answer (Ask page, direction D). Nodes are pills with their type dot; the start node is ink at the centre. Links are `--graph-edge` hairlines labelled `step · RELATIONSHIP` in mono; a link the rows only imply is dashed (the legend says so). The newest step of a running answer is accent (ring on its nodes, accent links); a lit citation is accent and everything else drops to 25% (links 20%). Above 12 nodes of its own, only the start, cited, lit and newest nodes keep their names; the rest are dots that name themselves on hover or focus. Carried nodes never crowd the walk: they keep their names only while the whole walk, carried nodes included, has 12 nodes or fewer. Earlier nodes drift at most 36 stage units when a step lands, and glide there with their links (`--duration-slow`); new links draw on from their ends. `carried` is context from earlier questions: its nodes and links are dashed and faint until a step touches them. Rules in `src/lib/walk.ts`. |
+| `GraphWalk`  | The agent's walk for one answer (Ask page, direction D, played as round 5's P "Follow the agent"). Nodes are pills with their type dot; the first node is ink, and a node a query started from (its anchor: the system, person or node it asked about) wears an ink ring and keeps its name. Steps play one at a time (`WALK_MS`), however fast they arrive: an accent mark with a pulse glides to the step's anchor, or to a spot of its own, and waits there while the tool runs; a chip under it says the step in words, then the relationships it read ("authored 30 · reviewed 22"). Links grow out of the anchor hop by hop, and each node appears (fades and grows in) when its link reaches it; nodes no link reaches come in on dotted spokes from the mark. A small step leans the stage in (at most 1.45×) and back out as it settles. A step that found nothing pulses the mark in warning and says "nothing found". The places the agent read are joined by a dashed accent route in reading order (in the legend as "The agent's route"). New nodes fan out round where their step started (nearer for one hop, further for two); a long list with no links (the systems) sits round the edge; nodes already drawn never jump. Links are `--graph-edge` hairlines labelled `step · RELATIONSHIP` in mono once grown; a link the rows only imply is dashed (the legend says so). The step in play is accent (ring on its nodes, accent links); a lit citation is accent and everything else drops to 25% (links 20%, the route 15%). Above 12 nodes of its own, only the first, anchors, cited, lit and newest nodes keep their names; the rest are dots that name themselves on hover or focus. Carried nodes never crowd the walk: they keep their names only while the whole walk, carried nodes included, has 12 nodes or fewer. A walk already there when it mounts (a reopened chat) is drawn at rest; Replay plays it again. Reduced motion: each step appears whole, no mark pulse, no camera. `carried` is context from earlier questions: its nodes and links are dashed and faint until a step touches them. Rules in `src/lib/walk.ts`. |
 | `WalkSteps`  | The tool calls behind an answer: number circle (success tint; accent while running; danger with an alert icon when failed), the call in mono, rows and ms. One step opens to show its rows (paths as chains); rows a citation used carry its chip. The last row is the answer check, and a rejected check stays visible with the reason. |
 | `WalkLedger` | The brain's work for one answer, one row per graph step in plain words ("Read recent work on Auth"). Each row has a mark for how it ended (done, running, found nothing, failed, not run), its rows and its time. Once the answer is in, repeated calls of one tool fold into one row; a call that found nothing or failed keeps its own row and says so under it. An open row shows its call and rows (`StepRows`). A node a sentence names ("Opened PR #10") is a `RefLink`: the sentence sits beside the row's toggle, whose hit area (`::after`) covers the row and draws its focus ring, and the links sit above it, so a click on a ref opens it and a click anywhere else opens the row. Hovering or focusing a row lights what its steps added to the walk; leaving the list, or the answer landing, clears it. The last row is the newest answer check ("Checked: every citation came from a step above"); a rejected check says why, and a pass after send-backs says how many ("Checked after 1 send-back: …"). There is no Checked, Assumed or Not in the brain footer. |
 | `StepRows`   | The rows one step returned: paths as chains of nodes and relationships, other rows on one line. Rows a citation used carry its number; the active citation tints its rows. A row or hop whose node has a page is a `RefLink`. Says so when the step found nothing. |
@@ -313,10 +335,11 @@ not add another component library.
 | `CompanyRail` | One tile per company brain; one click switches company and keeps the section you are on. Monogram 15px at width 118; ink for the current tile (section 3). Tooltip shows the name and `brain_<slug>` in mono. The + opens `AddCompanyDialog`. |
 | `TerritoryMap` | The whole company graph as territories (section 6, The graph map). Canvas plus an HTML label layer; drag pans, scroll zooms (`scrollZoom={false}` where it sits in a scrolling page; pinch and the buttons still zoom), click selects. Colours are read from the tokens and re-read when the theme changes. With `trail` (and `here`) it draws an agent's run over the map (section 6, The Systems page). |
 | `AgentRun` | One agent run in the Systems page's rail: who and when, the question, a status (Working now in ink, Done, Stopped, Failed in danger), "n steps · m not on the map", then every step numbered as on the map, its tool and rows. A node a step names ("Opened PR #10") is a `RefLink`. Links to the chat an Ask run came from. A Keeper review reads "Keeper review", titled by its first gap, and each step names its agent (pm, qa, Keeper) in ink. |
-| `ClaimApproval` | One Keeper claim waiting for a lead (Systems rail): `pending_approval` badge and its kind, the statement, why it needs a lead in words ("it touches a high-impact system"), the gap it answers, its evidence as `NodeChip`s (linked when the map knows a url), then "Your name" (required, 1 to 80 once trimmed; no sign-in), "Why (optional)" (500 at most), and Approve and Reject (secondary). Errors say what happened: a 409 "Someone already decided this claim", a 404 that it is gone, a 503 the server's sentence, a 422 under its field. Rules in `src/lib/keeper.ts`. |
+| `ClaimApproval` | One Keeper claim waiting for a lead (the review page's detail pane): its kind and subject chip, the statement in `--text-2xl`, "Why it needs you" with one row per reason (a heading and what it means), the gap it answers when it says more than the statement, its evidence as `NodeChip`s (linked when the graph knows a url), then "Why (optional)" (500 at most), Reject (secondary) and Approve (primary) in a footer that stays put while the body scrolls. The name (required, 1 to 80 once trimmed; no sign-in) comes from the page's header; a missing or refused one goes back through `onnameerror`. Errors say what happened: a 409 "Someone already decided this claim", a 404 that it is gone, a 503 the server's sentence, a 422 under its field. Rules in `src/lib/keeper.ts`. |
+| `KeeperTrail` | How the Keeper got to one claim, in the review page's work column: the review that wrote it ("Keeper review after a build · 17 Oct", "3 agents, 11 graph reads"), then one row per job in the order it ran, joined by a hairline: an actor pill (the Keeper's accent-soft), what the job came to ("pm drafted an expert claim", "qa could not ground it in the graph", "Keeper checked the drafts and wrote this claim"), the draft or the Keeper's reasoning quoted (muted, accent edge for the Keeper), the first 3 uids it cited as `NodeChip`s ("+n more"), and its graph reads in a `<details>`, one `stepLineRuns` line each. A claim no review wrote (an Ask interview) shows the gap's log lines instead. Loading and unreadable states say so. Words in `src/lib/keeper.ts`. |
 | `KeeperLog` | The Keeper's log, newest first: the time in mono (clock today, else `6 Feb`), who did what in words ("pm opened a follow-up"; `auto` reads as Keeper), then why in muted text; the gap's text under a line about a gap, and "See the claim" when the rail shows that claim. |
 | `NodeInspector` | The selected node: kind, territory and state, its fields (`get_entity`), where its neighbours live, its links by relationship, and its most linked neighbours, which select in turn. Counts come from the links the map draws. Its number, commit and path, and the refs in its body, are links; the footer button names the site ("Open on GitHub", "Open on Linear") and shows only when the node has a page. |
-| `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". The sidebar folds to icons (`--sidebar-folded`) from the top bar's fold button or the `[` key; the choice is kept in `citadel-sidebar`. `/graph`, `/ask` and `/systems` are bleed pages: no width cap, no padding. |
+| `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". The sidebar folds to icons (`--sidebar-folded`) from the top bar's fold button or the `[` key; the choice is kept in `citadel-sidebar`. `/graph`, `/ask`, `/systems` and `/review` are bleed pages: no width cap, no padding. |
 
 Adding a component:
 
@@ -337,8 +360,11 @@ Adding a component:
 - Icons next to text are `aria-hidden`; icon-only controls have an accessible name.
 - Motion is short (120 to 180ms, ease-out), only answers a user action, and is removed under
   `prefers-reduced-motion`. `--duration-slow` (320ms) is for motion that shows where something
-  came from in a walk: a link drawing on from its ends and a node gliding to its new place (with
-  its links). The scroll to a new question is the browser's native smooth scroll, not a token.
+  came from in a walk: a node gliding to its new place (with its links). The walk's own playback
+  is the one exception to "only answers a user action": it shows the agent working, step by step,
+  on the timings in `WALK_MS` (`src/lib/walk.ts`: 450ms to reach the anchor, 1400ms to grow, 350ms
+  to settle, 800ms for a step that found nothing). The scroll to a new question is the browser's
+  native smooth scroll, not a token.
 - Micro-interactions in the frame are `--duration-fast`: hover fills and colours fade, pressed
   controls give a little (`scale(0.97)` for sidebar items, `0.94` for rail tiles, `0.92` for the
   fold button), tooltips fade in a few pixels from their trigger, and the drawer's scrim fades in.

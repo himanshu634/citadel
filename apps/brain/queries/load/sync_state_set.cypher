@@ -5,7 +5,8 @@
 // returns: uid
 // example: pipeline.ingest("falkordb") calls it once per source
 MERGE (s:SyncState {uid: $uid})
-SET s.company = $company,
+SET s:Node,
+    s.company = $company,
     s.adapter = $adapter,
     s.key = $key,
     s.cursor = $cursor,

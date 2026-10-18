@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     # but does not export it, so agents/llm.py passes the key on; unset lets the SDK use its own
     # chain.
     anthropic_api_key: str | None = None
-    anthropic_model: str = "claude-haiku-5-5"  # cheap while the product takes shape
+    anthropic_model: str = "claude-sonnet-5-5"
     anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     anthropic_max_tokens: int = 64000
 

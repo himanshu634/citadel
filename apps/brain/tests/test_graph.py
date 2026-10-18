@@ -9,7 +9,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from brain import db, loader, tools
+from brain import db, keeper, loader, schema, tools
 from brain.canonical import Document, Link, Person, System, WorkItem
 from brain.embeddings import embed_pending
 from brain.testing import FakeEmbedder, load_company, needs_graph, synthetic_company
@@ -192,6 +192,94 @@ def test_issues_by_system_ranks_mentions_and_leaves_out_bot_issues():
         db.delete_graph(slug)
 
 
+def test_central_nodes_rank_by_pagerank(synthetic_graph):
+    systems = tools.central_nodes(synthetic_graph)
+    # Infra has the most changes, docs and owners pointing at it
+    assert [r.uid for r in systems] == [
+        "system:Infra",
+        "system:Billing",
+        "system:Web app",
+        "system:Auth",
+    ]
+    assert all(r.label == "System" and r.kind == "system" for r in systems)
+    assert [r.score for r in systems] == sorted((r.score for r in systems), reverse=True)
+
+    items = tools.central_nodes(synthetic_graph, label="WorkItem", limit=2)
+    assert [(r.uid, r.kind, r.number) for r in items] == [
+        ("synthetic:issue:11", "issue", 11),
+        ("synthetic:issue:12", "issue", 12),
+    ]
+    assert items[0].url and items[0].name == "Session table causes DB load spikes"
+
+    docs = tools.central_nodes(synthetic_graph, label="Document")
+    assert len(docs) == 3 and all(r.kind == "document" and r.url for r in docs)
+    with pytest.raises(ValueError):
+        tools.call(synthetic_graph, "central_nodes", label="Person")  # flat for people
+
+
+def test_bottlenecks_on_the_synthetic_tickets(ticket_graph):
+    rows = tools.bottlenecks(ticket_graph)
+    # PAY-3 -MENTIONS-> pr:9 -MENTIONS-> pr:3 -CLOSES-> issue:12: pr:9 and pr:3 each sit on two
+    # shortest paths; pr:1 (pr:6 -> pr:1 -> issue:11) and PAY-2 (PAY-3 -> PAY-2 -> IDN-2) on one
+    assert [(r.uid, r.score) for r in rows] == [
+        ("synthetic:pr:3", 16.0),  # 8 seeded runs x 2 paths; ties by uid
+        ("synthetic:pr:9", 16.0),
+        ("synthetic:pr:1", 8.0),
+        ("synthetic:ticket:PAY-2", 8.0),
+    ]
+    assert rows[3].key == "PAY-2" and rows[3].url
+    assert [r.uid for r in tools.bottlenecks(ticket_graph, open_only=True)] == [
+        "synthetic:pr:9",
+        "synthetic:ticket:PAY-2",  # In Progress: open by status_category
+    ]
+    assert len(tools.bottlenecks(ticket_graph, limit=1)) == 1
+
+
+def test_bottlenecks_leave_out_bots_and_closed_work():
+    slug = "test_bottlenecks"
+    db.delete_graph(slug)
+    try:
+        assert tools.bottlenecks(slug) == []  # no graph at all
+
+        def item(n: int, kind: str = "issue", author: str = "erin", **kw) -> WorkItem:
+            kw.setdefault("state", "open")
+            return WorkItem(uid=f"t:{kind}:{n}", source="t", kind=kind, number=n,
+                            title=f"{kind} {n}", author_login=author,
+                            created_at=f"2026-05-0{n}T00:00:00Z", **kw)  # fmt: skip
+
+        def link(rel: str, a: str, b: str) -> Link:
+            return Link(rel=rel, from_uid=a, from_label="WorkItem", to_uid=b,
+                        to_label="WorkItem", source="t")  # fmt: skip
+
+        loader.load(slug, [Person(login="erin"), System(name="Auth")])
+        assert tools.bottlenecks(slug) == []  # no work items, no links: no rows, no error
+
+        records = [
+            Person(login="erin"), Person(login="dep-bot", is_bot=True),
+            # an open ticket in the middle of a BLOCKS chain
+            item(1, "ticket", status_category="todo", state="Todo"),
+            item(2, "ticket", status_category="in_progress", state="In Progress"),
+            item(3, "ticket", status_category="todo", state="Todo"),
+            link("BLOCKS", "t:ticket:1", "t:ticket:2"), link("BLOCKS", "t:ticket:2", "t:ticket:3"),
+            # a closed issue in the middle of a MENTIONS chain
+            item(4), item(5, state="closed"), item(6),
+            link("MENTIONS", "t:issue:4", "t:issue:5"), link("MENTIONS", "t:issue:5", "t:issue:6"),
+            # a bot's PR in the middle of a CLOSES chain
+            item(7, "pull_request", author="dep-bot"), item(8),
+            link("MENTIONS", "t:issue:6", "t:pull_request:7"),
+            link("CLOSES", "t:pull_request:7", "t:issue:8"),
+        ]  # fmt: skip
+        loader.load(slug, records)
+        rows = tools.bottlenecks(slug)
+        assert "t:pull_request:7" not in {r.uid for r in rows}
+        assert {r.uid for r in rows} == {"t:issue:5", "t:issue:6", "t:ticket:2"}
+        assert all(r.score > 0 for r in rows)
+        open_rows = tools.bottlenecks(slug, open_only=True)
+        assert {r.uid for r in open_rows} == {"t:issue:6", "t:ticket:2"}
+    finally:
+        db.delete_graph(slug)
+
+
 def test_unknown_tool_and_bad_params(synthetic_graph):
     with pytest.raises(KeyError):
         tools.call(synthetic_graph, "drop_everything")
@@ -201,6 +289,16 @@ def test_unknown_tool_and_bad_params(synthetic_graph):
 
 def test_fulltext_query_cannot_inject_syntax():
     assert tools.fulltext_query("vector-index @crash* (dims)") == "vector|index|crash|dims"
+
+
+def test_fulltext_query_keeps_two_letter_words():
+    """System names are often two letters (CI, DB); only one-character words are dropped."""
+    assert tools.fulltext_query("CI DB a") == "ci|db"
+
+
+def test_text_search_finds_a_two_letter_word(synthetic_graph):
+    items = tools.related_work_items(synthetic_graph, text="CI")
+    assert [w.title for w in items] == ["ci: cache dependencies in pipeline"]
 
 
 def test_two_companies_stay_isolated(synthetic_graph, tmp_path):
@@ -383,3 +481,100 @@ def test_a_chunk_uid_opens_its_passage_and_its_source(synthetic_graph):
     assert "Rounding is off by a cent" in chunk.body
     links = {(n.rel, n.direction, n.uid) for n in chunk.neighbours}
     assert ("FROM", "out", "synthetic:pr:3") in links
+
+
+# Every lookup of a node by uid, with the params each query takes. Each must be served by the
+# Node.uid range index: a label-less `MATCH (n {uid: $uid})` is an All Node Scan, which on a
+# real company graph walks every chunk of text for each lookup.
+UID_LOOKUPS = {
+    "tools/get_entity": {"uid": "synthetic:pr:4", "limit": 25},
+    "tools/path_between": {
+        "from_uid": "person:erin",
+        "to_uid": "system:Auth",
+        "max_len": 6,
+        "paths": 3,
+    },  # fmt: skip
+    "keeper/evidence": {"uids": ["synthetic:pr:4", "person:erin"]},
+    "keeper/source_facts": {"uid": "system:Auth"},
+    "keeper/project_claim": {
+        "claims": [
+            {
+                "uid": "claim:plan",
+                "kind": "fact",
+                "subject": "system:Auth",
+                "statement": "s",
+                "value": None,
+                "valid_from": None,
+                "author": "keeper",
+                "approved_by": "lead",
+                "about": ["system:Auth"],
+                "evidence": ["synthetic:pr:4"],
+            }
+        ]
+    },  # fmt: skip
+}
+
+
+@pytest.mark.parametrize("name", sorted(UID_LOOKUPS))
+def test_uid_lookups_are_index_scans(synthetic_graph, name):
+    plan = db.explain(synthetic_graph, name, UID_LOOKUPS[name])
+    assert any("Index Scan" in op for op in plan), plan
+    assert not any("All Node Scan" in op for op in plan), plan
+
+
+def test_keeper_notes_starts_from_the_claims(synthetic_graph):
+    """The planner anchors on the Claim label (claims are few) and walks ABOUT to the uid: not
+    an index lookup, but never a scan of every node."""
+    plan = db.explain(synthetic_graph, "tools/keeper_notes", {"uid": "system:Auth"})
+    assert any("Label Scan" in op for op in plan), plan
+    assert not any("All Node Scan" in op for op in plan), plan
+
+
+def test_the_kind_label_is_reported_whatever_the_label_order():
+    """FalkorDB lists a node's labels in the order the graph first saw them, so with `Node`
+    created first `labels(n)[0]` is 'Node' for every node. The kind (Person, WorkItem, ...) must
+    still be what every query reports."""
+    slug = "test_label_order"
+    db.delete_graph(slug)
+    try:
+        db.run_text(slug, "CREATE INDEX FOR (n:Node) ON (n.uid)")  # Node is the first label
+        load_company(synthetic_company(slug))
+        db.run_text(slug, "MATCH (n) SET n:Node")
+        first = db.run_text(slug, "MATCH (n) RETURN DISTINCT labels(n)[0]").result_set
+        assert first == [["Node"]]  # the precondition this test is about
+
+        counts = stats(slug)
+        assert "node:Node" not in counts and counts["node:Person"] == 6
+        assert tools.get_entity(slug, uid="synthetic:pr:4").label == "WorkItem"
+        assert keeper.evidence(slug, ["person:erin"]) == {"person:erin": "Person"}
+        assert keeper.source_facts(slug, "system:Auth").declared_owners == ["team:identity"]
+        path = tools.path_between(slug, "person:erin", "system:Auth")[0]
+        assert [n.label for n in path.nodes][0] == "Person"
+        sources = db.run(slug, "sources/nodes_by_source", read_only=True)
+        assert {r["label"] for r in sources} == {
+            "Person", "Team", "System", "WorkItem", "Change", "Document", "Chunk",
+        }  # fmt: skip
+        people = db.run(slug, "graph/nodes", {"labels": ["Person"]}, read_only=True)
+        assert len(people) == 6 and {r["label"] for r in people} == {"Person"}
+        edges = db.run(slug, "graph/edges", {"labels": ["Person", "Team"]}, read_only=True)
+        assert {e["rel"] for e in edges} == {"MEMBER_OF"}
+    finally:
+        db.delete_graph(slug)
+
+
+def test_schema_backfills_the_node_label():
+    """A graph loaded before the Node label existed is labelled by `brain schema`, once."""
+    slug = "test_node_backfill"
+    db.delete_graph(slug)
+    try:
+        load_company(synthetic_company(slug))
+        db.run_text(slug, "MATCH (n) REMOVE n:Node")
+        assert tools.get_entity(slug, uid="synthetic:pr:4") is None  # not a Node: not found
+        total = db.run_text(slug, "MATCH (n) RETURN count(n)").result_set[0][0]
+
+        assert schema.apply_schema(slug).backfilled == total
+        assert tools.get_entity(slug, uid="synthetic:pr:4").label == "WorkItem"
+        assert schema.apply_schema(slug).backfilled == 0  # idempotent
+        assert stats(slug)["node:WorkItem"] == 16  # the label is added, nothing is duplicated
+    finally:
+        db.delete_graph(slug)

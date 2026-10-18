@@ -7,9 +7,16 @@ cursor. Only pages from completed runs are read by a transform (`completed_pages
 half-finished fetch can never make ingest skip older records. The next run only goes back to the
 previous run's start (minus a margin), which makes repeat fetches cheap.
 
+The state also remembers the window the completed runs were fetched under (`window_start`).
+When the company's `window.since` moves earlier, the next run starts at the new window start
+instead of the last run's start, so the older records it now covers are fetched too; a state
+without a stored window (written before it was recorded) is treated the same way, once. `full`
+ignores the last run's start as well.
+
 Layout of one list's folder:
 
-    state.json                 {"complete_until": ..., "completed_runs": [...], "run": {...}}
+    state.json                 {"complete_until": ..., "completed_runs": [...], "run": {...},
+                                "window_start": ...}
     <run>_<page>.json          one raw page of nodes each
 
 Any client with a `query(name, variables)` method works (`PagedClient`), so GitHub and Linear
@@ -61,6 +68,7 @@ def fetch_paged(
     stop_when_older: str | None = None,
     send_since: bool = True,
     incremental: bool = True,
+    full: bool = False,
     log=print,
 ) -> int:
     """Fetch every page of one GraphQL connection into `folder`, resuming an unfinished run.
@@ -71,19 +79,29 @@ def fetch_paged(
     `send_since=False` because their query declares no $since). `incremental=False` always
     starts at the window and keeps only the newest completed run (used for commit history,
     whose dates come from client clocks, so "since the last run" could miss late pushes).
+    A new run starts at the last run's start (minus `OVERLAP`) only when the cached runs cover
+    `window_start` (see `covers_window`) and `full` is not set; otherwise at `window_start`.
     Returns the number of pages written in this call.
     """
     state = read_json(folder / "state.json", {"complete_until": None, "completed_runs": []})
     run = state.get("run")
     if run is None:
         lower = window_start
-        if incremental and state["complete_until"]:
-            lower = max(lower, parse_ts(state["complete_until"]) - OVERLAP)
+        if incremental and not full and state["complete_until"]:
+            if covers_window(state, window_start):
+                lower = max(lower, parse_ts(state["complete_until"]) - OVERLAP)
+            else:
+                log(
+                    f"  {folder.name}: the cached runs start at "
+                    f"{state.get('window_start') or 'an unknown date'}, the window now at "
+                    f"{iso(window_start)}; fetching the whole window"
+                )
         started = datetime.now(UTC)
         run = {
             "id": started.strftime(RUN_ID_FORMAT),
             "started": iso(started),
             "lower": iso(lower),
+            "window_start": iso(window_start),
             "cursor": None,
             "page": 0,
         }
@@ -119,10 +137,23 @@ def fetch_paged(
         state["completed_runs"] = []
     state["completed_runs"].append(run["id"])
     state["complete_until"] = run["started"]
+    # The window this run was started under, not today's: a window widened while the run was
+    # unfinished is not covered yet, so the next run starts at the window. A run started before
+    # the window was recorded leaves it unknown, and the next run also starts at the window.
+    state["window_start"] = run.get("window_start")
     state["run"] = None
     write_json(folder / "state.json", state)
     log(f"  {folder.name}: {written} pages")
     return written
+
+
+def covers_window(state: dict[str, Any], window_start: datetime) -> bool:
+    """Whether the completed runs in `state` reach back to `window_start`: the window they were
+    fetched under starts there or earlier. A state without a stored window (written before it
+    was recorded, or completed by a run started then) does not: how far back it goes is not
+    known, so the next run fetches the whole window once and records it."""
+    stored = state.get("window_start")
+    return stored is not None and parse_ts(stored) <= window_start
 
 
 def run_id_of(page: Path) -> str:
@@ -135,6 +166,21 @@ def completed_pages(folder: Path) -> list[Path]:
     state = read_json(folder / "state.json", {"completed_runs": []})
     done = set(state["completed_runs"])
     return sorted(p for p in folder.glob("*_*.json") if run_id_of(p) in done)
+
+
+def unfinished(folder: Path) -> str | None:
+    """Why `completed_pages(folder)` is not everything the source holds for the window: no run
+    has completed yet (the list was never fetched, or its first run stopped), or a run is still
+    in progress (it stopped before its last page and will resume). None when every run is
+    complete. An adapter's `incomplete` hook builds on this, so ingest keeps its cursor until
+    the missing pages are in: moved past them, it would skip them as already seen."""
+    state = read_json(folder / "state.json", {"completed_runs": [], "run": None})
+    run = state.get("run")
+    if run is not None:
+        return f"{folder.name}: fetch run {run['id']} stopped at page {run['page']}"
+    if not state["completed_runs"]:
+        return f"{folder.name}: not fetched yet"
+    return None
 
 
 def completed_nodes(folder: Path) -> Iterator[tuple[str, dict[str, Any]]]:
