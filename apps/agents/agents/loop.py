@@ -303,8 +303,8 @@ def check_answer(answer: dict[str, Any], seen: dict[str, Any]) -> str | None:
 
 def _no_sources(markers: list[int], text: str, seen: dict[str, Any]) -> str:
     """The refusal for markers with an empty sources list: the model often repeats the same
-    call, so name what it may cite (the last CANDIDATES uids first seen) and, when the sources went into the
-    answer text instead (`<parameter name="sources">`), say so."""
+    call, so name what it may cite (the last CANDIDATES uids first seen) and, when the sources
+    went into the answer text instead (`<parameter name="sources">`), say so."""
     graph = [(u, n) for u, n in seen.items() if n.get("label") != mcp_.LABEL]
     shown = [f'{u} "{n["title"]}"' if n.get("title") else u for u, n in graph[-CANDIDATES:]]
     more = f" (and {len(graph) - CANDIDATES} more)" if len(graph) > CANDIDATES else ""
