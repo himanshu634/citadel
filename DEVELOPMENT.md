@@ -20,6 +20,27 @@ On macOS with Homebrew:
 brew install uv node pnpm gh
 ```
 
+## Quick start: one command
+
+After the prerequisites above are installed and Docker is running:
+
+```bash
+git clone https://github.com/himanshu634/citadel.git
+cd citadel
+make start
+```
+
+`make start` (`scripts/start.sh`) checks the tools, creates `.env` from `.env.example`,
+runs `uv sync` and `pnpm install`, starts FalkorDB (`make up`), builds the synthetic company
+into `brain_synthetic` (schema + ingest + embed, no keys needed) and then runs `make dev`: the
+app on <http://localhost:5173>, the API on <http://127.0.0.1:8000>. Ctrl+C stops the app;
+FalkorDB keeps running (`make down` stops it). Running it again is safe: the ingest only loads
+what changed. Other ports: `make start API_PORT=8010 FE_PORT=5180`, and `FALKORDB_PORT` /
+`FALKORDB_BROWSER_PORT` in `.env`. The first run downloads the embedding model (about 0.2 GB)
+into `data/models/`.
+
+The sections below do the same steps one at a time.
+
 ## 2. Clone and set up
 
 ```bash
@@ -102,7 +123,7 @@ make chat SLUG=synthetic OFFLINE=1       # one scripted turn, no key: checks the
 
 ```bash
 make fe-install   # first time only: pnpm install in apps/frontend
-make dev          # API on http://127.0.0.1:8000 and the app on http://localhost:5173
+make dev          # API on http://127.0.0.1:8000 and the app on http://localhost:5173 (FE_PORT moves it)
 ```
 
 Open <http://localhost:5173>. The app talks to the API through `/api` (Vite proxies it to

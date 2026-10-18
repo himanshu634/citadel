@@ -165,6 +165,18 @@ company, within noise. Tables by tag and case, the known misses, the method and 
 
 ## Running it
 
+With Docker (running), [uv](https://docs.astral.sh/uv/), Node.js 22 and pnpm installed, one
+command takes a fresh clone to the running app:
+
+```bash
+git clone https://github.com/himanshu634/citadel.git && cd citadel
+make start
+```
+
+It creates `.env`, installs the Python and frontend packages, starts FalkorDB, builds the
+synthetic demo company and opens the app on <http://localhost:5173>. Add `ANTHROPIC_API_KEY` to
+`.env` to ask questions. Running it again is safe.
+
 Setup, prerequisites, every command and troubleshooting: **[DEVELOPMENT.md](DEVELOPMENT.md)**.
 An offline synthetic company runs with no tokens. A GitHub token builds a brain from a public repo,
 and an Anthropic API key turns on Ask and the Keeper's review jobs.
