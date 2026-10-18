@@ -58,7 +58,7 @@ def test_a_company_without_servers_sends_no_mcp():
     client = FakeClient(reply(submit("t1", "Nothing found.", [])))
     ask(client)
     req = client.requests[0]
-    assert "mcp_servers" not in req and "betas" not in req
+    assert "mcp_servers" not in req and req["betas"] == [llm.THINKING_BINDING_BETA]
     assert [t.get("type") for t in req["tools"]] == [None, None]
 
 
@@ -66,7 +66,8 @@ def test_servers_and_toolsets_go_on_the_request(servers):
     client = FakeClient(reply(submit("t1", "Nothing found.", [])))
     ask(client)
     req = client.requests[0]
-    assert req["betas"] == [mcp.BETA] == ["mcp-client-2026-09-15"]
+    assert req["betas"] == [llm.THINKING_BINDING_BETA, mcp.BETA]
+    assert mcp.BETA == "mcp-client-2026-09-15"
     assert req["mcp_servers"] == [  # sorted by name; the token comes from its env var
         {"type": "url", "url": "https://docs.example/mcp", "name": "docs"},
         {"type": "url", "url": "https://handbook.example/mcp", "name": "handbook",
@@ -87,7 +88,7 @@ def test_the_mcp_beta_joins_the_fallback_beta(servers, monkeypatch):
     client = FakeClient(reply(submit("t1", "Nothing found.", [])))
     ask(client)
     req = client.requests[0]
-    assert req["betas"] == ["server-side-fallback-2026-07-01", mcp.BETA]
+    assert req["betas"] == [llm.THINKING_BINDING_BETA, "server-side-fallback-2026-07-01", mcp.BETA]
     assert req["fallbacks"] == "default"
 
 
@@ -171,7 +172,7 @@ def test_mcp_blocks_replay_unchanged_in_a_follow_up(servers):
     assert history[1] == {"role": "assistant", "content": sent}  # listing included, byte for byte
     assert [b["type"] for b in history[1]["content"]] == [
         "text", "mcp_tool_listing", "mcp_tool_use", "mcp_tool_result", "tool_use"]  # fmt: skip
-    assert client.requests[2]["betas"] == [mcp.BETA]
+    assert client.requests[2]["betas"] == [llm.THINKING_BINDING_BETA, mcp.BETA]
     assert client.requests[2]["tools"] == client.requests[0]["tools"]  # same prefix every call
 
 
@@ -185,7 +186,7 @@ def test_a_thread_with_mcp_blocks_keeps_the_header_after_servers_are_removed(ser
     servers()  # the company drops its servers
     ask(client, "Sure?", first.thread_id, saver)
     req = client.requests[1]
-    assert req["betas"] == [mcp.BETA] and "mcp_servers" not in req
+    assert req["betas"] == [llm.THINKING_BINDING_BETA, mcp.BETA] and "mcp_servers" not in req
 
 
 def test_a_cut_off_mcp_call_is_not_replayed(servers):
