@@ -46,7 +46,10 @@ def schema_cmd(slug: str) -> None:
     """Create the range, full-text and vector indexes on brain_<slug> (idempotent)."""
     cfg = company(slug)
     connected()
-    report = schema.apply_schema(slug)
+    try:
+        report = schema.apply_schema(slug)
+    except schema.SchemaMismatch as e:
+        fail(str(e))
     typer.echo(
         f"{cfg.graph_name}: {len(report.created)} index statements applied, "
         f"{len(report.existing)} already present."
@@ -56,8 +59,6 @@ def schema_cmd(slug: str) -> None:
     for idx in schema.list_indexes(slug):
         kinds = ", ".join(f"{p}:{'/'.join(t)}" for p, t in idx["types"].items())
         typer.echo(f"  {idx['label']:<10} {kinds}  [{idx['status']}]")
-    for w in report.warnings:
-        typer.secho(f"warning: {w}", fg="yellow")
 
 
 SEED_TICKETS = "apps/brain/examples/synthetic_company/tickets"

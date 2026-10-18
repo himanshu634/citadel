@@ -291,6 +291,16 @@ def test_fulltext_query_cannot_inject_syntax():
     assert tools.fulltext_query("vector-index @crash* (dims)") == "vector|index|crash|dims"
 
 
+def test_fulltext_query_keeps_two_letter_words():
+    """System names are often two letters (CI, DB); only one-character words are dropped."""
+    assert tools.fulltext_query("CI DB a") == "ci|db"
+
+
+def test_text_search_finds_a_two_letter_word(synthetic_graph):
+    items = tools.related_work_items(synthetic_graph, text="CI")
+    assert [w.title for w in items] == ["ci: cache dependencies in pipeline"]
+
+
 def test_two_companies_stay_isolated(synthetic_graph, tmp_path):
     other = tmp_path / "other"
     other.mkdir()

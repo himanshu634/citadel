@@ -68,8 +68,18 @@ def fetch_meta(client: GithubClient, owner: str, name: str, cache: Path) -> dict
 def _git(*args: str, cwd: Path | None = None, input: str | None = None) -> str:
     out = subprocess.run(["git", *args], cwd=cwd, input=input, capture_output=True, text=True)
     if out.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args[:2])} failed: {out.stderr.strip()[:300]}")
+        raise RuntimeError(f"git {_command(args)} failed: {out.stderr.strip()[:300]}")
     return out.stdout
+
+
+def _command(args: tuple[str, ...]) -> str:
+    """The git subcommand and its first argument, for error messages. Leading `-c <setting>`
+    pairs are left out: for private repos one carries the auth header, and the message
+    reaches build events and data/jobs/<slug>.json."""
+    rest = list(args)
+    while rest[:1] == ["-c"]:
+        rest = rest[2:]
+    return " ".join(rest[:2])
 
 
 def _auth_args(private: bool) -> list[str]:

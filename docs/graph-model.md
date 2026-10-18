@@ -128,7 +128,7 @@ PRs) is always one hop away for citation.
   tool queries it: nearest chunks to the embedded question, then the work item or document each
   comes from (best chunk per source); similarity is 1 - cosine distance.
 
-`make schema SLUG=<slug>` applies them; re-running is safe. The vector dimension must equal the embedding model's output size.
+`make schema SLUG=<slug>` applies them; re-running is safe. The vector dimension must equal the embedding model's output size: a graph whose index has another dimension fails the step (and a build's `prepare` stage) with a message saying to drop the index, because FalkorDB accepts vectors of the wrong size without indexing them.
 
 ## Ingest window
 

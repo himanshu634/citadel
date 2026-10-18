@@ -5,6 +5,10 @@ indexes enable search. Setup must be safe to re-run, so "already indexed" errors
 The statements live in queries/schema/*.cypher; this module only runs them in order. After the
 indexes it labels every node `Node` (schema/node_label): the loads do that as they write, so
 this only touches a graph loaded before the label existed, and nothing the second time.
+
+A vector index of another size than EMBEDDING_DIM is an error (`SchemaMismatch`, after a
+failed `prepare` event), not a warning: FalkorDB accepts a vector of the wrong size and never
+indexes it, so the build would look fine while semantic search finds nothing.
 """
 
 from __future__ import annotations
@@ -24,11 +28,16 @@ SCHEMA_FILES = ["schema/range_indexes", "schema/fulltext_indexes", "schema/vecto
 class SchemaReport:
     created: list[str] = field(default_factory=list)
     existing: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
     backfilled: int = 0  # nodes that lacked the Node label and were given it
 
 
+class SchemaMismatch(RuntimeError):
+    """An index the graph already holds does not fit the settings; the message says what to do."""
+
+
 def apply_schema(slug: str, on_event: OnEvent | None = None) -> SchemaReport:
+    """Run the schema files on brain_<slug>. Raises SchemaMismatch (after emitting a failed
+    `prepare` event) when the Chunk vector index has another dimension than EMBEDDING_DIM."""
     emit = on_event or noop
     emit(BuildEvent(slug, "prepare", "running"))
     dim = get_settings().embedding_dim
@@ -46,7 +55,10 @@ def apply_schema(slug: str, on_event: OnEvent | None = None) -> SchemaReport:
                     raise
                 report.existing.append(stmt)
     report.backfilled = db.run(slug, "schema/node_label")[0]["n"]
-    report.warnings.extend(_check_vector_dim(slug, dim))
+    mismatch = _check_vector_dim(slug, dim)
+    if mismatch is not None:
+        emit(BuildEvent(slug, "prepare", "failed", message=mismatch))
+        raise SchemaMismatch(mismatch)
     emit(BuildEvent(slug, "prepare", "done"))
     return report
 
@@ -55,14 +67,15 @@ def list_indexes(slug: str) -> list[dict]:
     return db.run(slug, "schema/list_indexes", read_only=True)
 
 
-def _check_vector_dim(slug: str, dim: int) -> list[str]:
+def _check_vector_dim(slug: str, dim: int) -> str | None:
+    """What is wrong with the Chunk vector index's dimension, or None when it fits."""
     for idx in list_indexes(slug):
         if idx["label"] != "Chunk":
             continue
         actual = (idx["options"].get("embedding") or {}).get("dimension")
         if actual is not None and actual != dim:
-            return [
+            return (
                 f"Chunk.embedding vector index has dimension {actual}, but EMBEDDING_DIM={dim}. "
                 "Drop the index (or `make reset`) and re-run `brain schema`."
-            ]
-    return []
+            )
+    return None

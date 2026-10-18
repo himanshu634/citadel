@@ -1,7 +1,8 @@
 // purpose: Why are these two things connected? The shortest paths between two nodes (any
 //          labels, by uid), following relationships in either direction. Uses FalkorDB's
 //          algo.SPpaths procedure with relDirection 'both', because the built-in shortestPath()
-//          only supports directed traversals. Text chunks (FROM) are left out of the walk.
+//          only supports directed traversals. Every relationship type the loader writes is
+//          listed (tests/test_query_files.py checks); text chunks (FROM) are left out.
 // params:  $from_uid, $to_uid, $max_len (int, hops), $paths (int, how many paths)
 // returns: length, nodes ([{label, uid, name, url}]), rels ([{type, from, to}]); no row when
 //          the two are not connected within $max_len hops
@@ -9,8 +10,8 @@
 MATCH (a:Node {uid: $from_uid}), (b:Node {uid: $to_uid})
 CALL algo.SPpaths({
   sourceNode: a, targetNode: b, relDirection: 'both', maxLen: $max_len, pathCount: $paths,
-  relTypes: ['AUTHORED', 'REVIEWED', 'COMMENTED_ON', 'MEMBER_OF', 'OWNS', 'TOUCHES', 'PART_OF',
-             'CLOSES', 'MENTIONS', 'MADE_IN', 'AFFECTS', 'SUPERSEDES', 'CONTRADICTS']
+  relTypes: ['AUTHORED', 'REVIEWED', 'COMMENTED_ON', 'ASSIGNED_TO', 'MEMBER_OF', 'OWNS',
+             'TOUCHES', 'PART_OF', 'CLOSES', 'MENTIONS', 'BLOCKS']
 }) YIELD path
 RETURN length(path) AS length,
        [n IN nodes(path) | {label: head([l IN labels(n) WHERE l <> 'Node']),

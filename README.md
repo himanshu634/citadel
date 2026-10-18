@@ -234,7 +234,7 @@ purpose, parameters, returns, example.
 | `schema/node_label.cypher` | Gives every node the `Node` label beside its kind, so a lookup by uid alone is an index scan |
 | `schema/fulltext_indexes.cypher` | Full-text indexes on `WorkItem` and `Document` title and body |
 | `schema/vector_index.cypher` | HNSW cosine vector index on `Chunk.embedding` (dimension from `EMBEDDING_DIM`) |
-| `schema/list_indexes.cypher` | List indexes; used to warn when the vector dimension does not match |
+| `schema/list_indexes.cypher` | List indexes; a vector index whose dimension is not `EMBEDDING_DIM` fails the schema step |
 
 ### Load (write side, run by ingest)
 
