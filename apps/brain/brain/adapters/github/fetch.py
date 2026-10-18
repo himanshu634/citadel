@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from brain.adapters.github.client import GithubClient, graphql, token
-from brain.adapters.runs import fetch_paged, iso, write_json
+from brain.adapters.runs import fetch_paged, iso, unfinished, write_json
 from brain.config import CompanyConfig
 from brain.normalize import glob_match
 
@@ -211,10 +211,31 @@ def fetch_blobs(
     return texts
 
 
+# --- what the cache still lacks ---------------------------------------------------------------
+
+
+def incomplete(source, cache: Path) -> str | None:
+    """What `records` cannot read yet: a paged list the source includes with no completed run or
+    one still unfinished (see runs.unfinished). Only pull_requests/ and issues/ count: their
+    items carry GitHub's timestamps, which the ingest cursor filters, and one cursor covers both
+    lists. history/ does not: its run always covers the whole window again, and commits are
+    dated by client clocks, so the cursor never filters them."""
+    include = set(source.include)
+    lists = []
+    if include & {"pull_requests", "reviews"}:
+        lists.append("pull_requests")
+    if "issues" in include:
+        lists.append("issues")
+    reasons = [reason for name in lists if (reason := unfinished(cache / name))]
+    return "; ".join(reasons) or None
+
+
 # --- the whole fetch --------------------------------------------------------------------------
 
 
-def run(company: CompanyConfig, source, cache: Path, log=print) -> None:
+def run(company: CompanyConfig, source, cache: Path, full: bool = False, log=print) -> None:
+    """The whole fetch. `full` makes every paged run start at the window (see
+    brain.adapters.runs.fetch_paged)."""
     owner, name = source.repo.split("/")
     include = set(source.include)
     cache.mkdir(parents=True, exist_ok=True)
@@ -235,6 +256,7 @@ def run(company: CompanyConfig, source, cache: Path, log=print) -> None:
             window_start,
             stop_when_older="updatedAt",
             send_since=False,
+            full=full,
             log=log,
         )
     if "issues" in include:
@@ -245,6 +267,7 @@ def run(company: CompanyConfig, source, cache: Path, log=print) -> None:
             lambda d: d["repository"]["issues"],
             cache / "issues",
             window_start,
+            full=full,
             log=log,
         )
 

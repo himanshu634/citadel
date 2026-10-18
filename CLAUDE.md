@@ -27,7 +27,7 @@ make setup                     # uv sync + create .env from .env.example
 make up / make down            # FalkorDB in Docker; ports/password from .env (:6379, Browser UI :3000)
 make schema SLUG=synthetic     # create indexes on brain_synthetic (idempotent)
 make synthetic                 # regenerate synthetic JSONL, schema + full ingest (+ embed) into brain_synthetic
-make fetch | ingest | sync     # SOURCE=<type> limits to one source; FULL=1 ignores sync cursors; ingest also embeds
+make fetch | ingest | sync     # SOURCE=<type> limits to one source; FULL=1 ignores sync cursors (fetch: pulls the whole window again); ingest also embeds
 make embed SLUG=x              # embed new or changed chunk text (ALL=1: every chunk again)
 make stats                     # node/relationship counts
 make tools                     # list the named query tools and their params
@@ -89,7 +89,10 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   all network I/O into the cache; `records` must read only the cache or local files, so re-ingest costs no API
   calls. Raise `SourceUnavailable` to make ingest skip a source. Optional `check()` (no network:
   a folder, an env var) returns a `SourceProblem` saying what would stop the next build; `blocks`
-  when the download fails (no token), else ingest just skips it. `downloads = True` marks a
+  when the download fails (no token), else ingest just skips it. Optional `incomplete()` returns
+  a sentence while the cache lacks records a fetch still has to bring (a run that stopped
+  halfway, a list never fetched): ingest loads what there is but keeps the source's cursor, so
+  those records are not dropped as already seen when they arrive. `downloads = True` marks a
   source with a network fetch. `pipeline.configured_sources` runs them for the Sources page.
 - **`normalize.py`** applies the company YAML: path → System rules (first match wins, then
   `fallback`, `ignore`), bot detection and login aliases, conventional-commit prefix →
@@ -102,7 +105,11 @@ companies/<slug>.yaml ─► adapter.fetch  ─► data/raw/<slug>/<type>/   (ne
   GraphQL documents in `queries/*.graphql`. Tests use recorded pages in
   `tests/fixtures/github/`.
 - **`adapters/runs.py`**: the resumable, incremental paging into a raw cache that GitHub and
-  Linear share (`fetch_paged`, `completed_pages`).
+  Linear share (`fetch_paged`, `completed_pages`, `unfinished`). A list's `state.json` keeps
+  `complete_until` (the last completed run's start; the next run goes back to it minus an hour)
+  and `window_start` (the window those runs were fetched under): a `window.since` moved earlier
+  (or a state written before the window was stored) makes the next run start at the window, and
+  so does `full` (`brain fetch --full`).
 - **`adapters/linear/`** (`LINEAR_API_KEY`; `own`/`synthetic` data only): `client.py`, `fetch.py`,
   `transform.py`, `seed.py` (`make linear-seed`, the only writer to Linear). Issues become
   WorkItem `kind: ticket`; ASSIGNED_TO is replaced on every load, BLOCKS edges of the source

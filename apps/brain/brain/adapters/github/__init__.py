@@ -6,6 +6,11 @@ clone for commit file lists; file texts for CODEOWNERS and docs). `records` turn
 into canonical records without touching the network. See fetch.py and transform.py.
 
 Refuses private repositories unless the company's data_permission is `own`.
+
+One SyncState cursor per repository covers two paged lists (pull_requests/ and issues/).
+`incomplete` says when either has no completed fetch run or one still unfinished, so ingest
+loads the pages it has but keeps the cursor: moved past the pages still to come (by the other
+list's newer items), it would drop them as already seen once they arrive.
 """
 
 from __future__ import annotations
@@ -58,8 +63,10 @@ class GithubAdapter:
     def cache_for(self, source: GithubSource, cache_dir: Path) -> Path:
         return cache_dir / source.repo.replace("/", "__")
 
-    def fetch(self, company: CompanyConfig, source: GithubSource, cache_dir: Path) -> None:
-        _fetch.run(company, source, self.cache_for(source, cache_dir))
+    def fetch(
+        self, company: CompanyConfig, source: GithubSource, cache_dir: Path, full: bool = False
+    ) -> None:
+        _fetch.run(company, source, self.cache_for(source, cache_dir), full=full)
 
     def check(
         self, company: CompanyConfig, source: GithubSource, cache_dir: Path
@@ -73,6 +80,12 @@ class GithubAdapter:
                 "No GitHub token: set GITHUB_TOKEN in .env or run gh auth login", blocks=True
             )
         return None
+
+    def incomplete(
+        self, company: CompanyConfig, source: GithubSource, cache_dir: Path
+    ) -> str | None:
+        """A sentence when a paged list `records` reads is not fully fetched (module doc)."""
+        return _fetch.incomplete(source, self.cache_for(source, cache_dir))
 
     def records(
         self, company: CompanyConfig, source: GithubSource, cache_dir: Path
