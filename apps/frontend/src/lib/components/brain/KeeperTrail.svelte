@@ -1,13 +1,14 @@
 <!--
 @component
-How the Keeper got to one claim, as the review page's detail shows it under the gap: which review
-wrote it, then each agent's job in the order it ran. pm and qa each drafted an answer (quoted, with
-the uids they cited) or said they could not ground it; the Keeper checked the drafts and wrote the
+How the Keeper got to one claim, as the review page shows it in a column beside the claim (design
+direction H): which review wrote it, then each agent's job in the order it ran. pm and qa each drafted an answer (quoted, with
+the first uids they cited) or said they could not ground it; the Keeper checked the drafts and wrote the
 claim, with its own reasoning from the log. Every job's graph reads open under it, one line each
 as on the Systems page. A claim no review wrote (a person's reply in Ask) shows the gap's log
 instead. `trail` is null while it loads; `failed` says it could not be read.
 -->
 <script lang="ts">
+	import { ArrowRight } from '@lucide/svelte';
 	import { actorName, stepLineRuns } from '$lib/activity';
 	import {
 		keeperReasoning,
@@ -33,21 +34,24 @@ instead. `trail` is null while it loads; `failed` says it could not be read.
 		refsOf: (uids: string[]) => EvidenceRef[];
 		/** Where a node opens, by uid. */
 		urlOf?: (uid: string) => string | null;
+		/** Where the review can be watched on the map (the Systems page). */
+		href?: string | null;
 		/** For tests and the gallery: the clock times read. */
 		now?: number;
 	};
 
-	let { trail, failed = null, refsOf, urlOf, now }: Props = $props();
+	let { trail, failed = null, refsOf, urlOf, href = null, now }: Props = $props();
 	const id = $props.id();
 
 	const reasoning = $derived(trail ? keeperReasoning(trail.log) : null);
 	const lines = $derived(trail ? trailLog(trail.log) : []);
-	const LABEL_MAX = 32;
+	const LABEL_MAX = 28;
+	const CITES_SHOWN = 3;
 	const short = (text: string) => (text.length > LABEL_MAX ? `${text.slice(0, LABEL_MAX - 1)}…` : text);
 </script>
 
 <section class="trail" aria-labelledby="{id}-h">
-	<h3 id="{id}-h">How the Keeper got here</h3>
+	<h3 id="{id}-h">The Keeper's work</h3>
 	{#if failed}
 		<p class="none">Can't read the Keeper's work on this claim: {failed}</p>
 	{:else if !trail}
@@ -72,9 +76,12 @@ instead. `trail` is null while it loads; `failed` says it could not be read.
 						{/if}
 						{#if consult?.cites.length}
 							<ul class="cites" aria-label="What {job.actor} cited">
-								{#each refsOf(consult.cites) as ref (ref.uid)}
+								{#each refsOf(consult.cites).slice(0, CITES_SHOWN) as ref (ref.uid)}
 									<li title={ref.uid}><NodeChip type={nodeType(ref.label)} label={short(ref.title)} href={ref.url ?? undefined} /></li>
 								{/each}
+								{#if consult.cites.length > CITES_SHOWN}
+									<li class="more" title={consult.cites.slice(CITES_SHOWN).join('\n')}>+{consult.cites.length - CITES_SHOWN} more</li>
+								{/if}
 							</ul>
 						{/if}
 						{#if job.steps.length}
@@ -97,6 +104,7 @@ instead. `trail` is null while it loads; `failed` says it could not be read.
 				</li>
 			{/each}
 		</ol>
+		{#if href}<a class="map" {href}>See the Keeper's runs on the Systems map <ArrowRight aria-hidden="true" /></a>{/if}
 	{:else if lines.length}
 		<ol class="log">
 			{#each lines as entry (entry.uid)}
@@ -127,10 +135,8 @@ instead. `trail` is null while it loads; `failed` says it could not be read.
 	}
 	.lead {
 		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-1) var(--space-3);
-		align-items: baseline;
-		margin: 0 0 var(--space-3);
+		flex-direction: column;
+		margin: 0 0 var(--space-4);
 		font-size: var(--text-sm);
 	}
 	.run {
@@ -150,7 +156,7 @@ instead. `trail` is null while it loads; `failed` says it could not be read.
 	.job {
 		position: relative;
 		display: grid;
-		grid-template-columns: 4.5rem minmax(0, 1fr);
+		grid-template-columns: 3.5rem minmax(0, 1fr);
 		gap: var(--space-3);
 		padding-bottom: var(--space-4);
 	}
@@ -160,7 +166,7 @@ instead. `trail` is null while it loads; `failed` says it could not be read.
 		position: absolute;
 		top: var(--space-6);
 		bottom: 0;
-		left: 2.25rem;
+		left: 1.75rem;
 		border-left: var(--border-hair) solid var(--color-line);
 	}
 	.who {
@@ -208,6 +214,25 @@ instead. `trail` is null while it loads; `failed` says it could not be read.
 	}
 	.cites li {
 		max-width: 100%;
+	}
+	.cites .more {
+		align-self: center;
+		color: var(--color-text-muted);
+		font-size: var(--text-xs);
+	}
+	.map {
+		display: inline-flex;
+		gap: var(--space-1);
+		align-items: center;
+		color: var(--color-text-muted);
+		font-size: var(--text-sm);
+	}
+	.map:hover {
+		color: var(--color-text);
+	}
+	.map :global(svg) {
+		width: 1em;
+		height: 1em;
 	}
 	details summary {
 		width: fit-content;

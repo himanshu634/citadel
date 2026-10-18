@@ -2,8 +2,8 @@
 @component
 The review page (design direction D, "list and detail"): every Keeper claim waiting for a lead.
 The list on the left holds them all; the open one fills the right with its statement, why it needs
-a lead, the gap it answers, how the Keeper got there (`KeeperTrail`, read per claim) and its
-evidence, and Reject or Approve under it. The open claim is in
+a lead, the gap it answers and its evidence, with the Keeper's work in a column beside it
+(`KeeperTrail`, read per claim; direction H), and Reject or Approve under both. The open claim is in
 the URL (`?claim=<uid>`), so a claim has a link. Decided claims stay in the list under "Decided
 here" for the rest of the visit.
 
@@ -343,7 +343,7 @@ anywhere in the company, and the Systems rail stays for the agents' runs and the
 								ondecide={(decision, by, why) => decide(open, decision, by, why)}
 							>
 								{#snippet work()}
-									<KeeperTrail trail={openWork?.trail ?? null} failed={openWork?.error ?? null} {refsOf} {urlOf} />
+									<KeeperTrail trail={openWork?.trail ?? null} failed={openWork?.error ?? null} {refsOf} {urlOf} href={systemsPath} />
 								{/snippet}
 							</ClaimApproval>
 						{/key}
