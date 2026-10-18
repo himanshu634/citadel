@@ -12,15 +12,25 @@ renders on the right of that header. Cards never nest and never cast a shadow.
 		description?: string;
 		actions?: Snippet;
 		padded?: boolean;
+		/** Element id, for in-page links to the card. */
+		id?: string;
 		children: Snippet;
 		class?: string;
 	};
 
-	let { title, description, actions, padded = true, children, class: className }: Props = $props();
+	let {
+		title,
+		description,
+		actions,
+		padded = true,
+		id,
+		children,
+		class: className
+	}: Props = $props();
 	const headingId = $props.id();
 </script>
 
-<section class={['card', className]} aria-labelledby={title ? headingId : undefined}>
+<section {id} class={['card', className]} aria-labelledby={title ? headingId : undefined}>
 	{#if title}
 		<header>
 			<div class="titles">

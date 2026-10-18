@@ -766,7 +766,7 @@
 		</div>
 	</Card>
 
-	<Card title="Source row">
+	<Card title="Source row" id="source-row">
 		<p class="note">
 			One source on the Sources page (direction A, the source ledger), a <code>tbody</code> inside
 			the page's table: synced and open (GitHub), two folders sharing one count (the first one's
@@ -1270,7 +1270,7 @@
 		</div>
 	</Card>
 
-	<Card title="Agent run">
+	<Card title="Agent run" id="agent-run">
 		<p class="note">
 			The Systems page's rail: one run's steps, numbered as on the map. A ring is the step
 			running now; a dash is a step with nothing on the map.
@@ -1305,7 +1305,7 @@
 		</div>
 	</Card>
 
-	<Card title="Claim approval">
+	<Card title="Claim approval" id="claim-approval">
 		<p class="note">
 			A Keeper claim waiting for a lead, in the Systems page's rail: why it needs one in words, the
 			gap it answers, its evidence, then a typed name (no sign-in), an optional reason, and Approve or
