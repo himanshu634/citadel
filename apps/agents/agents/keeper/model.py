@@ -86,12 +86,13 @@ StepStatus = Literal["running", "done", "failed"]
 
 class ReviewStep(BaseModel):
     """One step of a review, for the Systems page's activity trail (`agents/activity.py`): a
-    graph-tool call of a pm, qa or keeper job (kind "graph"), or a job's submit (kind
-    "submit"). Numbered 1.. in the order they ran within the review."""
+    tool call of a pm, qa or keeper job (kind "graph"), or a job's submit (kind "submit").
+    Numbered 1.. in the order they ran within the review. An Archivist run writes its steps the
+    same way under its ArchiveRequest's uid (its archive_* source calls are kind "graph" too)."""
 
-    review: str  # the Review's uid
+    review: str  # the Review's uid, or the ArchiveRequest's for an Archivist run
     n: int
-    actor: str  # "pm", "qa" or "keeper"
+    actor: str  # "pm", "qa", "keeper" or "archivist"
     tool: str
     kind: Literal["graph", "submit"] = "graph"
     input: dict[str, Any] = Field(default_factory=dict)  # stored as JSON text

@@ -531,8 +531,8 @@ class MemoryKeeperStore(_LedgerStore):
     # --- review steps -------------------------------------------------------------------------
 
     def _w_write_step(self, p: Mapping[str, Any]) -> list[Row]:
-        if not any(r.uid == p["review"] for r in self.reviews):
-            return []
+        if p["review"] not in self.requests and not any(r.uid == p["review"] for r in self.reviews):
+            return []  # steps hang off a review or an archive request
         keys = ("review", "n", "actor", "tool", "kind", "input", "status", "count", "error")
         self.steps[(p["review"], p["n"])] = {
             **{k: p[k] for k in keys},

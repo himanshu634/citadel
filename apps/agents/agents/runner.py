@@ -8,11 +8,17 @@ Why: every role decides the same way, so this is the one place that does it. The
 append-only history, all tool results in one message, and a submit that may cite only uids
 seen in tool results this run. `client` is Claude (`llm.client()`) or a scripted policy client
 (`agents/policies`); the run can't tell the difference.
+
+A job may bring its own `toolset` (the Archivist's adds its source tools), follow the run as it
+goes (`on_event` gets the loop's custom events: `llm`, `step`, `step_done`) and be stopped
+(`should_stop`, checked between saved steps: the run ends with stop "stopped" and nothing is
+applied).
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,6 +34,7 @@ from agents.work.store import Row, WorkStore
 from agents.work.submits import Submit
 
 RECURSION_LIMIT = 30  # graph steps per run (each tool round trip is two)
+STOPPED = "stopped"  # RunResult.stop when `should_stop` ended the run
 
 
 @dataclass
@@ -109,14 +116,20 @@ def run_job(
     *,
     client: anthropic.Anthropic,
     graph_run: Runner | None = None,
+    toolset: Toolset | None = None,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
+    recursion_limit: int = RECURSION_LIMIT,
 ) -> RunResult:
+    """One run of `job` on `subject`. `toolset` replaces the role's read tools (`graph_run` is
+    then unused)."""
     result = RunResult(ctx.agent, role.name, job.name, subject.uid)
 
     g = StateGraph(AgentState)
     entry = add_brain_loop(
         g,
         client,
-        role_toolset(role, graph_run),
+        toolset or role_toolset(role, graph_run),
         system_prompt=role.prompt,
         submit_tool=job.submit.tool(),
         check=grounding(job.submit, subject),
@@ -131,8 +144,9 @@ def run_job(
         "stop_details": None,
         "nudges": 0,
     }
+    follow = _Follow(on_event, should_stop, recursion_limit)
     try:
-        _think_and_write(g, inputs, store, job, subject, ctx, result)
+        _think_and_write(g, inputs, store, job, subject, ctx, result, follow)
     except Exception as e:  # an API or store failure: log it, carry on
         result.stop = f"error: {type(e).__name__}: {e}"[:300]
 
@@ -152,6 +166,39 @@ def run_job(
     return result
 
 
+@dataclass(frozen=True)
+class _Follow:
+    on_event: Callable[[dict[str, Any]], None] | None
+    should_stop: Callable[[], bool] | None
+    recursion_limit: int
+
+
+def _run_loop(g: StateGraph, inputs: dict[str, Any], follow: _Follow) -> dict[str, Any]:
+    """The loop's final state. Followed (`on_event` / `should_stop`), it streams: custom events
+    go to `on_event`, and `should_stop` is asked after each saved step while there is no answer
+    (a run whose submit was accepted is complete)."""
+    config = {"recursion_limit": follow.recursion_limit}
+    graph = g.compile()
+    if follow.on_event is None and follow.should_stop is None:
+        try:
+            return graph.invoke(inputs, config)
+        except GraphRecursionError:
+            return {"stop": "step_limit"}
+    state: dict[str, Any] = {}
+    try:
+        for mode, chunk in graph.stream(inputs, config, stream_mode=["values", "custom"]):
+            if mode == "custom":
+                if follow.on_event is not None:
+                    follow.on_event(chunk)
+                continue
+            state = chunk
+            if follow.should_stop is not None and not state.get("answer") and follow.should_stop():
+                return {**state, "answer": None, "stop": STOPPED}
+    except GraphRecursionError:
+        return {**state, "answer": None, "stop": "step_limit"}
+    return state
+
+
 def _think_and_write(
     g: StateGraph,
     inputs: dict[str, Any],
@@ -160,12 +207,10 @@ def _think_and_write(
     subject: Subject,
     ctx: Ctx,
     result: RunResult,
+    follow: _Follow,
 ) -> None:
     """The brain loop, then the job's writes; fills in `result`."""
-    try:
-        state = g.compile().invoke(inputs, {"recursion_limit": RECURSION_LIMIT})
-    except GraphRecursionError:
-        state = {"stop": "step_limit"}
+    state = _run_loop(g, inputs, follow)
 
     result.model = state.get("model")
     result.tools_called = [

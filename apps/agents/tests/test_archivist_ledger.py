@@ -210,3 +210,17 @@ def test_archive_conflict_gap_kind(store):
         "norm": "old new owner", "now": T1,
     })  # fmt: skip
     assert row["created"] is True
+
+
+def test_steps_hang_off_an_archive_request(store):
+    req = open_request(store)[0]["uid"]
+    step = {"review": req, "n": 1, "actor": "archivist", "tool": "archive_fetch",
+            "input": {"source": "s", "id": "x"}, "at": T1}  # fmt: skip
+    assert store.write("ledger/write_step", ARCH, step) == [{"review": req, "n": 1}]
+    done = {"review": req, "n": 1, "status": "done", "count": 1, "at": T2}
+    assert store.write("ledger/finish_step", ARCH, done)[0]["status"] == "done"
+    [got] = store.read("ledger/review_steps", {"reviews": [req]})
+    assert (got["actor"], got["tool"], got["status"], got["count"]) == (
+        "archivist", "archive_fetch", "done", 1
+    )  # fmt: skip
+    assert got["input"] == {"source": "s", "id": "x"}

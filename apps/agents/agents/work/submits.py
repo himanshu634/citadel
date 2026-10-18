@@ -16,7 +16,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agents.keeper.model import ClaimKind
+from agents.keeper.model import ClaimKind, RequestOutcome, Verdict
 
 CITES = Field(
     min_length=1,
@@ -145,6 +145,69 @@ class SubmitFollowUp(Submit):
     body: str = Field(description="What to do and why, citing the claim's evidence.")
 
 
+# --- Archivist ----------------------------------------------------------------------------------
+
+
+class FindIn(BaseModel):
+    """One older item to load. Its checks (fetched in this run, quote, evidence in the brain)
+    run in the job's apply, so a find that fails them is dropped and logged, not refused here."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    uid: str = Field(description="uid of an item you fetched with archive_fetch in this run.")
+    why: str = Field(description="One sentence: why this item answers the request.")
+    quote: str = Field(
+        description="A passage (at least 20 characters) copied from the item's fetched text "
+        "that shows it matches the request."
+    )
+    verdict: Verdict = Field(
+        description="holds: nothing newer in the brain changes it; superseded: a newer item "
+        "changed it (give superseded_by); conflicts: it disagrees with a Keeper claim or a "
+        "declared owner."
+    )
+    evidence: list[str] = Field(
+        default_factory=list,
+        description="Brain uids from tool results in this run that connect the item to the "
+        "brain and back the verdict.",
+    )
+    superseded_by: str | None = Field(
+        None, description="For superseded: the uid of the newer brain item that changed it."
+    )
+
+
+class SubmitArchiveAnswer(Submit):
+    name: ClassVar[str] = "submit_archive_answer"
+    description: ClassVar[str] = (
+        "Answer the archive request: the older items to load (finds, each with why, a quote, a "
+        "verdict and its evidence), a short summary for the asker, and the outcome."
+    )
+    subject: ClassVar[str | None] = "request"
+
+    request: str = Field(description="uid of the archive request being answered.")
+    outcome: RequestOutcome = Field(
+        description="found (finds to load), nothing_found, or already_in_brain (what was asked "
+        "for is in the brain already)."
+    )
+    summary: str = Field(description="One or two sentences for the asker.")
+    finds: list[FindIn] = Field(default_factory=list, description="Items to load (found).")
+    cites: list[str] = OPTIONAL_CITES
+
+    @model_validator(mode="after")
+    def _finds(self) -> SubmitArchiveAnswer:
+        if self.outcome == "found" and not self.finds:
+            raise ValueError("outcome found needs at least one find")
+        if self.outcome != "found" and self.finds:
+            raise ValueError(f"outcome {self.outcome} takes no finds")
+        return self
+
+    def uids(self) -> list[str]:
+        """The cites, and each find's uid, evidence and superseded_by (3b: seen in this run)."""
+        out = list(self.cites)
+        for f in self.finds:
+            out += [f.uid, *f.evidence, *([f.superseded_by] if f.superseded_by else [])]
+        return out
+
+
 SUBMITS: dict[str, type[Submit]] = {
-    s.name: s for s in [SubmitConsult, SubmitKeeperDecision, SubmitFollowUp]
+    s.name: s for s in [SubmitConsult, SubmitKeeperDecision, SubmitFollowUp, SubmitArchiveAnswer]
 }

@@ -33,7 +33,7 @@ def settings(monkeypatch):
 
 
 def test_every_role_is_registered_with_a_user_sorted_tools_and_prompts():
-    assert list(ROLES) == ["pm", "qa", "brain", "keeper"]
+    assert list(ROLES) == ["pm", "qa", "brain", "keeper", "archivist"]
     for role in ROLES.values():
         assert role.db_user in acl.PERMISSIONS
         assert list(role.read_tools) == sorted(role.read_tools), role.name
@@ -53,8 +53,13 @@ def test_submit_tools_have_json_schemas():
         tool = json.loads(json.dumps(submit.tool()))
         assert tool["name"].startswith("submit_") and tool["description"]
         assert "cites" in tool["input_schema"]["properties"]
-        # cites may be empty only where "nothing grounded" is an answer (Keeper consult/decide)
-        optional = submit.name in ("submit_consult", "submit_keeper_decision")
+        # cites may be empty only where "nothing grounded" is an answer (Keeper consult/decide,
+        # the Archivist's nothing_found)
+        optional = submit.name in (
+            "submit_consult",
+            "submit_keeper_decision",
+            "submit_archive_answer",
+        )
         assert ("cites" in tool["input_schema"]["required"]) is not optional, submit.name
 
 

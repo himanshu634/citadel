@@ -1,15 +1,19 @@
 // purpose: Write one step of a review for the activity trail: a graph-tool call of a pm, qa or
 //          keeper job (written `running` when it starts), or a job's submit (written ended).
-//          Written again with the same (review, n), it is overwritten.
-// params:  $review (Review uid), $n (1.. within the review), $actor, $tool,
+//          An Archivist run's steps hang off its ArchiveRequest the same way ($review is then
+//          the request's uid). Written again with the same (review, n), it is overwritten.
+// params:  $review (Review or ArchiveRequest uid), $n (1.. within the review), $actor, $tool,
 //          $kind ('graph' | 'submit'), $input (JSON text), $status ('running' | 'done' |
 //          'failed'), $count, $error (each may be null), $touched: [brain uid], $at (ISO)
-// returns: review, n. No rows: no such review.
+// returns: review, n. No rows: no such review or request.
 // notes:   A step not written `running` is ended at $at.
 // example: store.write("ledger/write_step", "citadel_keeper", {"review": "review:1a2b3c4d",
 //          "n": 1, "actor": "pm", "tool": "work_history", "input": "{\"system\": \"Auth\"}",
 //          "at": "2026-10-17T10:00:00Z"})
-MATCH (r:Review {uid: $review})
+OPTIONAL MATCH (rv:Review {uid: $review})
+OPTIONAL MATCH (rq:ArchiveRequest {uid: $review})
+WITH coalesce(rv, rq) AS r
+WHERE r IS NOT NULL
 MERGE (r)-[:HAS_STEP]->(s:ReviewStep {review: $review, n: $n})
 SET s.actor = $actor,
     s.tool = $tool,
