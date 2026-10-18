@@ -45,7 +45,8 @@ OPTIONAL MATCH (src)<-[:PART_OF]-(:Change)-[:TOUCHES]->(ts:System)
 WITH src, c, score, author, collect(DISTINCT ts.name) AS touched
 OPTIONAL MATCH (src)-[:MENTIONS]->(ms:System)
 WITH src, c, score, author, touched, collect(DISTINCT ms.name) AS mentioned
-RETURN src.uid AS uid, labels(src)[0] AS label,
+RETURN src.uid AS uid,
+       head([l IN labels(src) WHERE l <> 'Node']) AS label,
        CASE WHEN 'Document' IN labels(src) THEN 'document' ELSE src.kind END AS kind,
        src.number AS number, src.title AS title, src.state AS state, src.url AS url,
        c.uid AS chunk_uid, c.kind AS chunk_kind, left(c.text, 300) AS snippet,

@@ -7,7 +7,7 @@
 // example: backend GET /api/companies/falkordb/sources
 MATCH (n)
 WHERE n.source IS NOT NULL
-WITH n.source AS source, labels(n)[0] AS label,
+WITH n.source AS source, head([l IN labels(n) WHERE l <> 'Node']) AS label,
      CASE WHEN n:WorkItem THEN n.kind ELSE null END AS kind,
      CASE WHEN n:WorkItem THEN n.state ELSE null END AS state
 RETURN source, label, kind, state, count(*) AS n

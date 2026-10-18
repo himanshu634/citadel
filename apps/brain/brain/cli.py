@@ -51,6 +51,8 @@ def schema_cmd(slug: str) -> None:
         f"{cfg.graph_name}: {len(report.created)} index statements applied, "
         f"{len(report.existing)} already present."
     )
+    if report.backfilled:
+        typer.echo(f"  {report.backfilled} nodes given the Node label (loaded before it existed).")
     for idx in schema.list_indexes(slug):
         kinds = ", ".join(f"{p}:{'/'.join(t)}" for p, t in idx["types"].items())
         typer.echo(f"  {idx['label']:<10} {kinds}  [{idx['status']}]")

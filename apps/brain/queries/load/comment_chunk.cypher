@@ -10,7 +10,8 @@
 UNWIND $rows AS row
 MATCH (w:WorkItem {uid: row.work_item_uid})
 MERGE (c:Chunk {uid: row.uid})
-SET c.company = $company,
+SET c:Node,
+    c.company = $company,
     c.kind = 'comment',
     c.comment_uid = row.comment_uid,
     c.idx = row.idx,

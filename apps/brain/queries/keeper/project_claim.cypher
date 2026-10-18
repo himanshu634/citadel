@@ -14,15 +14,15 @@
 // example: keeper.project("synthetic", [claim])
 UNWIND $claims AS c
 MERGE (n:Claim {uid: c.uid})
-SET n.kind = c.kind, n.subject = c.subject, n.title = c.statement, n.statement = c.statement,
-    n.value = c.value, n.status = 'accepted', n.valid_from = c.valid_from, n.valid_to = null,
+SET n:Node, n.kind = c.kind, n.subject = c.subject, n.title = c.statement,
+    n.statement = c.statement, n.value = c.value, n.status = 'accepted', n.valid_from = c.valid_from, n.valid_to = null,
     n.author = c.author, n.approved_by = c.approved_by
 WITH n, c
 UNWIND c.about AS about_uid
-MATCH (a {uid: about_uid})
+MATCH (a:Node {uid: about_uid})
 MERGE (n)-[:ABOUT]->(a)
 WITH DISTINCT n, c
 UNWIND c.evidence AS evidence_uid
-MATCH (e {uid: evidence_uid})
+MATCH (e:Node {uid: evidence_uid})
 MERGE (n)-[:EVIDENCE]->(e)
 RETURN DISTINCT n.uid AS uid

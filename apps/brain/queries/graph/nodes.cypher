@@ -7,10 +7,11 @@
 //          the body and document Chunks of the same node are not comments), ordered by uid
 // example: graph_view.load("synthetic")
 MATCH (n)
-WHERE labels(n)[0] IN $labels
+WHERE head([l IN labels(n) WHERE l <> 'Node']) IN $labels
 OPTIONAL MATCH (c:Chunk)-[:FROM]->(n)
 WHERE c.kind = 'comment' AND coalesce(c.idx, 0) = 0
-RETURN n.uid AS uid, labels(n)[0] AS label,
+RETURN n.uid AS uid,
+       head([l IN labels(n) WHERE l <> 'Node']) AS label,
        coalesce(n.name, n.login, n.title, n.subject, n.path) AS title,
        n.kind AS kind, n.state AS state, n.number AS number, n.url AS url,
        coalesce(n.is_bot, false) AS is_bot, count(c) AS comments

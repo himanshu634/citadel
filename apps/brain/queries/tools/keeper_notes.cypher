@@ -5,12 +5,12 @@
 // returns: uid, kind, statement, value, valid_from, approved_by,
 //          evidence ([{uid, label, title, url}]); newest first
 // example: make query TOOL=keeper_notes P="uid=system:Auth"
-MATCH (c:Claim)-[:ABOUT]->({uid: $uid})
+MATCH (c:Claim)-[:ABOUT]->(:Node {uid: $uid})
 WHERE c.status = 'accepted' AND c.valid_to IS NULL
 OPTIONAL MATCH (c)-[:EVIDENCE]->(e)
 WITH c, e ORDER BY e.uid
 WITH c, collect(CASE WHEN e IS NULL THEN NULL ELSE {
-       uid: e.uid, label: labels(e)[0],
+       uid: e.uid, label: head([l IN labels(e) WHERE l <> 'Node']),
        title: coalesce(e.title, e.subject, e.name, e.login, e.path, left(e.text, 80)),
        url: e.url} END) AS evidence
 RETURN c.uid AS uid, c.kind AS kind, c.statement AS statement, c.value AS value,
