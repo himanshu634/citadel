@@ -13,7 +13,7 @@ again. Every chat is kept on the server: the past chats column (`ChatList`, fold
 `citadel-ask-history`) lists them, `?thread=<id>` opens one (a reload or a shared link reopens
 it), and each lane shows how it answered (`TurnTimeline`, folded under the answer). A chip under
 the question field picks the Claude model for the next question (`ModelPicker`, direction P;
-Haiku 5.5 by default, kept in this browser); each answer says which model wrote it, and a
+Sonnet 5.5 by default, kept in this browser); each answer says which model wrote it, and a
 follow-up on another model says so.
 -->
 <script lang="ts">

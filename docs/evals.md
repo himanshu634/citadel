@@ -7,8 +7,8 @@ No model grades another model.
 
 ## Results (2026-10-17)
 
-Two models, both at effort `medium`: **Claude Haiku 5.5** (`claude-haiku-5-5`, the shipped
-default) and **Claude Sonnet 5.5** (`claude-sonnet-5-5`). Every case, `REPEAT=3`, both
+Two models, both at effort `medium`: **Claude Haiku 5.5** (`claude-haiku-5-5`, the default
+at the time) and **Claude Sonnet 5.5** (`claude-sonnet-5-5`). Every case, `REPEAT=3`, both
 companies, all eight runs on the same graphs (their last ingest, by the SyncState `last_run`,
 was at 09:39Z, before the first run at 15:00Z). There are two rounds:
 

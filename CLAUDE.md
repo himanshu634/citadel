@@ -60,7 +60,7 @@ Configuration comes from `.env` (see `.env.example`): FalkorDB host/port/credent
 `data/models/`, or `gemini-embedding-2`) and `EMBEDDING_DIM` (768; the vector index size, must
 equal the model's output size) drive the embed stage. `gemini` uses Google's Gemini embedding
 API (`GEMINI_API_KEY`) instead of the local model, and sends chunk text there.
-`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (default `claude-haiku-5-5`) and `ANTHROPIC_EFFORT`
+`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (default `claude-sonnet-5-5`) and `ANTHROPIC_EFFORT`
 (default `medium`) drive `agents ask` and the Keeper's jobs. `KEEPER_BUDGET` (5, gaps one
 on-demand review decides), `KEEPER_BUILD_BUDGET` (3, the review after a build) and
 `KEEPER_NOTICE_CAP` (10, max new gaps per noticing run) tune the Keeper. Settings live in
