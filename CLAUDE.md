@@ -200,6 +200,9 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
   A tail Haiku writes into the answer text (`</answer>` + `<parameter name="sources">...`) is
   cut from the accepted answer (`loop.cut_leak`, a copy; the replayed tool_use keeps it), and a
   leaked sources/path list fills that field only when it is empty.
+  A question ends with no answer after `loop.MAX_REFUSALS` (5) refused submits; markers with an
+  empty `sources` (after `cut_leak`) are refused with the latest seen uids (Haiku can repeat
+  that call until `max_tokens`).
 - Step limits (LangGraph `recursion_limit`; each tool round trip is two steps): 40 per Ask
   question (`ask.RECURSION_LIMIT`), 30 per role job (`runner.RECURSION_LIMIT`). Hitting one
   ends the run with stop `step_limit`.

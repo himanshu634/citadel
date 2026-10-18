@@ -5,6 +5,7 @@
          +------------------------+
     call_claude --(end_turn without an answer)--> nudge -> call_claude
     call_claude --(refusal / max_tokens)--> END
+    run_tools --(MAX_REFUSALS refused submits this question)--> END
 
 The graph owns the loop (not the SDK tool runner), so every step is checkpointed. Rules it keeps:
 - State holds messages in Anthropic's own block format and is append-only. Assistant content is
@@ -12,9 +13,10 @@ The graph owns the loop (not the SDK tool runner), so every step is checkpointed
 - All tool results of one assistant turn go back in a single user message.
 - The answer arrives through the `submit_answer` tool (the current models reject forced tool
   choice, so the system prompt asks for it). Cited uids must have appeared in a tool result in
-  this thread; otherwise Claude gets an error result and tries again. A parameter Claude wrote
-  into the answer text (`</answer><parameter name="sources">`) is cut from the accepted answer
-  (`cut_leak`); the replayed tool_use keeps it.
+  this thread; otherwise Claude gets an error result and tries again, up to MAX_REFUSALS times
+  per question (a model can repeat one bad submit until the step limit or max_tokens). A
+  parameter Claude wrote into the answer text (`</answer><parameter name="sources">`) is cut
+  from the accepted answer (`cut_leak`); the replayed tool_use keeps it.
 - A company's MCP servers (`agents/mcp.py`) run inside the Claude call: their `mcp_tool_use` /
   `mcp_tool_result` blocks arrive in the assistant content and replay with it; run_tools never
   sees them. A successful MCP call is citable as `mcp:<server>/<tool>`.
@@ -43,6 +45,8 @@ from agents.walk import preview_rows, subgraph
 SYSTEM_PROMPT = resources.files("agents").joinpath("system_prompt.md").read_text()
 SUBMIT = "submit_answer"
 MAX_NUDGES = 1  # times we ask for submit_answer after a plain-text reply before giving up
+MAX_REFUSALS = 5  # refused submits in one question before the turn ends without an answer
+CANDIDATES = 15  # seen uids listed in a refusal for markers with no sources
 _MARKER = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")  # [1] or [1, 3]
 _LEAK = re.compile(r"</answer>|<parameter name=")  # where a leaked parameter tail starts
 _LEAKED = re.compile(r'<parameter name="(sources|path)">\s*(\[.*?\])', re.S)
@@ -95,6 +99,7 @@ class AgentState(TypedDict, total=False):
     model: str | None  # the model that served the last call (differs after a fallback)
     ask_model: str | None  # the model this turn asked for (Ask page); None: ANTHROPIC_MODEL
     nudges: int
+    refusals: int  # refused submits this question (reset with nudges)
     trace: Annotated[list[dict[str, Any]], operator.add]  # one entry per tool call (run_tools)
 
 
@@ -204,11 +209,13 @@ def add_brain_loop(
             )
         seen = {**(state.get("seen") or {}), **new_seen}
         answer = None
+        refusals = state.get("refusals") or 0
         for use in submits:
             given = use.get("input") or {}
             given = cut_leak(given) if submit == SUBMIT else given  # a copy: history stays as is
             problem = check(given, seen)
             if problem:
+                refusals += 1
                 results.append(result_block(use["id"], problem, True))
             else:
                 answer = given
@@ -219,6 +226,9 @@ def add_brain_loop(
             "seen": new_seen,
             "answer": answer,
             "trace": trace,
+            "refusals": refusals,
+            # Out of tries: every submit has its result, so the thread stays valid.
+            **({"stop": "no_answer"} if not answer and refusals >= MAX_REFUSALS else {}),
         }
 
     def nudge(state: AgentState) -> dict[str, Any]:
@@ -239,7 +249,9 @@ def add_brain_loop(
         return "nudge" if state.get("nudges", 0) < MAX_NUDGES else END
 
     def after_tools(state: AgentState) -> Literal["call_claude", "__end__"]:
-        return END if state.get("answer") else "call_claude"
+        if state.get("answer") or (state.get("refusals") or 0) >= MAX_REFUSALS:
+            return END
+        return "call_claude"
 
     g.add_node("call_claude", call_claude)
     g.add_node("run_tools", run_tools)
@@ -285,12 +297,36 @@ def check_answer(answer: dict[str, Any], seen: dict[str, Any]) -> str | None:
         )
     markers = {int(n) for m in _MARKER.findall(answer["answer"]) for n in m.split(",")}
     bad = sorted(n for n in markers if not 1 <= n <= len(sources))
+    if bad and not sources:
+        return _no_sources(bad, answer["answer"], seen)
     if bad:
         return (
             f"Markers {bad} have no matching entry in sources ({len(sources)} given). "
             f"Marker [n] cites sources[n-1]; fix them and call {SUBMIT} again."
         )
     return None
+
+
+def _no_sources(markers: list[int], text: str, seen: dict[str, Any]) -> str:
+    """The refusal for markers with an empty sources list: the model often repeats the same
+    call, so name what it may cite (the last CANDIDATES uids first seen) and, when the sources
+    went into the answer text instead (`<parameter name="sources">`), say so."""
+    graph = [(u, n) for u, n in seen.items() if n.get("label") != mcp_.LABEL]
+    shown = [f'{u} "{n["title"]}"' if n.get("title") else u for u, n in graph[-CANDIDATES:]]
+    more = f" (and {len(graph) - CANDIDATES} more)" if len(graph) > CANDIDATES else ""
+    parts = [
+        f"sources is empty, but the answer has markers {markers}. Put the uid each marker cites "
+        f"in sources (marker [n] cites sources[n-1]), or remove the markers, then call "
+        f"{SUBMIT} again."
+    ]
+    if shown:
+        parts.append(f"uids from your tool results: {', '.join(shown)}{more}.")
+    if "<parameter" in text or "</answer>" in text:
+        parts.append(
+            'Your answer text holds a "</answer>" or <parameter name="sources"> part: sources '
+            "is its own field, not part of answer. End answer before it."
+        )
+    return " ".join(parts)
 
 
 def cut_leak(answer: dict[str, Any]) -> dict[str, Any]:
