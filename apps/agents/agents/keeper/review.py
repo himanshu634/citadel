@@ -48,6 +48,7 @@ and the brain uids it touched; each job then adds one `submit` step, `failed` wh
 nothing. The pick records the picked gaps and the first one's text on the Review
 (`ledger/review_picked`). Step writes are best effort: a ledger hiccup never changes a job.
 
+A run also puts back to `open` the Keeper's archive requests an earlier run left `running`.
 Whatever the end, the gaps this run moved to in_review and left undecided (still in_review, no
 claim waiting for a lead) go back to `open` without using an attempt, so the next review can
 pick them; a run first does the same for gaps an earlier run left behind (a killed process).
@@ -265,6 +266,7 @@ class _Run:
 
     def steps(self, budget: int) -> None:
         self.release_orphans()
+        self.release_archive_orphans()
         if not self.brain.graph_exists(self.slug):
             raise BrainUnavailable(self.slug)
         counts = reproject(self.store, self.slug, brain=self.brain, now=self.now())
@@ -405,6 +407,24 @@ class _Run:
         n = sum(self.release_gap(g["uid"], "left in review by an earlier review") for g in rows)
         if n:
             self.event("release", message=f"Released {n} gap(s) an earlier review left in review.")
+
+    def release_archive_orphans(self) -> None:
+        """Keeper requests an earlier review left `running` (a killed process, e.g. `--reload`
+        during the Archivist's run) go back to `open`, so this review's archive step runs them
+        and their gaps do not wait for good. Only reviews run Keeper requests, and only one
+        review runs at a time, so no other run owns them. Ask's requests are left alone."""
+        running = {"statuses": ["running"], "limit": ARCHIVE_QUEUE_LIMIT}
+        rows = self.store.read("ledger/archive_requests", running)
+        n = 0
+        for r in (r for r in rows if r["asked_by"] == "keeper"):
+            now = self.now()
+            back = {"uid": r["uid"], "from": ["running"], "to": "open", "now": now}
+            if self.store.write("ledger/archive_set_request", DB_USER, back):
+                why = f"{r['uid']}: left running by an earlier review"
+                log(self.store, now, "keeper", "archive_released", gap=r["gap"], why=why)
+                n += 1
+        if n:
+            self.event("release", message=f"Released {n} archive request(s) left running.")
 
     def release(self, reason: str) -> None:
         """Gaps this run picked that are still in review with no claim waiting for a lead go

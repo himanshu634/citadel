@@ -179,6 +179,7 @@ def test_ask_for_a_question_already_in_flight_leaves_the_gap_in_review():
     assert rows == [{"uid": gap, "status": "in_review", "request": other}]
     assert get_gap(store, gap).status == "in_review"
     assert requests(store, gap) == []
+    assert get_gap(store, gap).archive_asked is True  # it asked: it ends, served or not
     [entry] = [e for e in store.log if e.gap == gap]
     assert entry.action == "archive_requested" and other in (entry.why or "")
 
@@ -365,6 +366,22 @@ def test_a_building_refusal_puts_the_request_back(monkeypatch):
     assert (r.state, r.stop) == ("stopped", "brain_unavailable")
     assert get_gap(store, gap).status == "waiting_archive"
     assert store.read("ledger/archive_get_request", {"uid": req})[0]["status"] == "open"
+
+
+def test_a_request_left_running_is_run_again(answer):
+    """A review killed during the Archivist left its request running: the next review puts it
+    back to open, runs it and settles the gap. Ask's running requests are left alone."""
+    store = MemoryKeeperStore(SLUG)
+    gap, req = waiting_gap(store)
+    move = {"uid": req, "from": ["open"], "to": "running", "now": NOW}
+    store.write("ledger/archive_set_request", ARCHIVIST, move)
+    asks = open_request(store, gap=None, asked_by="ask", text="old ask")
+    store.write("ledger/archive_set_request", ARCHIVIST, {**move, "uid": asks})
+    r = run_review(store, budget=1)
+    assert [c["uid"] for c in answer.calls] == [req]
+    assert r.archive_reopened == [gap] and get_gap(store, gap).status == "open"
+    assert "archive_released" in actions(store, gap)
+    assert store.read("ledger/archive_get_request", {"uid": asks})[0]["status"] == "running"
 
 
 def test_release_orphans_leaves_waiting_archive(answer):
