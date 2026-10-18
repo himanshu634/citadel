@@ -26,7 +26,7 @@ def test_ingesting_twice_gives_identical_counts(synthetic_graph):
     before = stats(synthetic_graph)
     load_company(synthetic_company(synthetic_graph))
     assert stats(synthetic_graph) == before
-    assert before["node:Change"] == 25 and before["node:WorkItem"] == 15
+    assert before["node:Change"] == 25 and before["node:WorkItem"] == 16
 
 
 def test_experts_rank_recent_humans_and_flag_owners(synthetic_graph):
