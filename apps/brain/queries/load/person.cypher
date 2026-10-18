@@ -6,7 +6,8 @@
 // example: loader.load("synthetic", [Person(login="alice")])
 UNWIND $rows AS row
 MERGE (p:Person {uid: row.uid})
-SET p.company = $company,
+SET p:Node,
+    p.company = $company,
     p.login = row.login,
     p.display_name = coalesce(row.display_name, p.display_name),
     p.is_bot = row.is_bot,

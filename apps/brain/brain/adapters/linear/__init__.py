@@ -14,6 +14,7 @@ from brain.adapters.base import SourceProblem
 from brain.adapters.linear import fetch as _fetch
 from brain.adapters.linear import transform as _transform
 from brain.adapters.linear.source import LinearSource
+from brain.adapters.runs import unfinished
 from brain.canonical import CanonicalRecord
 from brain.config import CompanyConfig, get_settings
 
@@ -29,8 +30,10 @@ class LinearAdapter:
     def cache_for(self, source: LinearSource, cache_dir: Path) -> Path:
         return cache_dir / source.workspace
 
-    def fetch(self, company: CompanyConfig, source: LinearSource, cache_dir: Path) -> None:
-        _fetch.run(company, source, self.cache_for(source, cache_dir))
+    def fetch(
+        self, company: CompanyConfig, source: LinearSource, cache_dir: Path, full: bool = False
+    ) -> None:
+        _fetch.run(company, source, self.cache_for(source, cache_dir), full=full)
 
     def check(
         self, company: CompanyConfig, source: LinearSource, cache_dir: Path
@@ -39,6 +42,13 @@ class LinearAdapter:
         if get_settings().linear_api_key:
             return None
         return SourceProblem("No Linear API key: set LINEAR_API_KEY in .env", blocks=True)
+
+    def incomplete(
+        self, company: CompanyConfig, source: LinearSource, cache_dir: Path
+    ) -> str | None:
+        """A sentence while the issue run has not completed (its cache lacks tickets that must
+        still pass the ingest cursor), else None."""
+        return unfinished(self.cache_for(source, cache_dir) / "issues")
 
     def records(
         self, company: CompanyConfig, source: LinearSource, cache_dir: Path

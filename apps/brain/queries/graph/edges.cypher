@@ -4,6 +4,7 @@
 // returns: source (uid), rel (relationship type), target (uid), ordered by source, rel, target
 // example: graph_view.load("synthetic")
 MATCH (a)-[r]->(b)
-WHERE labels(a)[0] IN $labels AND labels(b)[0] IN $labels
+WHERE head([l IN labels(a) WHERE l <> 'Node']) IN $labels
+  AND head([l IN labels(b) WHERE l <> 'Node']) IN $labels
 RETURN a.uid AS source, type(r) AS rel, b.uid AS target
 ORDER BY source, rel, target

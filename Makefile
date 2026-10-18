@@ -56,8 +56,8 @@ init: ## Write companies/$(SLUG).yaml template (NAME="Display Name" optional)
 schema: ## Create indexes on graph brain_$(SLUG) (safe to re-run)
 	$(BRAIN) schema $(SLUG)
 
-fetch: ## Pull raw data for $(SLUG) into data/raw/ (SOURCE=github to limit)
-	$(BRAIN) fetch $(SLUG) $(if $(SOURCE),--source $(SOURCE))
+fetch: ## Pull raw data for $(SLUG) into data/raw/ (SOURCE=github to limit; FULL=1 pulls the whole window again)
+	$(BRAIN) fetch $(SLUG) $(if $(filter 1 yes,$(FULL)),--full) $(if $(SOURCE),--source $(SOURCE))
 
 ingest: ## Load cached data into brain_$(SLUG), then embed (FULL=1 ignores sync cursors)
 	$(BRAIN) ingest $(SLUG) $(if $(filter 1 yes,$(FULL)),--full) $(if $(SOURCE),--source $(SOURCE))

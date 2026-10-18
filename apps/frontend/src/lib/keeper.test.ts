@@ -4,6 +4,7 @@ import {
 	checkApproval,
 	criticalLine,
 	decidedLine,
+	decidedTag,
 	decisionError,
 	keeperRunning,
 	evidenceRefs,
@@ -12,6 +13,7 @@ import {
 	railLog,
 	logSentence,
 	logWhy,
+	reasonRows,
 	reasonWords,
 	reviewNote,
 	whoName
@@ -225,5 +227,26 @@ describe('decidedLine', () => {
 	});
 	it('says a rejection reopens the gap', () => {
 		expect(decidedLine('reject', 'Dana', { ...claim, status: 'rejected' })).toBe('Dana rejected: bob decides the refund rules in Billing. Its gap is open again.');
+	});
+});
+
+describe('reasonRows', () => {
+	it('gives each reason a heading and what it means, in order', () => {
+		const rows = reasonRows(['replaces_claim', 'no_source_evidence']);
+		expect(rows.map((r) => r.title)).toEqual(['It replaces an earlier claim', 'No source is behind it']);
+		expect(rows[1].detail).toMatch(/No commit, PR, ticket or doc/);
+	});
+	it('reads an unknown code as words, and no reasons as a plain "needs a lead"', () => {
+		expect(reasonRows(['new_rule'])).toEqual([{ code: 'new_rule', title: 'new rule', detail: '' }]);
+		expect(reasonRows([])[0].title).toBe('It needs a lead');
+	});
+});
+
+describe('decidedTag', () => {
+	it('says what the decision ended as', () => {
+		expect(decidedTag('approve', 'accepted')).toEqual({ text: 'Approved', tone: 'success' });
+		expect(decidedTag('approve', 'conflicts_with_source').tone).toBe('warning');
+		expect(decidedTag('approve', 'stale').text).toBe('Approved, not added');
+		expect(decidedTag('reject', 'rejected')).toEqual({ text: 'Rejected', tone: 'neutral' });
 	});
 });

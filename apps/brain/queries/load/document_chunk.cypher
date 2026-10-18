@@ -7,7 +7,8 @@
 UNWIND $rows AS row
 MATCH (d:Document {uid: row.document_uid})
 MERGE (c:Chunk {uid: row.uid})
-SET c.company = $company,
+SET c:Node,
+    c.company = $company,
     c.kind = 'document',
     c.idx = row.idx,
     c.text = row.text,
