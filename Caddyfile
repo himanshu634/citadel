@@ -1,0 +1,25 @@
+# One origin for the app and the API (the frontend calls the relative /api; CORS allows only
+# the dev server). Environment, from docker-compose.prod.yml:
+#   SITE_ADDRESS     the public name (HTTPS certificates are automatic), or :80 for a local test
+#   BASIC_AUTH_USER  the shared user name
+#   BASIC_AUTH_HASH  its bcrypt hash: docker run --rm caddy:2.10.2-alpine caddy hash-password
+{$SITE_ADDRESS} {
+	basic_auth {
+		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+	}
+
+	# Event streams (Ask, builds, Keeper reviews) must not be buffered; the API pings every 15 s.
+	handle /api/* {
+		reverse_proxy api:8000 {
+			flush_interval -1
+		}
+	}
+
+	# The static build. /c/<slug> and /new are not prerendered: the SPA fallback serves them.
+	handle {
+		root * /srv/www
+		encode gzip
+		try_files {path} {path}.html /200.html
+		file_server
+	}
+}

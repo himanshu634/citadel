@@ -1,0 +1,16 @@
+# Keep secrets, local data and build output out of the image (see Dockerfile).
+.env
+.env.*
+!.env.example
+.git
+data
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+**/node_modules
+apps/frontend/build
+apps/frontend/.svelte-kit
+docs
+.claude

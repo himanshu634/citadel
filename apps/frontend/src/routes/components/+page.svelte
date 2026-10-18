@@ -774,7 +774,7 @@
 			missing), blocked (no key, so every sync fails), never synced with a long name, and one
 			syncing while another is busy.
 		</p>
-		<div class="ledger-sample">
+		<div class="ledger-sample" id="source-row">
 			<table>
 				<thead>
 					<tr>
@@ -1275,7 +1275,7 @@
 			The Systems page's rail: one run's steps, numbered as on the map. A ring is the step
 			running now; a dash is a step with nothing on the map.
 		</p>
-		<div class="runs">
+		<div class="runs" id="agent-run">
 			<div>
 				<h3 class="sub">Working now</h3>
 				<AgentRun run={runningRun} trail={runningTrail} href="#agent-run" urlOf={(uid) => syntheticGraph.nodes.find((n) => n.uid === uid)?.url ?? null} />
@@ -1311,7 +1311,7 @@
 			gap it answers, its evidence, then a typed name (no sign-in), an optional reason, and Approve or
 			Reject. Type a name and press Approve; an empty name says what is missing.
 		</p>
-		<div class="runs">
+		<div class="runs" id="claim-approval">
 			<div>
 				<h3 class="sub">Waiting (try it)</h3>
 				<ClaimApproval

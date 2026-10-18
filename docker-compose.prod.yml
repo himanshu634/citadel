@@ -1,0 +1,72 @@
+# Production stack for one VM (docs/hosting.md): FalkorDB, the API and Caddy. The local
+# FalkorDB for development stays in docker-compose.yml.
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+#
+# Needs in the env file: FALKORDB_PASSWORD, ANTHROPIC_API_KEY, GITHUB_TOKEN, SITE_ADDRESS,
+# BASIC_AUTH_USER and BASIC_AUTH_HASH (single-quoted: a bcrypt hash holds `$`). The API also
+# reads the file directly (env_file), so every app setting in .env.example applies.
+# Own project name: never touches the dev project's `citadel-falkordb-1`.
+name: citadel-prod
+
+services:
+  falkordb:
+    # Pinned, not FALKORDB_IMAGE_TAG: .env.example sets that to latest for development.
+    # v4.22.1 is the version the local data was made with; a dump.rdb copy needs the same.
+    image: falkordb/falkordb:v4.22.1
+    # No published ports: only the api service reaches it, on the compose network.
+    environment:
+      REDIS_ARGS: --requirepass ${FALKORDB_PASSWORD:?set FALKORDB_PASSWORD}
+      FALKORDB_PASSWORD: ${FALKORDB_PASSWORD}
+    volumes:
+      - falkordb_data:/var/lib/falkordb/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$FALKORDB_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      target: api
+    env_file: ${ENV_FILE:-.env}
+    environment:
+      # Overrides the env file, which points at localhost for development.
+      FALKORDB_HOST: falkordb
+      FALKORDB_PORT: "6379"
+      FALKORDB_TLS: "false"
+      BRAIN_ROOT: /srv/citadel
+    volumes:
+      - brain_root:/srv/citadel
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    # One container, one worker. Restarts stop builds and reviews in flight (recover at startup).
+    restart: unless-stopped
+
+  caddy:
+    build:
+      context: .
+      target: web
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS}
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER:?set BASIC_AUTH_USER}
+      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:?set BASIC_AUTH_HASH}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  falkordb_data:
+  brain_root:
+  caddy_data:
+  caddy_config:

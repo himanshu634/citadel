@@ -159,6 +159,29 @@ The same code runs against a cloud instance. In `.env`, set `FALKORDB_HOST`, `FA
 `FALKORDB_USERNAME` and `FALKORDB_PASSWORD` from the console, and `FALKORDB_TLS=true` if the
 instance uses TLS. Skip `make up`; everything else is the same.
 
+## Running the production stack
+
+`docker-compose.prod.yml` runs FalkorDB (pinned, password, no published ports), the API (one
+uvicorn worker) and Caddy (the static app plus `/api`, behind one shared password) on one
+machine. The images come from the `Dockerfile` (targets `api` and `web`). The plan and its
+reasons are in `docs/hosting.md`. In the env file, add to the usual settings:
+
+```bash
+FALKORDB_PASSWORD=<a long random string>
+SITE_ADDRESS=brain.example.com        # :80 for a plain-HTTP local test
+BASIC_AUTH_USER=judge
+BASIC_AUTH_HASH='<docker run --rm caddy:2.10.2-alpine caddy hash-password>'   # single quotes
+# HTTP_PORT=8088 HTTPS_PORT=8443      # a local test beside the dev stack
+```
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+```
+
+The API's volume (`BRAIN_ROOT=/srv/citadel`) holds `companies/` and `data/`; on the first start
+it gets the repo's `companies/*.yaml`. A restart stops any build or Keeper review in flight, so
+redeploy when none runs.
+
 ## Troubleshooting
 
 | Problem | Fix |
