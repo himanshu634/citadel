@@ -38,6 +38,7 @@ export { default as GraphWalk } from './components/brain/GraphWalk.svelte';
 export { default as KeeperLog } from './components/brain/KeeperLog.svelte';
 export { default as KeeperTrail } from './components/brain/KeeperTrail.svelte';
 export { default as ModelPicker } from './components/brain/ModelPicker.svelte';
+export { default as GraphHoverCard } from './components/brain/GraphHoverCard.svelte';
 export { default as NodeInspector } from './components/brain/NodeInspector.svelte';
 export { default as WalkAnswer } from './components/brain/WalkAnswer.svelte';
 export { default as StepRows } from './components/brain/StepRows.svelte';

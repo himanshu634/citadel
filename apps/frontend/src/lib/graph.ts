@@ -21,7 +21,7 @@ import {
 	type SimulationNodeDatum
 } from 'd3-force';
 import { packSiblings } from 'd3-hierarchy';
-import type { GraphLabel, GraphNode, GraphView } from './types';
+import type { GraphEdge, GraphLabel, GraphNode, GraphView } from './types';
 
 /** The map's own coordinate space; the canvas scales it to fit. */
 export const WORLD = { width: 968, height: 688 } as const;
@@ -391,6 +391,106 @@ export function search(view: Pick<GraphView, 'nodes'>, query: string, limit = 8)
 		.sort((a, b) => a[0] - b[0] || b[1].degree - a[1].degree || a[1].uid.localeCompare(b[1].uid))
 		.slice(0, limit)
 		.map(([, n]) => n);
+}
+
+/** Distance from (px, py) to the segment a-b. */
+function segmentDistance(
+	px: number,
+	py: number,
+	a: { x: number; y: number },
+	b: { x: number; y: number }
+): number {
+	const dx = b.x - a.x;
+	const dy = b.y - a.y;
+	const len = dx * dx + dy * dy;
+	const t = len ? Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / len)) : 0;
+	return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy));
+}
+
+/** The links under the point (x, y), as indexes into `edges`: every link between the pair of
+ *  nodes whose line is nearest, when it is within `tolerance` (all in world units). Only the
+ *  links in `drawn` are looked at, because a link the map does not draw cannot be pointed at. */
+export function edgesAt(
+	edges: readonly Pick<GraphEdge, 'source' | 'target'>[],
+	drawn: (i: number) => boolean,
+	at: (uid: string) => { x: number; y: number } | undefined,
+	x: number,
+	y: number,
+	tolerance: number
+): number[] {
+	let best = -1;
+	let bestD = tolerance;
+	edges.forEach((e, i) => {
+		if (!drawn(i)) return;
+		const a = at(e.source);
+		const b = at(e.target);
+		if (!a || !b) return;
+		// Cheap box test first: most links are nowhere near the pointer.
+		if (x < Math.min(a.x, b.x) - bestD || x > Math.max(a.x, b.x) + bestD) return;
+		if (y < Math.min(a.y, b.y) - bestD || y > Math.max(a.y, b.y) + bestD) return;
+		const d = segmentDistance(x, y, a, b);
+		if (d <= bestD) {
+			best = i;
+			bestD = d;
+		}
+	});
+	if (best < 0) return [];
+	const pair = (e: Pick<GraphEdge, 'source' | 'target'>) => [e.source, e.target].sort().join('\n');
+	const key = pair(edges[best]);
+	return edges.flatMap((e, i) => (drawn(i) && pair(e) === key ? [i] : []));
+}
+
+export interface PropRow {
+	key: string;
+	value: string;
+}
+
+const CLIP = 200;
+const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
+function formatDate(d: Date): string {
+	return d.toLocaleString('en', {
+		year: 'numeric',
+		month: 'short',
+		day: 'numeric',
+		hour: '2-digit',
+		minute: '2-digit',
+		timeZone: 'UTC',
+		timeZoneName: 'short'
+	});
+}
+
+function formatValue(key: string, value: unknown): string {
+	if (value === null || value === undefined || value === '') return '—';
+	if (typeof value === 'boolean') return value ? 'yes' : 'no';
+	if (typeof value === 'number') {
+		// `*_ts` fields are epoch seconds.
+		if (key.endsWith('_ts') || key === 'ts') return formatDate(new Date(value * 1000));
+		return value.toLocaleString('en');
+	}
+	if (Array.isArray(value)) {
+		return value.length ? value.map((v) => formatValue('', v)).join(', ') : '—';
+	}
+	if (typeof value === 'object') return JSON.stringify(value);
+	const text = String(value);
+	if (ISO.test(text)) {
+		const d = new Date(text);
+		if (!Number.isNaN(d.getTime())) return formatDate(d);
+	}
+	return text;
+}
+
+/** A node's or link's stored properties as rows to read: sorted by name, with `uid` first, dates
+ *  and epochs written out, lists joined, and long text cut at a word boundary. */
+export function propRows(props: Record<string, unknown> | undefined, clip = CLIP): PropRow[] {
+	return Object.keys(props ?? {})
+		.sort((a, b) => (a === 'uid' ? -1 : b === 'uid' ? 1 : a.localeCompare(b)))
+		.map((key) => {
+			const flat = formatValue(key, props![key]).replace(/\s+/g, ' ').trim();
+			const value =
+				flat.length > clip ? `${flat.slice(0, clip).replace(/\s+\S*$/, '')} …` : flat;
+			return { key, value };
+		});
 }
 
 /** Counts per kind and relationship, for the filter panel. */

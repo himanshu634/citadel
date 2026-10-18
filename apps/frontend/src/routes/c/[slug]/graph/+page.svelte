@@ -383,7 +383,17 @@ overview (`viewOf`). The layout runs in a worker (`graphLayout.ts`), because it 
 							{/if}
 						</div>
 					{:else}
-						<TerritoryMap view={graph} {layout} {selected} {keep} onselect={select} />
+						<TerritoryMap
+							view={graph}
+							{layout}
+							{selected}
+							{keep}
+							onselect={select}
+							details={(uid) =>
+								api.graphNode(data.slug, uid).catch((e: unknown) => {
+									throw new Error(describeError(e));
+								})}
+						/>
 					{/if}
 				</div>
 				{#if node && hood}

@@ -32,6 +32,7 @@
 		Menu,
 		ModelPicker,
 		NodeChip,
+		GraphHoverCard,
 		NodeInspector,
 		RefLink,
 		RefText,
@@ -53,7 +54,7 @@
 		WorkItemRow
 	} from '$lib';
 	import { AddCompany, type Lookup } from '$lib/addCompany.svelte';
-	import { layoutMap, neighbourhood } from '$lib/graph';
+	import { layoutMap, neighbourhood, propRows } from '$lib/graph';
 	import { RepoChecks, type RepoResult } from '$lib/repochecks.svelte';
 	import * as builds from './build-samples';
 	import { syntheticGraph } from './graph-samples';
@@ -74,6 +75,7 @@
 		type Company,
 		type CompanyConfig,
 		type CompanyStatus,
+		type NodeDetails,
 		type NodeType,
 		type RepoLookup,
 		type SourceConfig,
@@ -446,6 +448,30 @@
 	const approveLater = () => new Promise<null>((done) => setTimeout(() => done(null), 900));
 	const neverDecides = () => new Promise<null>(() => {});
 	let mapSelected = $state<string | null>('person:alice');
+	// What the hover card shows for #4; the map's sample `details` answers every node from its
+	// own fields, as the API would after a short wait.
+	const samplePr = {
+		uid: 'synthetic:pr:4',
+		company: 'synthetic',
+		kind: 'pull_request',
+		number: 4,
+		title: 'perf(billing): batch invoice generation',
+		body: 'Generate invoices in batches of 500 instead of one by one. '.repeat(6),
+		state: 'merged',
+		created_at: '2026-04-14T12:00:00Z',
+		created_ts: 1776168000,
+		merged_at: '2026-04-20T12:00:00Z',
+		labels: [],
+		container: 'synthetic/app',
+		source: 'canonical_jsonl',
+		url: 'https://example.com/synthetic/app/pull/4'
+	};
+	const sampleDetails = (uid: string): Promise<NodeDetails> => {
+		const n = syntheticGraph.nodes.find((x) => x.uid === uid);
+		if (!n) return Promise.reject(new Error('This node is no longer in the graph.'));
+		const { degree: _d, territory: _t, comments: _c, label, ...props } = n;
+		return new Promise((done) => setTimeout(() => done({ uid, label, props }), 400));
+	};
 	const graphNode = (uid: string) => syntheticGraph.nodes.find((n) => n.uid === uid);
 	const territoryOf = (uid: string) =>
 		syntheticGraph.territories.find((t) => t.id === graphNode(uid)?.territory) ?? null;
@@ -1245,11 +1271,45 @@
 				selected={mapSelected}
 				onselect={(uid) => (mapSelected = uid)}
 				scrollZoom={false}
+				details={sampleDetails}
 			/>
 		</div>
 		<h3 class="sub">Nothing selected</h3>
 		<div class="map-sample short">
 			<TerritoryMap view={syntheticGraph} layout={mapLayout} scrollZoom={false} />
+		</div>
+	</Card>
+
+	<Card title="Graph hover card">
+		<p class="note">
+			What a node or link of the map stores, while the pointer is on it. A node lists every
+			property it was loaded with (read when the pointer rests on it); a link lists each
+			relationship between its two ends. Links can be pointed at once zoomed in twice. Hover the
+			map above to see it live.
+		</p>
+		<div class="hover-cards">
+			<GraphHoverCard
+				node={{ name: '#4 perf(billing): batch invoice generation', label: 'WorkItem', kind: 'Pull request' }}
+				sections={[{ rows: propRows(samplePr) }]}
+			/>
+			<GraphHoverCard
+				link={{
+					from: { name: 'erin', label: 'Person' },
+					to: { name: '#4 perf(billing): batch invoice generation', label: 'WorkItem' }
+				}}
+				sections={[
+					{ heading: 'AUTHORED →', rows: [] },
+					{
+						heading: 'REVIEWED →',
+						rows: propRows({ state: 'APPROVED', submitted_at: '2026-09-05T12:00:00Z', ts: 1788609600 })
+					}
+				]}
+			/>
+			<GraphHoverCard node={{ name: 'erin', label: 'Person', kind: 'Person' }} loading />
+			<GraphHoverCard
+				node={{ name: 'Billing runbook', label: 'Document', kind: 'Document' }}
+				error="This node is no longer in the graph."
+			/>
 		</div>
 	</Card>
 
@@ -1489,6 +1549,12 @@
 		margin: var(--space-5) 0 var(--space-3);
 		font-size: var(--text-sm);
 		font-variation-settings: 'wdth' var(--width-label);
+	}
+	.hover-cards {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-start;
+		gap: var(--space-4);
 	}
 	.map-sample {
 		height: 30rem;

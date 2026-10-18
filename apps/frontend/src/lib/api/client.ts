@@ -26,6 +26,7 @@ import type {
 	GraphView,
 	LogEntry,
 	ModelsOut,
+	NodeDetails,
 	OnboardRequest,
 	OnboardResult,
 	Overview,
@@ -168,6 +169,9 @@ export const api = {
 	/** The whole graph for the Graph page; `bots` adds the bot accounts and their links. */
 	graph: (slug: string, bots = false) =>
 		request<GraphView>('GET', `${company(slug)}/graph${bots ? '?bots=true' : ''}`),
+	/** Everything one node stores, for the map's hover card. 404 when the graph has no such node. */
+	graphNode: (slug: string, uid: string) =>
+		request<NodeDetails>('GET', `${company(slug)}/graph/node?uid=${encodeURIComponent(uid)}`),
 	/** One node's fields (the `get_entity` tool); null when the graph has no such node. */
 	entity: (slug: string, uid: string) =>
 		request<{ rows: Entity[] }>('POST', `${company(slug)}/tools/get_entity`, {

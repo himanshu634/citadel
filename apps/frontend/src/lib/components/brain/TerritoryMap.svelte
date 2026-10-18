@@ -6,6 +6,11 @@ between them. Drag to pan, scroll or use the buttons to zoom, click a node to se
 selection lights the node's neighbours and links and dims everything else, and outlines the
 territories it reaches in ink.
 
+Given `details`, hovering shows what is stored (`GraphHoverCard`): a node's every property, read
+through `details` once the pointer rests on it, and, once zoomed in to `LINK_ZOOM` times the
+fitted scale, a drawn link's relationships with their properties. Without it (the Systems page),
+hover only names the node.
+
 A `trail` (the Systems page) draws an agent's run over the map: an ink line through the node each
 step sat on, numbered in order, the nodes it touched kept bright and the rest dimmed. While the
 run is going, the node it is on now gets an ink ring with `here` beside it, and its territory an
@@ -20,9 +25,25 @@ summary instead; the page's search and list are the keyboard way in (see design-
 	import { quadtree } from 'd3-quadtree';
 	import { untrack } from 'svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import GraphHoverCard from '$lib/components/brain/GraphHoverCard.svelte';
 	import type { Trail } from '$lib/activity';
-	import { neighbourhood, nodeName, routes, type MapLayout, type PlacedNode } from '$lib/graph';
-	import { LABEL_TYPES, NODE_LABELS, type GraphLabel, type GraphView } from '$lib/types';
+	import {
+		edgesAt,
+		neighbourhood,
+		nodeName,
+		propRows,
+		routes,
+		type MapLayout,
+		type PlacedNode
+	} from '$lib/graph';
+	import {
+		LABEL_TYPES,
+		NODE_LABELS,
+		type GraphLabel,
+		type GraphNode,
+		type GraphView,
+		type NodeDetails
+	} from '$lib/types';
 
 	type Props = {
 		view: GraphView;
@@ -38,7 +59,16 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		trail?: Trail | null;
 		/** What the agent is doing now, beside its ring (only while `trail.current` is set). */
 		here?: string | null;
+		/** Reads everything a node stores; given, hovering a node or link shows it in a card. */
+		details?: ((uid: string) => Promise<NodeDetails>) | null;
 	};
+
+	/** Links can be pointed at from this many times the fitted scale: below it they are a haze. */
+	const LINK_ZOOM = 2;
+	/** How long the pointer rests on a node before its properties are read. */
+	const REST_MS = 150;
+	/** Room between the pointer, the hover card and the map's edges, in pixels. */
+	const CARD_GAP = 16;
 
 	let {
 		view,
@@ -48,7 +78,8 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		onselect,
 		scrollZoom = true,
 		trail = null,
-		here = null
+		here = null,
+		details = null
 	}: Props = $props();
 
 	let canvas = $state<HTMLCanvasElement>();
@@ -56,6 +87,12 @@ summary instead; the page's search and list are the keyboard way in (see design-
 	/** Where the user moved the map to; null shows the whole map, fitted to the box. */
 	let moved = $state<{ k: number; x: number; y: number } | null>(null);
 	let hover = $state<string | null>(null);
+	/** The links under the pointer (indexes into view.edges), when no node is. */
+	let hoverLinks = $state<number[]>([]);
+	/** The pointer on the map, where the hover card hangs. */
+	let pointer = $state({ x: 0, y: 0 });
+	/** What each hovered node stores, by uid: read once, kept while the map lives. */
+	let stored = $state<Record<string, { value: NodeDetails | null; error: string | null }>>({});
 	let palette = $state<Record<string, string>>({});
 
 	const index = $derived(new Map(view.nodes.map((n, i) => [n.uid, i])));
@@ -98,6 +135,7 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		};
 	});
 	const transform = $derived(moved ?? fitted);
+	const linksPointable = $derived(details !== null && transform.k >= fitted.k * LINK_ZOOM);
 
 	function fit() {
 		moved = null;
@@ -178,7 +216,7 @@ summary instead; the page's search and list are the keyboard way in (see design-
 	let frame = 0;
 	$effect(() => {
 		// Read everything the drawing depends on, then draw once per animation frame.
-		const deps = [canvas, size.width, size.height, transform, palette, view, layout, pos, shown, keptView, roads, hood, reached, hover, selected, trail, trailing, hereTerritory];
+		const deps = [canvas, size.width, size.height, transform, palette, view, layout, pos, shown, keptView, roads, hood, reached, hover, hoverLinks, selected, trail, trailing, hereTerritory];
 		void deps;
 		cancelAnimationFrame(frame);
 		frame = requestAnimationFrame(draw);
@@ -260,6 +298,22 @@ summary instead; the page's search and list are the keyboard way in (see design-
 			ctx.stroke();
 		}
 
+		// The links under the pointer: ink, so it is clear which line the card is about.
+		if (hoverLinks.length) {
+			const e = view.edges[hoverLinks[0]];
+			const a = at(e.source);
+			const b = at(e.target);
+			if (a && b) {
+				ctx.globalAlpha = 1;
+				ctx.strokeStyle = palette.ink;
+				ctx.lineWidth = 2 / k;
+				ctx.beginPath();
+				ctx.moveTo(a.x, a.y);
+				ctx.lineTo(b.x, b.y);
+				ctx.stroke();
+			}
+		}
+
 		// Nodes, small first so hubs sit on top.
 		const order = view.nodes
 			.filter((v) => (!shown || shown.has(v.uid)) && pos.has(v.uid))
@@ -329,6 +383,16 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		drag = { x: event.clientX, y: event.clientY, tx: transform.x, ty: transform.y, moved: false };
 	}
 
+	/** A link the map draws on its own line: inside one territory, or the selection's own. The
+	 *  links between territories are bundled into routes, so none of them can be pointed at. */
+	function drawnLink(i: number): boolean {
+		if (keep && !keep.edges[i]) return false;
+		const e = view.edges[i];
+		if (selected && (e.source === selected || e.target === selected)) return true;
+		const a = view.nodes[index.get(e.source) ?? -1]?.territory;
+		return a !== undefined && a === view.nodes[index.get(e.target) ?? -1]?.territory;
+	}
+
 	function onpointermove(event: PointerEvent) {
 		if (drag) {
 			const dx = event.clientX - drag.x;
@@ -336,11 +400,45 @@ summary instead; the page's search and list are the keyboard way in (see design-
 			if (Math.hypot(dx, dy) > 4) drag.moved = true;
 			if (drag.moved) {
 				moved = { k: transform.k, x: drag.tx + dx, y: drag.ty + dy };
+				hover = null;
+				hoverLinks = [];
 			}
 			return;
 		}
+		const { sx, sy, wx, wy } = worldAt(event);
+		pointer = { x: sx, y: sy };
 		hover = nodeAt(event);
+		const links =
+			!hover && linksPointable
+				? edgesAt(view.edges, drawnLink, (uid) => pos.get(uid), wx, wy, 5 / transform.k)
+				: [];
+		if (links.join() !== hoverLinks.join()) hoverLinks = links;
 	}
+
+	// A new view (another company, a rebuild, bots shown) may store other things.
+	$effect(() => {
+		void view;
+		stored = {};
+	});
+
+	// Read what a hovered node stores once the pointer rests on it; a reply for a node the pointer
+	// has left is still kept for the next time.
+	$effect(() => {
+		const uid = hover;
+		const read = details;
+		if (!uid || !read || untrack(() => uid in stored)) return;
+		const timer = setTimeout(() => {
+			read(uid).then(
+				(value) => (stored[uid] = { value, error: null }),
+				(e: unknown) =>
+					(stored[uid] = {
+						value: null,
+						error: e instanceof Error ? e.message : 'Could not read this node.'
+					})
+			);
+		}, REST_MS);
+		return () => clearTimeout(timer);
+	});
 
 	function onpointerup(event: PointerEvent) {
 		const was = drag;
@@ -372,6 +470,57 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		top: wy * transform.k + transform.y
 	});
 	const hovered = $derived(hover && hover !== selected ? view.nodes[index.get(hover) ?? -1] : null);
+	/** The node under the pointer, selected or not, for the hover card. */
+	const under = $derived(hover ? (view.nodes[index.get(hover) ?? -1] ?? null) : null);
+	const nodeOf = (uid: string) => view.nodes[index.get(uid) ?? -1] as GraphNode | undefined;
+	const end = (uid: string) => {
+		const n = nodeOf(uid);
+		return { name: n ? nodeName(n) : uid, label: n?.label ?? ('WorkItem' as GraphLabel) };
+	};
+	const kindWord = (n: GraphNode) =>
+		n.label === 'WorkItem' && n.kind
+			? n.kind === 'pull_request'
+				? 'Pull request'
+				: n.kind.charAt(0).toUpperCase() + n.kind.slice(1).replace(/_/g, ' ')
+			: kindOf(n.label);
+	/** The card's measured size, to keep it inside the map. */
+	let cardSize = $state({ width: 0, height: 0 });
+	/** Below right of the pointer; on the other side where it would cross an edge; never out. */
+	const cardAt = $derived.by(() => {
+		const { width: w, height: h } = cardSize;
+		const fit = (v: number, room: number) => Math.max(CARD_GAP, Math.min(v, room - CARD_GAP));
+		const right = pointer.x + CARD_GAP;
+		const left = right + w + CARD_GAP > size.width ? pointer.x - CARD_GAP - w : right;
+		const below = pointer.y + CARD_GAP;
+		const top = below + h + CARD_GAP > size.height ? pointer.y - CARD_GAP - h : below;
+		return { left: fit(left, size.width - w), top: fit(top, size.height - h) };
+	});
+	const card = $derived.by(() => {
+		if (!details) return null;
+		if (under) {
+			const got = stored[under.uid];
+			return {
+				node: { name: nodeName(under), label: under.label, kind: kindWord(under) },
+				link: null,
+				sections: got?.value ? [{ rows: propRows(got.value.props) }] : [],
+				loading: !got,
+				error: got?.error ?? null
+			};
+		}
+		if (!hoverLinks.length) return null;
+		const first = view.edges[hoverLinks[0]];
+		return {
+			node: null,
+			link: { from: end(first.source), to: end(first.target) },
+			sections: hoverLinks.map((i) => {
+				const e = view.edges[i];
+				const back = e.source !== first.source;
+				return { heading: back ? `← ${e.rel}` : `${e.rel} →`, rows: propRows(e.props) };
+			}),
+			loading: false,
+			error: null
+		};
+	});
 	const picked = $derived(selected ? view.nodes[index.get(selected) ?? -1] : null);
 	const kindOf = (label: GraphLabel) => NODE_LABELS[LABEL_TYPES[label]];
 </script>
@@ -385,7 +534,10 @@ summary instead; the page's search and list are the keyboard way in (see design-
 		{onpointerdown}
 		{onpointermove}
 		{onpointerup}
-		onpointerleave={() => (hover = null)}
+		onpointerleave={() => {
+			hover = null;
+			hoverLinks = [];
+		}}
 		{@attach wheel}
 	></canvas>
 
@@ -424,7 +576,7 @@ summary instead; the page's search and list are the keyboard way in (see design-
 				{/if}
 			{/if}
 		{/if}
-		{#if hovered}
+		{#if hovered && !card}
 			{@const n = pos.get(hovered.uid)}
 			{@const p = n ? screen(n.x, n.y) : { left: -999, top: -999 }}
 			<span class="node hover" style:left="{p.left + 10}px" style:top="{p.top - 9}px">
@@ -439,6 +591,19 @@ summary instead; the page's search and list are the keyboard way in (see design-
 			</span>
 		{/if}
 	</div>
+
+	{#if card}
+		<div
+			class="hovercard"
+			style:left="{cardAt.left}px"
+			style:top="{cardAt.top}px"
+			style:max-height="{size.height - 2 * CARD_GAP}px"
+			bind:clientWidth={cardSize.width}
+			bind:clientHeight={cardSize.height}
+		>
+			<GraphHoverCard {...card} />
+		</div>
+	{/if}
 
 	<div class="zoom">
 		<Button variant="secondary" size="sm" iconOnly label="Zoom in" onclick={() => zoomBy(1.4)}><Plus /></Button>
@@ -578,6 +743,14 @@ summary instead; the page's search and list are the keyboard way in (see design-
 	}
 	.here.end {
 		transform: translate(calc(-100% + var(--space-4)), -100%);
+	}
+	/* Placed in script (`cardAt`): beside the pointer, always inside the map. */
+	.hovercard {
+		position: absolute;
+		z-index: 1;
+		display: flex;
+		pointer-events: none;
+		overflow: hidden;
 	}
 	.zoom {
 		position: absolute;

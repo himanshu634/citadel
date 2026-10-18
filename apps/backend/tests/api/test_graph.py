@@ -40,3 +40,27 @@ def test_graph_draws_the_company(api_root, runner, synthetic_graph):
     assert body["comments"] > 0 and any(n["comments"] for n in body["nodes"])
     assert body["bots"] == 1 and not body["bots_shown"]  # ci-bot
     assert len(with_bots["nodes"]) == len(body["nodes"]) + 1 and with_bots["bots_shown"]
+
+
+def test_node_of_a_graph_never_built_is_404(api_root, runner, monkeypatch):
+    write(api_root, "fresh", name="Fresh")
+    monkeypatch.setattr("brain.db.graph_exists", lambda slug: False)
+    client = TestClient(create_app(runner))
+    assert client.get("/api/companies/fresh/graph/node?uid=x").status_code == 404
+
+
+@needs_graph
+def test_hover_details_of_a_node_and_its_links(api_root, runner, synthetic_graph):
+    write(api_root, synthetic_graph, name="Synthetic")
+    client = TestClient(create_app(runner))
+    url = f"/api/companies/{synthetic_graph}/graph/node"
+
+    pr = client.get(url, params={"uid": "synthetic:pr:4"}).json()
+    assert pr["uid"] == "synthetic:pr:4" and pr["label"] == "WorkItem"
+    assert pr["props"]["uid"] == "synthetic:pr:4" and pr["props"]["kind"] == "pull_request"
+    assert "title" in pr["props"] and "embedding" not in pr["props"]
+    assert client.get(url, params={"uid": "nope"}).status_code == 404
+
+    edges = client.get(f"/api/companies/{synthetic_graph}/graph").json()["edges"]
+    assert all(isinstance(e["props"], dict) for e in edges)
+    assert any(e["props"] for e in edges)  # loaded links carry at least their source
