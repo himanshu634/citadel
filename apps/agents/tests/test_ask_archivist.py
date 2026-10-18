@@ -233,13 +233,16 @@ def test_timeout_answers_anyway(slug, store, elapsed):
     client = asker(cite=(ASKER,), text="The archive took too long; #15 points at #900 [1].")
     events = run(slug, store, client, archivists=Archivists(later), clock=lambda: now[0])
     row = archive_row(events)
-    assert row["partial"] is True and row["reason"] == "timeout"
+    # Only the hard deadline is a timeout; past the soft one the run submits what it has.
+    hard = elapsed > 45
+    assert row["partial"] is True and row["reason"] == ("timeout" if hard else None)
     assert row["outcome"] == "nothing_found" and row["finds"] == []
     answer = events[-1]
     assert answer.text == "The archive took too long; #15 points at #900 [1]."
     assert [s.uid for s in answer.sources] == [ASKER]
     [req] = requests(store)
     assert req.status == "answered" and req.partial
+    assert req.reason == ("timeout" if hard else None)  # the ledger says why, too
 
 
 def test_out_of_scope_ask_still_answers(slug, store):
@@ -307,11 +310,13 @@ class Joined(MemoryKeeperStore):
 def test_concurrent_same_ref_runs_once(slug):
     store = Joined(slug)
     running = threading.Event()
+    problems: list[str] = []  # an assert inside the hook would only end the Archivist's run
 
     def hold(run_n, call_n):
         if call_n == 1:
             running.set()
-            assert store.joined.wait(10)  # the second asker has joined before this run goes on
+            if not store.joined.wait(10):  # the second asker joins before this run goes on
+                problems.append("the second asker never joined")
 
     archivists = Archivists(hold)
     out: dict[str, list] = {}
@@ -326,14 +331,114 @@ def test_concurrent_same_ref_runs_once(slug):
     second.start()
     first.join(30)
     second.join(30)
+    assert not first.is_alive() and not second.is_alive()
+    assert problems == []
 
     a, b = archive_row(out["a"]), archive_row(out["b"])
+    assert b["calls"] == 0 and a["calls"] == 1  # the joiner caused no external calls
     assert archivists.made == 1  # one run of the Archivist
     assert a["request"] == b["request"] and len(requests(store)) == 1
     assert a["outcome"] == b["outcome"] == "found"
     assert [f["uid"] for f in a["finds"]] == [f["uid"] for f in b["finds"]] == [OLD]
     assert not [e for e in out["b"] if isinstance(e, dict) and e.get("kind") == "archive_step"]
     assert [s.uid for s in out["b"][-1].sources] == [OLD]
+
+
+def _running(store, text=OLD) -> str:
+    """A request another asker is running."""
+    refs = [text]
+    params = {"uid": archive_uid(), "kind": "reference", "text": text, "refs": refs,
+              "from_uid": ASKER, "asked_by": "ask", "norm": norm("reference", text, refs),
+              "now": NOW}  # fmt: skip
+    [row] = store.write("ledger/archive_open_request", "citadel_brain", params)
+    moved = {"uid": row["uid"], "from": ["open"], "to": "running", "now": NOW}
+    assert store.write("ledger/archive_set_request", "citadel_archivist", moved)
+    return row["uid"]
+
+
+def _join(slug, store, **kw):
+    params = live.AskArchivistParams(**REF)
+    archivists = Archivists()
+    [row] = live.run(slug, params, client=archivists, ledger=store, writer=lambda c: None,
+                     poll=0.01, **kw)  # fmt: skip
+    assert archivists.made == 0  # a joiner never runs the Archivist
+    return row
+
+
+def test_joiner_stopped_while_the_other_run_goes_on(slug, store):
+    uid = _running(store)
+    stop = threading.Event()
+    stop.set()
+    row = _join(slug, store, stop=stop)
+    assert (row["request"], row["reason"], row["summary"]) == (uid, "stopped", live.STILL_RUNNING)
+    assert row["calls"] == 0 and row["finds"] == []
+
+
+def test_joiner_times_out_on_a_frozen_clock(slug, store, monkeypatch):
+    """The join waits on real time, so a test clock that never moves cannot keep it waiting."""
+    from brain.config import get_settings
+
+    _running(store)
+    monkeypatch.setenv("ARCHIVIST_ASK_TIMEOUT", "1")
+    get_settings.cache_clear()
+    done = []
+    worker = threading.Thread(
+        target=lambda: done.append(_join(slug, store, stop=None, clock=lambda: 0.0)), daemon=True
+    )
+    worker.start()
+    worker.join(5)
+    assert not worker.is_alive()
+    [row] = done
+    assert row["reason"] == "timeout" and row["summary"] == live.STILL_RUNNING
+
+
+def test_joiner_says_the_run_it_joined_was_cut_short(slug, store):
+    uid = _running(store)
+    done = []
+    worker = threading.Thread(
+        target=lambda: done.append(_join(slug, store, stop=None)), daemon=True
+    )
+    worker.start()
+    ended = {"uid": uid, "from": ["running"], "to": "answered", "outcome": "nothing_found",
+             "summary": "Stopped before it reported anything.", "reason": "timeout",
+             "partial": True, "calls": 2, "now": NOW}  # fmt: skip
+    assert store.write("ledger/archive_set_request", "citadel_archivist", ended)
+    worker.join(5)
+    assert not worker.is_alive()
+    [row] = done
+    assert row["reason"] == "joined another question's run: timeout"
+    assert row["partial"] is True and row["calls"] == 0
+
+
+def test_archived_mark_survives_later_tools(slug, store):
+    """A later tool that returns the archived item without the flag (related_work_items here)
+    keeps the mark, in the same step, a later step and a follow-up turn."""
+    from brain import tools as brain_tools
+
+    def run_tool(slug_, name, **p):
+        if name == "related_work_items":
+            return [{"uid": OLD, "title": "Decision: replace sessions with JWT for Auth"}]
+        return brain_tools.call(slug_, name, **p)
+
+    base = graph_toolset()
+    plain = type(base)(tools=base.tools, run=run_tool)
+    tools = with_archivist(plain, lambda s: store, Archivists(), poll=0.01)
+    related = {"text": "sessions JWT"}
+    saver = InMemorySaver()
+    first = FakeClient(
+        reply(tool_use("t1", "ask_archivist", REF), tool_use("t2", "related_work_items", related)),
+        reply(tool_use("t3", "related_work_items", related)),
+        reply(submit("t4", "In 2025, #900 decided it [1].", [OLD])),
+    )
+    follow = FakeClient(
+        reply(tool_use("u1", "related_work_items", related)),
+        reply(submit("u2", "Still #900 [1].", [OLD])),
+    )
+    for client in (first, follow):
+        answer = agent.ask(slug, "Why JWT?", "th_mark", client=client, toolset=tools,
+                           checkpointer=saver)  # fmt: skip
+        [source] = answer.sources
+        assert source.uid == OLD and source.archived.startswith("2025-03-10"), client
 
 
 # --- history, traces, walk ----------------------------------------------------------------------
@@ -381,9 +486,21 @@ def test_walk_draws_finds_and_mentions_from_the_asker():
     by_uid = {n["uid"]: n for n in nodes}
     assert by_uid[OLD]["label"] == "WorkItem" and by_uid[OLD]["title"] == "Decision: JWT"
     assert by_uid["synthetic:doc:docs/old.md"]["label"] == "Document"
-    assert ASKER in by_uid
-    assert {(r["from"], r["to"], r["type"]) for r in rels} == {
-        (ASKER, OLD, "MENTIONS"), (ASKER, "synthetic:doc:docs/old.md", "MENTIONS")}  # fmt: skip
+    assert by_uid[ASKER]["label"] == "WorkItem"
+    # The ref names #900: that MENTIONS is stored; the doc it found on the way only implied.
+    assert {(r["from"], r["to"], r["type"], r["inferred"]) for r in rels} == {
+        (ASKER, OLD, "MENTIONS", False),
+        (ASKER, "synthetic:doc:docs/old.md", "MENTIONS", True)}  # fmt: skip
+    # "#900" and the item's url name it too; a topic request names nothing.
+    for text in ("#900", "https://x/900"):
+        _, rels = subgraph("ask_archivist", {"kind": "reference", "text": text,
+                                             "from_uid": ASKER}, rows)  # fmt: skip
+        assert {r["to"] for r in rels if not r["inferred"]} == {OLD}
+    _, rels = subgraph("ask_archivist", {"kind": "topic", "text": "jwt", "from_uid": ASKER}, rows)
+    assert all(r["inferred"] for r in rels)
+    nodes, _ = subgraph("ask_archivist", {"kind": "topic", "text": "x",
+                                          "from_uid": "system:Auth"}, rows)  # fmt: skip
+    assert {n["uid"]: n["label"] for n in nodes}["system:Auth"] == "System"
     assert subgraph("ask_archivist", {"kind": "topic", "text": "x", "from_uid": None}, [])[0] == []
 
 

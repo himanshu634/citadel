@@ -78,7 +78,12 @@ SUBMIT_TOOL: dict[str, Any] = {
 
 
 def _merge(a: dict, b: dict) -> dict:
-    return {**a, **b}
+    """`seen` across steps: node by node, so what an earlier result said about a node (its
+    `archived` mark, a url) stays when a later one names it with fewer keys."""
+    out = dict(a)
+    for uid, node in b.items():
+        out[uid] = {**out.get(uid, {}), **node}
+    return out
 
 
 class AgentState(TypedDict, total=False):
@@ -192,7 +197,7 @@ def add_brain_loop(
             finally:
                 CURRENT_STEP.reset(token)
             ms = round((time.perf_counter() - started) * 1000)
-            new_seen.update(out.seen)
+            new_seen = _merge(new_seen, out.seen)
             results.append(result_block(use["id"], out.content, out.is_error))
             nodes, rels = subgraph(use["name"], out.params, out.rows)
             record(
@@ -209,7 +214,7 @@ def add_brain_loop(
                     "uids": sorted(out.seen),
                 }
             )
-        seen = {**(state.get("seen") or {}), **new_seen}
+        seen = _merge(state.get("seen") or {}, new_seen)
         answer = None
         for use in submits:
             problem = check(use.get("input") or {}, seen)

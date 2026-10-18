@@ -58,15 +58,16 @@ def answer_request(
     client: anthropic.Anthropic,
     tier: Tier,
     on_event: Callable[[dict[str, Any]], None] | None = None,
-    should_stop: Callable[[], bool] | None = None,
+    should_stop: Callable[[], bool | str | None] | None = None,
     graph_run: Runner | None = None,
     backends: Mapping[str, Any] | None = None,
     building: Callable[[str], bool] | None = None,
     wrap_up: Callable[[], bool] | None = None,
 ) -> ArchiveRequest:
     """Answer one open request; returns it as the ledger holds it afterwards. `should_stop` is
-    the hard stop (nothing is applied); once `wrap_up()` is true the source tools refuse and
-    ask for the submit, so what was fetched is still checked and loaded (rule 8)."""
+    the hard stop (nothing is applied); a string it returns is the request's reason (Ask's
+    "timeout"), else the reason is "stopped". Once `wrap_up()` is true the source tools refuse
+    and ask for the submit, so what was fetched is still checked and loaded (rule 8)."""
     ctx = Ctx(f"agent:{ACTOR}", ROLE.db_user, utc_now())  # type: ignore[arg-type]
     hooks = _Hooks(on_event, should_stop, wrap_up, graph_run)
     try:
@@ -88,7 +89,7 @@ class _Hooks:
     """The caller's ways into a run."""
 
     on_event: Callable[[dict[str, Any]], None] | None
-    should_stop: Callable[[], bool] | None
+    should_stop: Callable[[], bool | str | None] | None
     wrap_up: Callable[[], bool] | None
     graph_run: Runner | None
 
@@ -143,8 +144,15 @@ def _run(
                             wrap_up=hooks.wrap_up)  # fmt: skip
     job = replace(JOB, apply=partial(JOB.apply, run=run), context=partial(JOB.context, run=run))
 
+    why: list[str] = []  # the stop's reason, when should_stop gave one (Ask: "timeout")
+
     def stop() -> bool:
-        return trouble.halt or (hooks.should_stop is not None and hooks.should_stop())
+        if trouble.halt:
+            return True
+        said = hooks.should_stop() if hooks.should_stop is not None else None
+        if isinstance(said, str) and said:
+            why.append(said)
+        return bool(said)
 
     result = run_job(
         store, ROLE, job, Subject("archive_request", request.uid, request.model_dump()), ctx,
@@ -167,8 +175,9 @@ def _run(
         summary = "Stopped before it reported anything."
         log(store, ctx, ACTOR, "archive_nothing", gap=request.gap,
             why=f"{request.uid}: {summary}")  # fmt: skip
+        reason = why[-1] if result.stop == STOPPED and why else result.stop
         _end(store, ctx, request, "answered", outcome="nothing_found", summary=summary,
-             reason=result.stop, partial=True, calls=calls)  # fmt: skip
+             reason=reason, partial=True, calls=calls)  # fmt: skip
     elif result.submit is None and not (result.stop or "").startswith("error"):
         _end(store, ctx, request, "failed", reason="no_answer", calls=calls)
     else:

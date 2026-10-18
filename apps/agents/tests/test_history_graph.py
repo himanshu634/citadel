@@ -116,7 +116,11 @@ def test_archive_steps_read_back_nested_under_their_call(store):
     rec = history.Recorder(store, "Why JWT?")
     call = {"id": "t1", "tool": "ask_archivist", "kind": "graph", "input": {"kind": "topic"}}
     llm = {"kind": "llm", "seq": 1, "usage": {}, "calls": [call]}
-    inner = [("p1_0", "archive_lookup"), ("p2_0", "archive_fetch"), ("p3_0", "submit_answer")]
+    inner = [
+        ("p1_0", "archive_lookup"),
+        ("p2_0", "archive_fetch"),
+        ("p3_0", "submit_archive_answer"),
+    ]
     rec.on({"kind": "start", "thread_id": "th_archive"})
     rec.on(llm)
     for id_, tool in inner:
@@ -133,5 +137,5 @@ def test_archive_steps_read_back_nested_under_their_call(store):
     assert [(s.id, s.tool, s.kind, s.parent, s.n) for s in outer.steps] == [
         ("p1_0", "archive_lookup", "archive", "t1", 1),
         ("p2_0", "archive_fetch", "archive", "t1", 2),
-        ("p3_0", "submit_answer", "archive", "t1", 3)]  # fmt: skip
+        ("p3_0", "submit_archive_answer", "archive", "t1", 3)]  # fmt: skip
     assert [t.id for t in store.ref_threads("synthetic:issue:900", 5)] == ["th_archive"]

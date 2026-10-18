@@ -241,19 +241,32 @@ def _keeper_notes(b: _Builder, params: Row, rows: list[Row]) -> None:
             b.rel(claim, ev, "EVIDENCE")
 
 
-def _item_label(uid: str) -> str:
+def _label_of(uid: str) -> str:
+    """A node's label from its uid alone: system:, person:, team:, else the item kind."""
+    if label := _LABEL_BY_PREFIX.get(uid.split(":")[0]):
+        return label
     return "Document" if ":doc:" in uid else "Change" if ":commit:" in uid else "WorkItem"
 
 
+def _named(find: Row, refs: list[str]) -> bool:
+    """A reference request's ref names this find: its uid or url, or "#<n>" for an item n."""
+    uid = str(find.get("uid"))
+    return any(r in (uid, find.get("url")) or (r.startswith("#") and uid.endswith(f":{r[1:]}"))
+               for r in refs)  # fmt: skip
+
+
 def _ask_archivist(b: _Builder, params: Row, rows: list[Row]) -> None:
-    """The items the Archivist loaded, each MENTIONed by the item the reference was found in
-    (`from_uid`); for a topic request that link is only implied."""
+    """The items the Archivist loaded, each MENTIONed by the item the request came from
+    (`from_uid`): stored for a find a ref of the request names, only implied for the others
+    (a topic request's, or one found on the way)."""
     finds = [f for r in rows for f in r.get("finds") or [] if f.get("uid")]
     origin = params.get("from_uid")
-    asker = b.node(origin, _item_label(origin)) if origin and finds else None
+    asker = b.node(origin, _label_of(origin)) if origin and finds else None
+    refs = str(params.get("text") or "").replace(",", " ").split()
+    refs = refs if params.get("kind") == "reference" else []
     for f in finds:
-        found = b.node(f["uid"], _item_label(f["uid"]), f.get("title"), f.get("url"))
-        b.rel(asker, found, "MENTIONS", inferred=params.get("kind") != "reference")
+        found = b.node(f["uid"], _label_of(f["uid"]), f.get("title"), f.get("url"))
+        b.rel(asker, found, "MENTIONS", inferred=not _named(f, refs))
 
 
 _BY_TOOL: dict[str, Callable[[_Builder, Row, list[Row]], None]] = {

@@ -9,8 +9,9 @@
 
 Why inline: Ask cites what was loaded in the same answer, so the finds' uids join `seen`.
 Deadlines (rule 8), from the run's start: past 0.7 x `archivist_ask_timeout` the source tools ask
-the model to submit (`wrap_up`); past the timeout, or when the Ask stream closes (`ASK_STOP`),
-the run ends at its next step with nothing applied (`should_stop`).
+the model to submit (`wrap_up`; a partial answer, no reason); past the timeout, or when the Ask
+stream closes (`ASK_STOP`), the run ends at its next step with nothing applied (`should_stop`;
+reason "timeout" or "stopped", in the ledger too).
 
 Isolation: the inner run is another LangGraph graph run from inside Ask's `run_tools` node.
 LangGraph finds its parent run through a contextvar, so the inner run would save checkpoints
@@ -54,6 +55,7 @@ RECOVER_LIMIT = 1000  # requests read by `recover`
 _REF_SPLIT = re.compile(r"[\s,]+")
 QUEUED = "The Keeper asked this already; its next review looks."
 STILL_RUNNING = "Another question is still searching the archive for this."
+JOINED = "joined another question's run"
 
 
 class AskArchivistParams(BaseModel):
@@ -143,11 +145,11 @@ def run(
     started = clock()
     timeout = get_settings().archivist_ask_timeout
 
-    def timed_out() -> bool:
-        return clock() - started > timeout
-
-    def should_stop() -> bool:
-        return (stop is not None and stop.is_set()) or timed_out()
+    def should_stop() -> str | None:
+        """Why the run must end now (the request's reason), or None."""
+        if stop is not None and stop.is_set():
+            return "stopped"
+        return "timeout" if clock() - started > timeout else None
 
     def wrap_up() -> bool:
         return clock() - started >= WRAP_UP_AT * timeout
@@ -169,7 +171,8 @@ def run(
         if not created:
             if request.asked_by == "keeper" and request.status == "open":
                 return [_row(ledger, request, reason="queued", summary=QUEUED)]
-            return [_join(ledger, request, should_stop, timed_out, poll)]
+            left = timeout - (clock() - started)
+            return [_join(ledger, request, stop, left, poll)]
 
         # Ask's writer reads Ask's run from the context it is called in, so it is called in a
         # copy of Ask's (taken here, before the switch).
@@ -187,9 +190,7 @@ def run(
             answer_request, ledger, slug, request, client=archivist, tier="ask",
             on_event=forward, should_stop=should_stop, wrap_up=wrap_up, building=building,
         )  # fmt: skip
-        stopped = stop is not None and stop.is_set()
-        late = done.partial and not stopped and (timed_out() or wrap_up())
-        return [_row(ledger, done, reason="timeout" if late else done.reason)]
+        return [_row(ledger, done)]
     except Exception as e:  # never raised: Ask answers with what it has
         _log.warning("ask_archivist failed for %s", slug, exc_info=True)
         reason = f"error: {type(e).__name__}: {e}"[:300]
@@ -201,18 +202,24 @@ def run(
 def _join(
     ledger: WorkStore,
     request: ArchiveRequest,
-    should_stop: Callable[[], bool],
-    timed_out: Callable[[], bool],
+    stop: threading.Event | None,
+    left: float,
     poll: float,
 ) -> dict[str, Any]:
-    """Rule 16: another asker runs this question; wait for its answer within the Ask timeout."""
+    """Rule 16: another asker runs this question; wait for its answer for the `left` seconds of
+    the Ask timeout (measured on the clock it sleeps on). Its calls are that run's (0 here); a
+    run that ended cut short says so."""
+    until = time.monotonic() + left
     while request.status not in ENDED:
-        if should_stop():
-            reason = "timeout" if timed_out() else "stopped"
-            return _row(ledger, request, reason=reason, summary=STILL_RUNNING)
+        if stop is not None and stop.is_set():
+            return _row(ledger, request, reason="stopped", summary=STILL_RUNNING, calls=0)
+        if time.monotonic() >= until:
+            return _row(ledger, request, reason="timeout", summary=STILL_RUNNING, calls=0)
         time.sleep(poll)
         request = _get(ledger, request.uid) or request
-    return _row(ledger, request)
+    cut = request.partial or request.reason in ("stopped", "timeout")
+    reason = f"{JOINED}: {request.reason or 'partial'}" if cut else None
+    return _row(ledger, request, reason=reason, calls=0)
 
 
 def _abandon(ledger: WorkStore, uid: str, reason: str) -> None:
