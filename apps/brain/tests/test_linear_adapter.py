@@ -192,6 +192,32 @@ def test_no_cache_raises_source_unavailable(tmp_path):
         list(records(company(), SOURCE, tmp_path / "nothing"))
 
 
+def no_completed_run(cache: Path) -> None:
+    """A run that started but never completed: its page is on disk, state.json lists nothing."""
+    folder = cache / "issues"
+    for page in folder.glob("*_*.json"):
+        page.unlink()
+    (folder / "20261017T000000_0000.json").write_text("[]")
+    (folder / "state.json").write_text(
+        json.dumps({"complete_until": None, "completed_runs": [], "run": "20261017T000000"})
+    )
+
+
+@pytest.mark.parametrize(
+    "leave",
+    [lambda cache: shutil.rmtree(cache / "issues"), no_completed_run],
+    ids=["issues folder cleared", "run not completed"],
+)
+def test_no_completed_issues_run_is_unavailable(tmp_path, leave):
+    """No completed issues run (the folder was cleared for a team change and the fetch after
+    it failed, or a first run never completed): records raises, so ingest skips the source.
+    Loading the teams alone would make the loader prune every Linear BLOCKS edge."""
+    cache = fixture_copy(tmp_path)
+    leave(cache)
+    with pytest.raises(SourceUnavailable, match="no completed"):
+        list(records(company(), SOURCE, cache))
+
+
 def test_registered_and_yaml_validates():
     adapter = REGISTRY["linear"]
     assert isinstance(adapter, LinearAdapter) and adapter.name == "linear"
