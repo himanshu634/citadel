@@ -127,7 +127,7 @@ def run(
     slug: str,
     params: AskArchivistParams,
     *,
-    client: Callable[[], anthropic.Anthropic],
+    client: anthropic.Anthropic | Callable[[], anthropic.Anthropic],
     ledger: WorkStore,
     writer: Callable[[dict[str, Any]], None],
     stop: threading.Event | None,
@@ -137,9 +137,9 @@ def run(
     clock: Callable[[], float] = time.monotonic,
     poll: float = POLL,
 ) -> list[dict[str, Any]]:
-    """One `ask_archivist` call; its one row. `client()` makes the Archivist's client (only when
-    it runs); `writer` is Ask's stream writer and `parent` the Ask tool call id its steps hang
-    off; `stop` is the Ask run's stop event."""
+    """One `ask_archivist` call; its one row. `client` is the Archivist's client, or a function
+    that makes it (called only when a run starts); `writer` is Ask's stream writer and `parent`
+    the Ask tool call id its steps hang off; `stop` is the Ask run's stop event."""
     started = clock()
     timeout = get_settings().archivist_ask_timeout
 
@@ -180,7 +180,7 @@ def run(
             step = {**body, "kind": "archive_step", "parent": parent, "event": chunk.get("kind")}
             ask_ctx.run(writer, step)
 
-        archivist = client()
+        archivist = client() if callable(client) else client
         created = None  # answer_request never raises: it ends the request itself
         # An empty context: LangGraph must not see Ask's run as this run's parent.
         done = contextvars.Context().run(

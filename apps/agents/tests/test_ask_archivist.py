@@ -279,6 +279,14 @@ def test_archivist_that_cannot_start_ends_its_request(slug, store):
     assert req.status == "failed" and row["request"] == req.uid  # not left open (rule 16)
 
 
+def test_live_run_takes_a_client_or_a_factory(slug, store):
+    """`live.run` called directly (no Ask graph: nothing to stream to) with a client object."""
+    client = offline_client("archivist", "answer_request")
+    params = live.AskArchivistParams(**REF)
+    [row] = live.run(slug, params, client=client, ledger=store, writer=lambda c: None, stop=None)
+    assert row["outcome"] == "found" and client.calls > 0
+
+
 # --- one search per question at a time (rule 16) ------------------------------------------------
 
 
