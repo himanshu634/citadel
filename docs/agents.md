@@ -146,6 +146,7 @@ One FalkorDB user per role:
 | `citadel_pm` | R | | RW |
 | `citadel_qa` | R | | RW |
 | `citadel_brain` | R | RW | RW (opens gaps) |
+| `citadel_archivist` | R | | RW (requests, finds) |
 
 The table lives in `agents/acl.py` (`PERMISSIONS`); the Keeper's stores refuse what it does not
 allow. `acl.setuser_commands(slug, passwords)` renders it as `ACL SETUSER` lines; nothing applies

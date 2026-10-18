@@ -19,8 +19,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-GapKind = Literal["failed_question", "thumbs_down", "stale_owner", "unowned_hot_system"]
-GapStatus = Literal["open", "in_review", "resolved", "needs_person", "dismissed"]
+GapKind = Literal[
+    "failed_question", "thumbs_down", "stale_owner", "unowned_hot_system", "archive_conflict"
+]
+GapStatus = Literal["open", "in_review", "waiting_archive", "resolved", "needs_person", "dismissed"]
 ClaimKind = Literal["owner", "expert", "decision", "fact", "link"]
 ClaimStatus = Literal[
     "pending_approval", "accepted", "rejected", "superseded", "stale", "conflicts_with_source"
@@ -30,7 +32,8 @@ ClaimStatus = Literal[
 # (kind, subject). Mirrored in apps/brain/queries/ledger/open_gap.cypher.
 NOTICING_KINDS: tuple[str, ...] = ("stale_owner", "unowned_hot_system")
 # A gap in one of these statuses absorbs a repeat (count + 1) instead of a new gap opening.
-LIVE_GAP: tuple[str, ...] = ("open", "in_review")
+# `waiting_archive` is a gap whose answer the Archivist is looking for in older items.
+LIVE_GAP: tuple[str, ...] = ("open", "in_review", "waiting_archive")
 
 
 class Gap(BaseModel):
@@ -47,6 +50,7 @@ class Gap(BaseModel):
     about: list[str] = Field(default_factory=list)  # brain uids it is about
     subject: str | None = None  # the brain uid a noticing gap is about, its dedupe key
     reason: str | None = None  # why it last changed status (needs_person, dismissed, ...)
+    archive_asked: bool = False  # the Keeper already asked the Archivist about it (once per gap)
 
 
 class LogEntry(BaseModel):
@@ -160,6 +164,52 @@ class FollowUp(BaseModel):
     created_at: str
 
 
+RequestStatus = Literal["open", "running", "answered", "failed", "refused"]
+# A request in one of these statuses absorbs the same question (rule 16). Mirrored in
+# apps/brain/queries/ledger/archive_open_request.cypher.
+LIVE_REQUEST: tuple[str, ...] = ("open", "running")
+RequestOutcome = Literal["found", "nothing_found", "already_in_brain"]
+Verdict = Literal["holds", "superseded", "conflicts"]
+
+
+class ArchiveRequest(BaseModel):
+    """One ask of the Archivist: look for older items by reference or by topic. The Archivist
+    reads its queue, runs, and records the outcome here (`ledger/archive_*`)."""
+
+    uid: str  # archive:<12 hex>
+    kind: Literal["reference", "topic"]
+    text: str
+    refs: list[str] = Field(default_factory=list)  # the exact refs of a reference request
+    from_uid: str | None = None  # the brain uid the person was looking at, if any
+    asked_by: Literal["ask", "keeper"]
+    gap: str | None = None  # the Keeper gap it serves
+    thread: str | None = None  # the Ask thread that raised it
+    status: RequestStatus = "open"
+    outcome: RequestOutcome | None = None  # set when answered
+    summary: str | None = None
+    reason: str | None = None  # why it failed or was refused
+    norm: str  # the dedupe key (`archivist.rules.norm`)
+    partial: bool = False  # a budget ran out: not served from memory later
+    calls: int = 0  # external calls it used
+    created_at: str
+    updated_at: str
+
+
+class ArchiveFind(BaseModel):
+    """One older item the Archivist stands behind for a request, with the proof it checked."""
+
+    request: str  # the ArchiveRequest's uid
+    uid: str  # the brain uid the item loads as
+    url: str | None = None
+    title: str
+    date: str | None = None  # the item's own date, ISO
+    why: str  # why it answers the request
+    quote: str  # a passage of its fetched text
+    verdict: Verdict
+    evidence: list[str] = Field(default_factory=list)  # brain uids that back the verdict
+    superseded_by: str | None = None  # the newer uid, for verdict "superseded"
+
+
 def iso(now: str | float) -> str:
     """A ledger timestamp: ISO strings pass through; epoch seconds (`Ctx.now`) become UTC ISO."""
     if isinstance(now, str):
@@ -191,6 +241,10 @@ def claim_uid() -> str:
 def consult_uid(gap: str, role: str, attempt: int) -> str:
     """Mirrored in apps/brain/queries/ledger/post_consult.cypher."""
     return f"consult:{gap}:{role}:{attempt}"
+
+
+def archive_uid() -> str:
+    return f"archive:{_hex(12)}"
 
 
 def followup_uid(claim: str) -> str:

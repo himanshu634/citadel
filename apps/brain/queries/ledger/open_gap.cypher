@@ -1,4 +1,5 @@
-// purpose: Open a gap, or bump the live one it repeats. A gap that is open or in_review with the
+// purpose: Open a gap, or bump the live one it repeats. A gap that is open, in_review or
+//          waiting_archive with the
 //          same kind and the same norm (for noticing kinds: the same subject) gets count + 1, the
 //          new trace id and any new `about` uids, and keeps its uid. A trace the gap already
 //          lists changes nothing but `about` (one turn is one sighting). Otherwise a new open gap is
@@ -11,7 +12,7 @@
 //          "kind": "failed_question", "text": "Who owns Billing?", "norm": "who owns billing",
 //          "subject": null, "about": [], "trace_id": "t1", "now": "2026-10-17T10:00:00Z"})
 OPTIONAL MATCH (g:Gap {kind: $kind})
-WHERE g.status IN ['open', 'in_review']
+WHERE g.status IN ['open', 'in_review', 'waiting_archive']
   AND CASE WHEN $kind IN ['stale_owner', 'unowned_hot_system']
            THEN g.subject = $subject
            ELSE g.norm = $norm END

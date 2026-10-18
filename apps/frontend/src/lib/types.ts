@@ -683,8 +683,19 @@ export interface Activity {
 // --- The Keeper (/api/companies/{slug}/keeper/...; agents/keeper/model.py) ------------------
 // Timestamps are ISO-8601 UTC strings. Records point at brain_<slug> nodes by uid.
 
-export type GapKind = 'failed_question' | 'thumbs_down' | 'stale_owner' | 'unowned_hot_system';
-export type GapStatus = 'open' | 'in_review' | 'resolved' | 'needs_person' | 'dismissed';
+export type GapKind =
+	| 'failed_question'
+	| 'thumbs_down'
+	| 'stale_owner'
+	| 'unowned_hot_system'
+	| 'archive_conflict';
+export type GapStatus =
+	| 'open'
+	| 'in_review'
+	| 'waiting_archive'
+	| 'resolved'
+	| 'needs_person'
+	| 'dismissed';
 export type ClaimKind = 'owner' | 'expert' | 'decision' | 'fact' | 'link';
 export type ClaimStatus =
 	| 'pending_approval'
