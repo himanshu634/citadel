@@ -299,11 +299,12 @@ keeps it. `--fold-motion` (1, or 0 from AppShell before its first paint) turns t
 		background: var(--color-on-accent);
 		color: var(--color-accent);
 	}
-	/* Folded, the count sits on the icon's corner. */
+	/* Folded, the count sits on the icon's corner, held inside the block (which clips) so two
+	   or three digits grow toward the icon instead of past the edge. */
 	.folded .count {
 		position: absolute;
-		top: 0;
-		left: calc(var(--space-3) + var(--space-2));
+		top: 2px;
+		right: 2px;
 		min-width: var(--space-4);
 		height: var(--space-4);
 	}
