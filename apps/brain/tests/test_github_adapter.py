@@ -136,3 +136,16 @@ def test_normalized_output_drops_bulk_touched_issue_and_scrubs_email(company, ou
 )
 def test_codeowners_pattern_matching(pattern, path, hit):
     assert bool(codeowners.matching_files(pattern, [path])) is hit
+
+
+def test_git_error_never_carries_the_auth_header(tmp_path):
+    """A failing git call run with `-c http.extraHeader=...` (private repos) names the git
+    command, not the header: the message reaches build events and data/jobs/<slug>.json."""
+    from brain.adapters.github import fetch
+
+    header = "http.extraHeader=Authorization: Basic c2VjcmV0LXRva2Vu"
+    with pytest.raises(RuntimeError) as err:
+        fetch._git("-c", header, "rev-parse", "--verify", "HEAD", cwd=tmp_path)
+    message = str(err.value)
+    assert message.startswith("git rev-parse --verify failed:")
+    assert "c2VjcmV0LXRva2Vu" not in message and "extraHeader" not in message
