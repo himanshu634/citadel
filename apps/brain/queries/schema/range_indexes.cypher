@@ -19,7 +19,5 @@ CREATE INDEX FOR (n:WorkItem) ON (n.key);
 CREATE INDEX FOR (n:WorkItem) ON (n.url);
 CREATE INDEX FOR (n:Document) ON (n.uid);
 CREATE INDEX FOR (n:Chunk) ON (n.uid);
-CREATE INDEX FOR (n:Decision) ON (n.uid);
-CREATE INDEX FOR (n:Episode) ON (n.uid);
 CREATE INDEX FOR (n:SyncState) ON (n.uid);
 CREATE INDEX FOR (n:Claim) ON (n.uid);
