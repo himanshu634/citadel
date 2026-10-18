@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from agents.activity import runs_from_reviews, runs_from_thread
+from agents.activity import runs_from_archive, runs_from_reviews, runs_from_thread
 from agents.history import ChatStep, ChatTurn, Thread
-from agents.keeper.model import Review, ReviewStep
+from agents.keeper.model import ArchiveRequest, Review, ReviewStep
 
 T0 = datetime(2026, 10, 17, 9, 0, tzinfo=UTC)
 
@@ -104,3 +104,45 @@ def test_skipped_reviews_without_steps_are_left_out():
                review(uid="review:3", state="skipped")]  # fmt: skip
     runs = runs_from_reviews(reviews, {"review:3": [rstep(1)]}, live=lambda uid: False)
     assert [r.id for r in runs] == ["keeper:review:2", "keeper:review:3"]
+
+
+# --- Archivist requests -----------------------------------------------------------------------
+
+
+def request(uid="archive:1", status="answered", asked_by="ask", **kw):
+    return ArchiveRequest(uid=uid, kind="topic", text="why drop sqlite", asked_by=asked_by,
+                          status=status, norm="n", created_at="2026-10-17T09:00:00Z",
+                          updated_at="2026-10-17T09:05:00Z", **kw)  # fmt: skip
+
+
+def astep(uid, n, status="done", **kw):
+    return ReviewStep(review=uid, n=n, actor="archivist", tool="archive_search", status=status,
+                      started_at="2026-10-17T09:00:01Z", **kw)  # fmt: skip
+
+
+def test_an_archive_request_is_an_archivist_run_with_its_steps():
+    steps = {"archive:1": [astep("archive:1", 2, touched=["issue:1", "issue:1"]),
+                           astep("archive:1", 1, input={"q": "sqlite"}, count=3)]}  # fmt: skip
+    [run] = runs_from_archive([request(thread="t1")], steps, live=lambda r: False)
+    assert (run.id, run.source, run.actor, run.status) == (
+        "archive:archive:1", "archive", "archivist", "done")  # fmt: skip
+    assert run.title == "Archivist: why drop sqlite" and run.thread_id == "t1"
+    assert [(s.n, s.actor, s.touched) for s in run.steps] == [
+        (1, "archivist", []), (2, "archivist", ["issue:1"])]  # fmt: skip
+    assert run.steps[0].input == {"q": "sqlite"} and run.ended_at is not None
+
+
+def test_archive_request_status_and_liveness():
+    reqs = [request("archive:a", "running"), request("archive:b", "running"),
+            request("archive:c", "failed"), request("archive:d", "open")]  # fmt: skip
+    steps = {r.uid: [astep(r.uid, 1, status="running")] for r in reqs}
+    runs = runs_from_archive(reqs, steps, live=lambda r: r.uid == "archive:a")
+    assert [r.status for r in runs] == ["running", "stopped", "failed", "stopped"]
+    assert runs[0].ended_at is None and runs[0].steps[0].status == "running"
+    assert runs[1].steps[0].status == "failed" and runs[1].steps[0].error == "interrupted"
+
+
+def test_archive_requests_without_steps_are_left_out():
+    reqs = [request("archive:a", "refused"), request("archive:b")]
+    runs = runs_from_archive(reqs, {"archive:b": [astep("archive:b", 1)]}, live=lambda r: False)
+    assert [r.id for r in runs] == ["archive:archive:b"]

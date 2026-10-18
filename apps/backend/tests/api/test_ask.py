@@ -6,6 +6,7 @@ import json
 import threading
 
 import pytest
+from agents.ask import Answer, Source
 from agents.testing import TOOLSET, FakeClient, reply, settings, submit, tool_use  # noqa: F401
 from backend.api import create_app
 from backend.api.ask import Asker
@@ -143,3 +144,36 @@ def test_missing_credentials_become_an_error_event(company, runner):
         "error",
         {"detail": "No Anthropic credentials. Set ANTHROPIC_API_KEY in .env."},
     )
+
+
+def test_archive_steps_pass_through_and_an_unknown_kind_is_skipped(company, runner, monkeypatch):
+    def fake_run_events(slug, question, thread_id, **kw):
+        yield {"kind": "start", "thread_id": thread_id}
+        yield {"kind": "archive_step", "parent": "toolu_1", "event": "step", "id": "a1",
+               "tool": "archive_search", "input": {"q": "x"}}  # fmt: skip
+        yield {"kind": "archive_step", "parent": "toolu_1", "event": "step_done", "id": "a1",
+               "tool": "archive_search", "ms": 5, "count": 1,
+               "rels": [{"from": "a", "to": "b"}]}  # fmt: skip
+        yield {"kind": "from_the_future", "x": 1}
+        yield {"kind": "error", "detail": "after"}
+
+    monkeypatch.setattr("backend.api.ask.run_events", fake_run_events)
+    client = make_client(runner, FakeClient())
+    r = client.post(f"/api/companies/{company}/ask", json={"question": "Why?"})
+    got = frames(r.text)
+    assert [k for k, _ in got] == ["start", "archive_step", "archive_step", "error"]
+    first, second = got[1][1], got[2][1]
+    assert (first["parent"], first["event"], first["tool"], first["input"]) == (
+        "toolu_1", "step", "archive_search", {"q": "x"})  # fmt: skip
+    assert second["ms"] == 5 and second["rels"] == [{"from": "a", "to": "b"}]
+
+
+def test_an_archived_source_carries_its_date(company, runner, monkeypatch):
+    def fake_run_events(slug, question, thread_id, **kw):
+        source = Source(uid="pr:1", archived="2021-03-01")
+        yield Answer(question, thread_id, "x", sources=[source], stop="end_turn")
+
+    monkeypatch.setattr("backend.api.ask.run_events", fake_run_events)
+    client = make_client(runner, FakeClient())
+    got = frames(client.post(f"/api/companies/{company}/ask", json={"question": "Why?"}).text)
+    assert got[-1][1]["sources"][0]["archived"] == "2021-03-01"

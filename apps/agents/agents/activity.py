@@ -9,9 +9,10 @@ whichever agent ran it. This is that shape, independent of where a run is stored
 - `ActivityStep`: one tool call, in order, with its input (so the page can say what it did and
   which node it was about) and the uids it touched (so the page can draw it).
 
-Two sources: the chat history (`agents/history.py`), where `runs_from_thread` turns each Ask turn
+Three sources: the chat history (`agents/history.py`), where `runs_from_thread` turns each Ask turn
 into a run, and the Keeper's ledger (`keeper/review.py` writes each review's steps), where
-`runs_from_reviews` turns each review into one. Steps that touch nothing on the map (the answer
+`runs_from_reviews` turns each review into one and `runs_from_archive` each Archivist request
+(its steps hang off the request's uid). Steps that touch nothing on the map (the answer
 check, a job's submit, MCP calls) keep their place in the list with no `touched`.
 """
 
@@ -24,7 +25,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from agents.history import Thread
-from agents.keeper.model import Review, ReviewStep
+from agents.keeper.model import ArchiveRequest, Review, ReviewStep
 
 RunStatus = Literal["running", "done", "stopped", "failed"]
 StepStatus = Literal["running", "done", "failed"]
@@ -32,7 +33,7 @@ StepStatus = Literal["running", "done", "failed"]
 
 class ActivityStep(BaseModel):
     n: int  # 1-based, in the order the agent ran them
-    actor: str  # "brain" for Ask; "keeper", "pm", "qa" for a Keeper review
+    actor: str  # "brain" for Ask; "keeper", "pm", "qa" for a Keeper review; "archivist"
     tool: str
     kind: str = "graph"  # graph, submit, mcp or server (history.Kind)
     input: dict[str, Any] = {}
@@ -43,8 +44,8 @@ class ActivityStep(BaseModel):
 
 
 class ActivityRun(BaseModel):
-    id: str  # "ask:<thread id>:<turn n>" or "keeper:<review uid>"
-    source: Literal["ask", "keeper"] = "ask"
+    id: str  # "ask:<thread id>:<turn n>", "keeper:<review uid>" or "archive:<request uid>"
+    source: Literal["ask", "keeper", "archive"] = "ask"
     actor: str = "brain"
     title: str  # what the run was for: the question, or the review's first gap
     status: RunStatus
@@ -162,6 +163,55 @@ def runs_from_reviews(
                     )
                     for s in steps
                 ],
+            )
+        )
+    return runs
+
+
+def _step(s: ReviewStep, lost: bool) -> ActivityStep:
+    return ActivityStep(
+        n=s.n,
+        actor=s.actor,
+        tool=s.tool,
+        kind=s.kind,
+        input=s.input,
+        status="failed" if lost and s.status == "running" else s.status,
+        count=s.count,
+        error="interrupted" if lost and s.status == "running" else s.error,
+        touched=list(dict.fromkeys(s.touched)),
+    )
+
+
+def runs_from_archive(
+    requests: list[ArchiveRequest],
+    steps_by_request: Mapping[str, list[ReviewStep]],
+    *,
+    live: Callable[[ArchiveRequest], bool],
+) -> list[ActivityRun]:
+    """One run per Archivist request, in the order given. An `open` or `running` request stays
+    running only when `live(request)` (this process runs it); else it is `stopped`. A request
+    with no steps (open and waiting, refused, or answered from memory) did nothing to show and
+    is left out."""
+    runs = []
+    for req in requests:
+        steps = sorted(steps_by_request.get(req.uid, []), key=lambda s: s.n)
+        if not steps:
+            continue
+        if req.status in ("open", "running"):
+            status: RunStatus = "running" if live(req) else "stopped"
+        else:
+            status = "failed" if req.status == "failed" else "done"
+        runs.append(
+            ActivityRun(
+                id=f"archive:{req.uid}",
+                source="archive",
+                actor="archivist",
+                title=f"Archivist: {req.text}",
+                status=status,
+                started_at=req.created_at,  # type: ignore[arg-type]  # ISO text, parsed
+                ended_at=None if status == "running" else req.updated_at,  # type: ignore[arg-type]
+                thread_id=req.thread,
+                steps=[_step(s, status != "running") for s in steps],
             )
         )
     return runs

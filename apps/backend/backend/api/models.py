@@ -254,6 +254,17 @@ class AskCall(BaseModel):
     result: str | None = None
 
 
+class AskArchiveStep(BaseModel):
+    """A step of the Archivist's run inside an `ask_archivist` call. `parent` is the id of that
+    outer tool call; `event` is the inner chunk's kind (llm, step or step_done) and the rest of
+    the inner chunk's fields (`AskLlm`, `AskStep`, `AskStepDone`) pass through as they are."""
+
+    model_config = ConfigDict(extra="allow")
+
+    parent: str
+    event: str
+
+
 class AskUsage(BaseModel):
     input: int = 0
     output: int = 0
@@ -290,6 +301,7 @@ class AskSource(BaseModel):
     url: str | None = None
     label: str | None = None
     step: int | None = None  # the step that first returned it
+    archived: str | None = None  # an archived item (the Archivist's): its date ("" if none)
 
 
 class AskAnswer(BaseModel):
