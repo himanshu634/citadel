@@ -3,7 +3,9 @@
 One Keeper claim waiting for a lead, as the review page's detail pane shows it (design direction
 D): its kind and subject, the statement large, why it needs a lead (one row per reason), the gap it
 answers, the evidence behind it, then an optional reason and Reject or Approve under it. Use it for
-claims whose status is `pending_approval`.
+claims whose status is `pending_approval`. The `work` snippet (a `KeeperTrail`) fills a column
+beside the claim (direction H), so the agents' work is in view while the lead decides; below
+80rem it follows the claim and both scroll together.
 
 The approver's name is typed once in the page's header and comes in as `name`; a missing or
 refused name goes back to the page through `onnameerror`, which shows it under that field. The
@@ -12,6 +14,7 @@ through, or to the error to show (`decisionError`). A 409 or 404 says so here; t
 list again, so a claim someone else decided leaves it.
 -->
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import NodeChip from '$lib/components/ui/NodeChip.svelte';
@@ -44,6 +47,8 @@ list again, so a claim someone else decided leaves it.
 		busy?: Decision | null;
 		/** The last failure (the gallery sets it to show the state). */
 		failure?: DecisionError | null;
+		/** How the Keeper got to the claim (`KeeperTrail`), in a column beside it (under it when narrow). */
+		work?: Snippet;
 	};
 
 	let {
@@ -55,7 +60,8 @@ list again, so a claim someone else decided leaves it.
 		ondecide,
 		onnameerror,
 		busy = $bindable(null),
-		failure = $bindable(null)
+		failure = $bindable(null),
+		work
 	}: Props = $props();
 	const id = $props.id();
 
@@ -88,6 +94,7 @@ list again, so a claim someone else decided leaves it.
 </script>
 
 <article class="claim" aria-labelledby="{id}-statement">
+	<div class={['panes', { split: !!work }]}>
 	<div class="body">
 		<p class="tags">
 			<span class="kind">{CLAIM_KINDS[claim.kind] ?? claim.kind}</span>
@@ -129,6 +136,8 @@ list again, so a claim someone else decided leaves it.
 			{/if}
 		</section>
 	</div>
+	{#if work}<aside class="work" aria-label="The Keeper's work">{@render work()}</aside>{/if}
+	</div>
 
 	<form
 		class="decide"
@@ -164,6 +173,39 @@ list again, so a claim someone else decided leaves it.
 		min-height: 0;
 		height: 100%;
 		background: var(--color-surface-raised);
+	}
+	.panes {
+		display: flex;
+		flex: 1;
+		min-height: 0;
+	}
+	/* Design direction H: the agents' work in its own column beside the claim. */
+	.panes.split {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 24rem;
+	}
+	.work {
+		min-height: 0;
+		overflow: auto;
+		padding: var(--space-6) var(--space-5);
+		border-left: var(--border-hair) solid var(--color-line);
+		background: var(--color-surface);
+	}
+	@media (max-width: 80rem) {
+		/* Too narrow for two columns: the work follows the claim, and both scroll as one. */
+		.panes.split {
+			display: block;
+			overflow: auto;
+		}
+		.panes.split .body {
+			overflow: visible;
+		}
+		.work {
+			overflow: visible;
+			border-top: var(--border-hair) solid var(--color-line);
+			border-left: 0;
+			padding: var(--space-6) var(--space-10);
+		}
 	}
 	.body {
 		display: flex;
@@ -284,6 +326,7 @@ list again, so a claim someone else decided leaves it.
 	}
 	@media (max-width: 40rem) {
 		.body,
+		.work,
 		.decide {
 			padding-inline: var(--space-4);
 		}

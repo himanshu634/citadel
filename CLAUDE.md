@@ -343,7 +343,10 @@ demo's agents are `brain`, `keeper`, `pm` and `qa`. Pieces:
 - Frontend: Review now in the Systems page's bar and the log (`KeeperLog`) in its rail, read
   again when a Keeper run starts, steps or ends. Claims waiting for a lead are decided on
   `/c/<slug>/review` (list + detail, `ClaimApproval`: name typed once in the header, optional
-  why; the open claim in `?claim=`), opened from the sidebar's "Review claims", whose count comes
+  why; the open claim in `?claim=`; beside it `KeeperTrail`, the work behind it from
+  `GET .../keeper/claims/{uid}/trail`, which `agents/keeper/trail.py` joins from the ledger: the
+  review that picked the claim's gap, its steps cut into pm/qa/keeper jobs at each submit, the
+  consults and the gap's log), opened from the sidebar's "Review claims", whose count comes
   from `src/lib/pendingClaims.svelte.ts`. Words for reasons, log actions, errors in `src/lib/keeper.ts`; Ask
   marks a cited `Claim` source "Keeper" (`WalkAnswer`).
 

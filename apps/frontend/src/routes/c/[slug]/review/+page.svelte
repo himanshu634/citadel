@@ -2,7 +2,8 @@
 @component
 The review page (design direction D, "list and detail"): every Keeper claim waiting for a lead.
 The list on the left holds them all; the open one fills the right with its statement, why it needs
-a lead, the gap it answers and its evidence, and Reject or Approve under it. The open claim is in
+a lead, the gap it answers and its evidence, with the Keeper's work in a column beside it
+(`KeeperTrail`, read per claim; direction H), and Reject or Approve under both. The open claim is in
 the URL (`?claim=<uid>`), so a claim has a link. Decided claims stay in the list under "Decided
 here" for the rest of the visit.
 
@@ -14,7 +15,7 @@ anywhere in the company, and the Systems rail stays for the agents' runs and the
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { Badge, Banner, Button, ClaimApproval, EmptyState, Input, KeeperLog } from '$lib';
+	import { Badge, Banner, Button, ClaimApproval, EmptyState, Input, KeeperLog, KeeperTrail } from '$lib';
 	import { api, describeError } from '$lib/api/client';
 	import { getCompanies } from '$lib/companies.svelte';
 	import {
@@ -27,7 +28,7 @@ anywhere in the company, and the Systems rail stays for the agents' runs and the
 	} from '$lib/keeper';
 	import { buildingTitle, viewOf } from '$lib/overview';
 	import { getPendingClaims } from '$lib/pendingClaims.svelte';
-	import type { Claim, Gap, GraphView, LogEntry } from '$lib/types';
+	import type { Claim, ClaimTrail, Gap, GraphView, LogEntry } from '$lib/types';
 	import { shortUid } from '$lib/walk';
 
 	let { data } = $props();
@@ -127,6 +128,29 @@ anywhere in the company, and the Systems rail stays for the agents' runs and the
 		else url.searchParams.delete('claim');
 		void goto(url, { replaceState: true, keepFocus: true, noScroll: true });
 	}
+
+	// How the Keeper got to the open claim: read when it opens. Stays null while it loads.
+	type Work = { uid: string; trail: ClaimTrail | null; error: string | null };
+	let work = $state.raw<Work | null>(null);
+	const openWork = $derived(open && work?.uid === open.uid ? work : null);
+	$effect(() => {
+		const slug = data.slug;
+		const uid = open?.uid;
+		if (!uid) return;
+		let live = true;
+		api.keeper.trail(slug, uid).then(
+			(trail) => {
+				if (live) work = { uid, trail, error: null };
+			},
+			(e) => {
+				if (live) work = { uid, trail: null, error: describeError(e) };
+			}
+		);
+		return () => {
+			live = false;
+		};
+	});
+	const urlOf = (uid: string) => known.get(uid)?.url ?? null;
 
 	// Decisions made on this visit, newest first.
 	type Done = { claim: Claim; decision: 'approve' | 'reject'; by: string };
@@ -317,7 +341,11 @@ anywhere in the company, and the Systems rail stays for the agents' runs and the
 								name={approver}
 								onnameerror={onNameError}
 								ondecide={(decision, by, why) => decide(open, decision, by, why)}
-							/>
+							>
+								{#snippet work()}
+									<KeeperTrail trail={openWork?.trail ?? null} failed={openWork?.error ?? null} {refsOf} {urlOf} href={systemsPath} />
+								{/snippet}
+							</ClaimApproval>
 						{/key}
 					{:else}
 						<div class="pad">
