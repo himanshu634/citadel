@@ -26,8 +26,8 @@ help: ## Show this help
 
 # --- Environment ------------------------------------------------------------------------------
 
-start: ## One command from a fresh clone: deps, .env, FalkorDB, the synthetic brain, then API + app
-	@API_PORT=$(API_PORT) FE_PORT=$(FE_PORT) ./scripts/start.sh
+start: ## One command from a fresh clone: checks tools/.env/ports first, then deps, FalkorDB, demo brain, API + app
+	@API_PORT=$(API_PORT) FE_PORT=$(FE_PORT) bash scripts/start.sh
 
 setup: ## Install deps (uv sync) and create .env from .env.example if missing
 	@test -f .env || (cp .env.example .env && echo "Created .env from .env.example")

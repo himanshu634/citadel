@@ -30,14 +30,28 @@ cd citadel
 make start
 ```
 
-`make start` (`scripts/start.sh`) checks the tools, creates `.env` from `.env.example`,
-runs `uv sync` and `pnpm install`, starts FalkorDB (`make up`), builds the synthetic company
-into `brain_synthetic` (schema + ingest + embed, no keys needed) and then runs `make dev`: the
-app on <http://localhost:5173>, the API on <http://127.0.0.1:8000>. Ctrl+C stops the app;
-FalkorDB keeps running (`make down` stops it). Running it again is safe: the ingest only loads
-what changed. Other ports: `make start API_PORT=8010 FE_PORT=5180`, and `FALKORDB_PORT` /
-`FALKORDB_BROWSER_PORT` in `.env`. The first run downloads the embedding model (about 0.2 GB)
-into `data/models/`.
+`make start` (`scripts/start.sh`) runs in three phases:
+
+1. **Checks, before anything is installed or started.** The tools and their versions (git,
+   curl, uv, Node.js 20.19 or newer, pnpm 9 or newer, and Docker running with Compose v2 when
+   FalkorDB is local), `.env` (created from `.env.example` when missing; invalid values such as
+   an unknown `EMBEDDING_PROVIDER`, `gemini` without `GEMINI_API_KEY`, a non-numeric port or an
+   `EMBEDDING_DIM` that does not match the model), free ports for the API, the app and FalkorDB,
+   and disk space. Every problem is listed at once with its fix, and it stops. Things that only
+   limit features, such as an empty `ANTHROPIC_API_KEY`, are shown as notes.
+2. **Preparing, quietly.** `uv sync`, `pnpm install`, FalkorDB (`docker compose up --wait`),
+   a connection check, and the synthetic company built into `brain_synthetic` (schema + ingest +
+   embed, no keys needed). Each step writes its output to `data/logs/start/<step>.log` and
+   shows one line. A failed step shows what to check, one reason line and its log path.
+3. **Starting.** The API and the app run in the background with their logs in
+   `data/logs/start/api.log` and `frontend.log`. When both answer, it prints the URLs: the app
+   on <http://localhost:5173>, the API on <http://127.0.0.1:8000>. If either stops, it says so
+   and stops the other. Ctrl+C stops both; FalkorDB keeps running (`make down` stops it).
+
+Running it again is safe: the ingest only loads what changed. Other ports:
+`make start API_PORT=8010 FE_PORT=5180`, and `FALKORDB_PORT` / `FALKORDB_BROWSER_PORT` in
+`.env`. The first run downloads the embedding model (about 0.2 GB) into `data/models/`. To
+see the servers' output live, use `make dev` instead.
 
 The sections below do the same steps one at a time.
 

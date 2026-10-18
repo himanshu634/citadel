@@ -173,9 +173,11 @@ git clone https://github.com/himanshu634/citadel.git && cd citadel
 make start
 ```
 
-It creates `.env`, installs the Python and frontend packages, starts FalkorDB, builds the
-synthetic demo company and opens the app on <http://localhost:5173>. Add `ANTHROPIC_API_KEY` to
-`.env` to ask questions. Running it again is safe.
+It first checks the tools, `.env`, ports and disk space, and lists every problem with its fix
+before it installs or starts anything. Then it installs the packages, starts FalkorDB, builds the
+synthetic demo company and serves the app on <http://localhost:5173>. Step output goes to
+`data/logs/start/`, so the terminal shows only progress and, on a failure, one reason. Add
+`ANTHROPIC_API_KEY` to `.env` to ask questions. Running it again is safe.
 
 Setup, prerequisites, every command and troubleshooting: **[DEVELOPMENT.md](DEVELOPMENT.md)**.
 An offline synthetic company runs with no tokens. A GitHub token builds a brain from a public repo,
