@@ -499,7 +499,10 @@ read again when a Keeper run starts or ends, after Review now and after each dec
 		min-height: 0;
 		overflow: hidden;
 	}
+	/* Positioned so the rail's absolute children (the chips' .sr-only labels) are laid out in its
+	   scroll box; anchored to <body>, they stretched the document past the frame. */
 	.side {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-6);

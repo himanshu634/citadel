@@ -47,7 +47,7 @@ MODEL_IDS = frozenset(m.id for m in MODELS)
 
 
 def default_model() -> str:
-    """The model a question runs on when it names none: ANTHROPIC_MODEL (Haiku 5.5 unless set)."""
+    """The model a question runs on when it names none: ANTHROPIC_MODEL (Sonnet 5.5 unless set)."""
     return get_settings().anthropic_model
 
 

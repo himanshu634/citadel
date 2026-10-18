@@ -14,7 +14,9 @@ The graph owns the loop (not the SDK tool runner), so every step is checkpointed
 - The answer arrives through the `submit_answer` tool (the current models reject forced tool
   choice, so the system prompt asks for it). Cited uids must have appeared in a tool result in
   this thread; otherwise Claude gets an error result and tries again, up to MAX_REFUSALS times
-  per question (a model can repeat one bad submit until the step limit or max_tokens).
+  per question (a model can repeat one bad submit until the step limit or max_tokens). A
+  parameter Claude wrote into the answer text (`</answer><parameter name="sources">`) is cut
+  from the accepted answer (`cut_leak`); the replayed tool_use keeps it.
 - A company's MCP servers (`agents/mcp.py`) run inside the Claude call: their `mcp_tool_use` /
   `mcp_tool_result` blocks arrive in the assistant content and replay with it; run_tools never
   sees them. A successful MCP call is citable as `mcp:<server>/<tool>`.
@@ -46,6 +48,8 @@ MAX_NUDGES = 1  # times we ask for submit_answer after a plain-text reply before
 MAX_REFUSALS = 5  # refused submits in one question before the turn ends without an answer
 CANDIDATES = 15  # seen uids listed in a refusal for markers with no sources
 _MARKER = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")  # [1] or [1, 3]
+_LEAK = re.compile(r"</answer>|<parameter name=")  # where a leaked parameter tail starts
+_LEAKED = re.compile(r'<parameter name="(sources|path)">\s*(\[.*?\])', re.S)
 
 SUBMIT_TOOL: dict[str, Any] = {
     "name": SUBMIT,
@@ -207,12 +211,14 @@ def add_brain_loop(
         answer = None
         refusals = state.get("refusals") or 0
         for use in submits:
-            problem = check(use.get("input") or {}, seen)
+            given = use.get("input") or {}
+            given = cut_leak(given) if submit == SUBMIT else given  # a copy: history stays as is
+            problem = check(given, seen)
             if problem:
                 refusals += 1
                 results.append(result_block(use["id"], problem, True))
             else:
-                answer = use["input"]
+                answer = given
                 results.append(result_block(use["id"], "Answer recorded.", False))
             record({"id": use["id"], "tool": SUBMIT, "input": {}, "error": problem})
         return {
@@ -321,6 +327,29 @@ def _no_sources(markers: list[int], text: str, seen: dict[str, Any]) -> str:
             "is its own field, not part of answer. End answer before it."
         )
     return " ".join(parts)
+
+
+def cut_leak(answer: dict[str, Any]) -> dict[str, Any]:
+    """submit_answer's input without the tail Haiku sometimes writes after the answer text
+    (`</answer>` then `<parameter name="sources">[...]`, or prose). A leaked sources or path
+    list fills that field when it is empty; check_answer then checks it like any other. Markers
+    that still cite nothing keep the input whole, so its refusal can name the leaked part.
+    Returns a new dict: the input is also the replayed tool_use block, which must not change."""
+    text = answer.get("answer")
+    leak = _LEAK.search(text) if isinstance(text, str) else None
+    if not leak:
+        return answer
+    out = {**answer, "answer": text[: leak.start()].rstrip()}
+    for name, raw in _LEAKED.findall(text, leak.start()):
+        try:
+            uids = json.loads(raw)
+        except ValueError:
+            continue
+        if not out.get(name) and isinstance(uids, list) and all(isinstance(u, str) for u in uids):
+            out[name] = uids
+    if not out.get("sources") and _MARKER.search(out["answer"]):
+        return answer
+    return out
 
 
 RESULT_PREVIEW = 2000  # characters of an MCP or server tool result kept for the history

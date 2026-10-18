@@ -40,7 +40,7 @@ next to it.
 |---|---|---|
 | `GITHUB_TOKEN` | building a brain from a GitHub repo (`make sync`, the **+** in the app) | a read-only [personal access token](https://github.com/settings/tokens); leave empty to fall back to `gh auth token` |
 | `ANTHROPIC_API_KEY` | asking questions (`make ask`, the Ask page, `make eval`) and the Keeper's review jobs (without it a review only re-projects and notices) | [console.anthropic.com](https://console.anthropic.com/) |
-| `ANTHROPIC_MODEL`, `ANTHROPIC_EFFORT` | choosing the answering model | defaults: `claude-haiku-5-5`, `medium` |
+| `ANTHROPIC_MODEL`, `ANTHROPIC_EFFORT` | choosing the answering model | defaults: `claude-sonnet-5-5`, `medium` |
 | `KEEPER_BUDGET`, `KEEPER_BUILD_BUDGET`, `KEEPER_NOTICE_CAP` | tuning the Keeper: gaps per on-demand review, gaps per review after a build, new gaps per noticing run | defaults: 5, 3, 10 |
 | `LINEAR_API_KEY` | `linear` sources and `make linear-seed` | Linear → Settings → Security & access |
 | `FALKORDB_*` | a different port, a password, or FalkorDB Cloud | see [Using FalkorDB Cloud](#using-falkordb-cloud) |

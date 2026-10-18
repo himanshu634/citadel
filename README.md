@@ -148,15 +148,18 @@ ledger, which survives a rebuild of the brain).
 `make eval` asks Claude fixed questions against a loaded brain and grades each answer with
 deterministic checks: the uids it cites, the graph tools it ran, its text and its step count.
 Expected uids on the live repo are read from the graph when the run starts, so cases follow the
-data. Each case ran 3 times (2026-10-17, same graphs and agent code for every run):
+data. Each case ran 3 times (2026-10-17, same graphs for every run), before and after one prompt
+rule: cite each row of a ranking the answer names (the people, the coupled systems), not only
+the system the question was about:
 
-| Company | Cases | Haiku 5.5 (baseline, the default) | Sonnet 5.5 |
+| Company | Cases | Haiku 5.5 before → after | Sonnet 5.5 (default) before → after |
 |---|---:|---:|---:|
-| synthetic (offline demo) | 17 | 48/51 runs (94%) | 45/51 (88%) |
-| falkordb (FalkorDB/FalkorDB repo) | 23 | 66/69 runs (96%) | 64/69 (93%) |
+| synthetic (offline demo) | 17 | 48/51 (94%) → 47/51 (92%) | 45/51 (88%) → 51/51 (100%) |
+| falkordb (FalkorDB/FalkorDB repo) | 23 | 66/69 (96%) → 65/69 (94%) | 64/69 (93%) → 68/69 (99%) |
 
-No run errored. Every one of Sonnet's failed runs named the right answer but cited a coarser node
-than the case asks for. Tables by tag and case, the known misses, the method and how to rerun:
+No run errored. Before the rule, every one of Sonnet's failed runs named the right answer but
+cited a coarser node than the case asks for; after it, none does. Haiku's change is one run per
+company, within noise. Tables by tag and case, the known misses, the method and how to rerun:
 **[docs/evals.md](docs/evals.md)** (generated from the result files in
 [docs/evals/](docs/evals/)).
 

@@ -83,5 +83,11 @@ write it as plain text instead.
 - `sources`: the uids you cite, in the order of their marker numbers. Use only uids that appeared
   in tool results in this conversation. A result from a tool on an MCP server has no uid: cite it
   as `mcp:<server>/<tool>`, for example `mcp:handbook/search_docs`.
+- Cite the nodes your answer names. When the answer names rows of a ranking, cite each of
+  those rows by its own uid: the `person_uid` of each person you name from
+  `experts_for_system`, the `system_uid` of each system you name from `impact_of`, the `person_uid`
+  of each person in `people` of a pair you name from `collaborators`. You may also cite the system
+  the question was about or the work items behind a row, but not instead of the rows you name.
+  Do not cite rows you leave out of the answer.
 - `path`: when a chain of relationships explains the answer (for example from `path_between`),
   the uids along it in order. Otherwise an empty list.

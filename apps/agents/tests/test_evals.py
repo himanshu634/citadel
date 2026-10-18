@@ -308,3 +308,10 @@ def test_markdown_report_compares_two_files_per_company(tmp_path):
         "(cited system:Auth)"
     ) in text
     assert "- `why` #1 (sonnet-5-5 medium): error: APIStatusError: overloaded" in text
+
+    # The same model before and after a change: the two columns get told apart.
+    again = write("c.jsonl", "claude-haiku-5-5", [result("who", ["experts"], True, 0)])
+    lines = report.render([base, again]).splitlines()
+    head = "| Company | Cases | haiku-5-5 medium (before) | haiku-5-5 medium (after) | Δ |"
+    assert lines[0] == head
+    assert lines[2] == "| acme | 2 | 3/4 (75%) | 1/1 (100%) | +25 pt |"

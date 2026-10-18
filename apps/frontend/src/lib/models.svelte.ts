@@ -2,7 +2,7 @@
  * Which Claude model the next Ask question runs on (design direction P, "Chip in the composer").
  *
  * Why: the server offers a fixed list (GET /api/models: Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.1)
- * and a default (Haiku 5.5). The pick is per question, so a follow-up may use another model; it is
+ * and a default (Sonnet 5.5). The pick is per question, so a follow-up may use another model; it is
  * remembered in this browser, so the next visit starts where you left off. A remembered id the
  * server no longer offers falls back to the default. Until the list arrives (or when it fails)
  * nothing is picked and questions run on the server's default.

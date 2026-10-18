@@ -60,7 +60,7 @@ Configuration comes from `.env` (see `.env.example`): FalkorDB host/port/credent
 `data/models/`, or `gemini-embedding-2`) and `EMBEDDING_DIM` (768; the vector index size, must
 equal the model's output size) drive the embed stage. `gemini` uses Google's Gemini embedding
 API (`GEMINI_API_KEY`) instead of the local model, and sends chunk text there.
-`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (default `claude-haiku-5-5`) and `ANTHROPIC_EFFORT`
+`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (default `claude-sonnet-5-5`) and `ANTHROPIC_EFFORT`
 (default `medium`) drive `agents ask` and the Keeper's jobs. `KEEPER_BUDGET` (5, gaps one
 on-demand review decides), `KEEPER_BUILD_BUDGET` (3, the review after a build) and
 `KEEPER_NOTICE_CAP` (10, max new gaps per noticing run) tune the Keeper. Settings live in
@@ -197,9 +197,12 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; never LLM-writt
 - The answer comes through the `submit_answer` tool (forced `tool_choice` is a 400 on current
   models). It may cite only uids seen in tool results; anything else is sent back as an error.
   A plain-text reply gets one nudge to call it (`loop.MAX_NUDGES = 1`), then the turn ends.
+  A tail Haiku writes into the answer text (`</answer>` + `<parameter name="sources">...`) is
+  cut from the accepted answer (`loop.cut_leak`, a copy; the replayed tool_use keeps it), and a
+  leaked sources/path list fills that field only when it is empty.
   A question ends with no answer after `loop.MAX_REFUSALS` (5) refused submits; markers with an
-  empty `sources` are refused with the latest seen uids (Haiku can repeat that call until
-  `max_tokens`).
+  empty `sources` (after `cut_leak`) are refused with the latest seen uids (Haiku can repeat
+  that call until `max_tokens`).
 - Step limits (LangGraph `recursion_limit`; each tool round trip is two steps): 40 per Ask
   question (`ask.RECURSION_LIMIT`), 30 per role job (`runner.RECURSION_LIMIT`). Hitting one
   ends the run with stop `step_limit`.
