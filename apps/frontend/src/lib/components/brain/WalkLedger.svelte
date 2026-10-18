@@ -9,13 +9,15 @@ call and its rows (`StepRows`). A node a sentence names ("Opened PR #10") opens 
 own site) in a new tab: the sentence sits beside the row's toggle, whose hit area covers the row,
 and its links sit above that. Hovering or focusing a row reports its steps (`onhover`) so the
 walk beside it can light what they added; leaving the list clears it. The last row is the newest
-answer check; a pass after the answer was sent back says how many times. Rules in `ledgerItems`
+answer check; a pass after the answer was sent back says how many times. A step that carries
+`children` (Ask's `ask_archivist`: the Archivist's own steps) lists them under its row, indented,
+as they arrive; they have no rows to open. Rules in `ledgerItems`
 and `checkLine` (src/lib/walk.ts).
 -->
 <script lang="ts">
 	import { Check, ChevronRight, CircleAlert, CircleDashed, LoaderCircle, Minus } from '@lucide/svelte';
 	import type { WalkStep } from '$lib/types';
-	import { checkLine, ledgerItems, ledgerRuns, stepCall, type LedgerItem } from '$lib/walk';
+	import { checkLine, ledgerItems, ledgerRuns, stepCall, stepSentence, stepState, type LedgerItem } from '$lib/walk';
 	import RefText from '../ui/RefText.svelte';
 	import StepRows from './StepRows.svelte';
 
@@ -97,6 +99,19 @@ and `checkLine` (src/lib/walk.ts).
 				<p class="why failed">{item.steps[0].error}</p>
 			{:else if item.state === 'not-run'}
 				<p class="why">The answer ended before this call ran.</p>
+			{/if}
+			{#if item.steps.length === 1 && item.steps[0].children?.length}
+				<ol class="children" aria-label="The Archivist's steps">
+					{#each item.steps[0].children ?? [] as child (child.id)}
+						{@const state = stepState(child)}
+						<li class={['child', state]}>
+							{@render mark(state)}
+							<span class="sentence">{stepSentence(child, child.status === 'done')}</span>
+							<span class="meta tabular">{child.count != null && state !== 'failed' ? (child.count === 1 ? '1 row' : `${child.count} rows`) : state === 'failed' ? 'failed' : ''}</span>
+							<span class="ms tabular">{child.ms != null ? `${child.ms} ms` : ''}</span>
+						</li>
+					{/each}
+				</ol>
 			{/if}
 			{#if isOpen}
 				<div id="{id}-{key}" class="detail">
@@ -264,6 +279,33 @@ and `checkLine` (src/lib/walk.ts).
 	.why.failed {
 		color: var(--color-danger);
 	}
+	.children {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		margin: 0 0 var(--space-1) calc(var(--space-2) + 0.625rem);
+		padding: 0 0 0 var(--space-3);
+		border-left: var(--border-hair) solid var(--color-line-strong);
+		list-style: none;
+	}
+	.child {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		min-height: var(--control-sm);
+		padding: 0 var(--space-2);
+		animation: arrive var(--duration-base) var(--ease-out);
+	}
+	.child .sentence {
+		color: var(--color-text-muted);
+		font-size: var(--text-sm);
+	}
+	.child.running .sentence {
+		color: var(--color-accent);
+	}
+	.child.failed .sentence {
+		color: var(--color-danger);
+	}
 	.detail {
 		display: flex;
 		flex-direction: column;
@@ -296,7 +338,8 @@ and `checkLine` (src/lib/walk.ts).
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.item {
+		.item,
+		.child {
 			animation: none;
 		}
 		.row :global(.chev) {

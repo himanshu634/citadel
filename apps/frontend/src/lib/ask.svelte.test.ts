@@ -292,3 +292,65 @@ describe('turnFromChat', () => {
 		expect(turnFromChat(t).steps[0]).toMatchObject({ status: 'done', error: NOT_RUN });
 	});
 });
+
+describe('the Archivist inside Ask', () => {
+	const doneInner = (id: string, tool: string, extra = {}) => ({
+		parent: 'o',
+		event: 'step_done',
+		id,
+		tool,
+		input: {},
+		ms: 4,
+		count: 1,
+		error: null,
+		rows: [],
+		nodes: [],
+		rels: [],
+		uids: [],
+		...extra
+	});
+	const outer = { id: 'o', n: 1, tool: 'ask_archivist', input: { kind: 'topic', text: 'old auth' } };
+	const outerDone = { ...outer, ms: 90, count: 1, error: null, rows: [{ summary: 'found 1 older PR' }], nodes: [], rels: [] };
+
+	test('archive_step before its parent step is kept and attached', async () => {
+		serve(
+			sse([
+				['start', { thread_id: 't' }],
+				['archive_step', { parent: 'o', event: 'llm' }],
+				['archive_step', { parent: 'o', event: 'step', id: 'i1', tool: 'archive_search', input: { source: 'github', terms: 'x' } }],
+				['step', outer],
+				['archive_step', doneInner('i1', 'archive_search')],
+				['step_done', outerDone],
+				['answer', { thread_id: 't', text: 'ok', sources: [], path: [], stop: 'tool_use', model: 'm' }]
+			])
+		);
+		const t = new AskThread('acme');
+		await t.ask('q');
+		const [step] = t.turns[0].steps;
+		expect(step.status).toBe('done');
+		expect(step.children?.map((c) => [c.id, c.status])).toEqual([['i1', 'done']]);
+		expect(step.rows).toEqual([{ summary: 'found 1 older PR' }]);
+	});
+
+	test('children replace by id and stay when the parent is done', async () => {
+		serve(
+			sse([
+				['start', { thread_id: 't' }],
+				['step', outer],
+				['archive_step', { parent: 'o', event: 'step', id: 'i1', tool: 'archive_fetch', input: {} }],
+				['archive_step', { parent: 'o', event: 'step', id: 'i2', tool: 'archive_fetch', input: {} }],
+				['archive_step', doneInner('i2', 'archive_fetch')],
+				['step_done', outerDone]
+			])
+		);
+		const t = new AskThread('acme');
+		await t.ask('q');
+		const kids = t.turns[0].steps[0].children ?? [];
+		expect(kids.map((c) => [c.id, c.status])).toEqual([
+			['i1', 'done'],
+			['i2', 'done']
+		]);
+		expect(kids[0].error).toBe(NOT_RUN); // never finished: the run ended
+		expect(kids[1].error).toBeNull();
+	});
+});

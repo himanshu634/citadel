@@ -7,13 +7,14 @@ clicked again (`onpin`). With no answer it says why (refused, stopped, too many 
 Only a small set of Markdown is understood, and never as HTML (`answerBlocks` in walk.ts). With
 `refs`, `#12` and file paths in the text open on GitHub (or the item's own site) in a new tab.
 Pass `reveal` for an answer that just arrived live: its blocks fade in one after another.
-A source that is a Keeper claim (label `Claim`) carries an ink "Keeper" mark, so what the Keeper
+A source the Archivist loaded from before the window (`archived`) carries an "Archive · year"
+badge. A source that is a Keeper claim (label `Claim`) carries an ink "Keeper" mark, so what the Keeper
 holds is told apart from what the sources say; its chip says so to screen readers.
 -->
 <script lang="ts">
 	import type { RefContext } from '$lib/links';
 	import type { AskAnswer } from '$lib/types';
-	import { answerBlocks, sourceKind, type Inline } from '$lib/walk';
+	import { answerBlocks, archiveBadge, sourceKind, type Inline } from '$lib/walk';
 	import RefLink from '../ui/RefLink.svelte';
 
 	type Props = {
@@ -107,6 +108,7 @@ holds is told apart from what the sources say; its chip says so to screen reader
 					<span class="n tabular">{n}</span>
 					<div>
 						{#if src.label === 'Claim'}<span class="keeper">Keeper</span>{/if}
+						{#if archiveBadge(src.archived)}<span class="archive">{archiveBadge(src.archived)}</span>{/if}
 						{#if src.url}
 							<a href={src.url} target="_blank" rel="noreferrer" onfocus={() => onactive?.(n)} onblur={() => onactive?.(null)}
 								>{src.title ?? src.uid}</a
@@ -213,7 +215,8 @@ holds is told apart from what the sources say; its chip says so to screen reader
 	.sources a {
 		text-decoration-color: var(--color-line-strong);
 	}
-	.keeper {
+	.keeper,
+	.archive {
 		display: inline-block;
 		margin-right: var(--space-2);
 		padding: 0 var(--space-1);
@@ -225,6 +228,11 @@ holds is told apart from what the sources say; its chip says so to screen reader
 		font-variation-settings: 'wdth' var(--width-label);
 		line-height: 1.4;
 		vertical-align: 0.0625rem;
+	}
+	.archive {
+		border-style: dashed;
+		color: var(--color-text-muted);
+		border-color: var(--color-line-strong);
 	}
 	small {
 		display: block;

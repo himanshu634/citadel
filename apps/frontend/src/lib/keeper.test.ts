@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from './api/client';
 import {
+	gapStatusWords,
 	checkApproval,
 	criticalLine,
 	decidedLine,
@@ -83,6 +84,17 @@ describe('log lines', () => {
 		expect(logSentence(entry('review_start'))).toBe('Keeper started a review');
 		expect(logSentence(entry('review_skipped'))).toBe('Keeper skipped a review');
 		expect(logSentence(entry('brand_new_thing'))).toBe('Keeper brand new thing');
+	});
+	it('words the Archivist actions and gap status', () => {
+		expect(logSentence(entry('archive_requested', { actor: 'ask' }))).toBe('Ask asked the Archivist for older history');
+		expect(logSentence(entry('archive_loaded', { actor: 'archivist' }))).toBe(
+			'Archivist loaded older history into the brain'
+		);
+		expect(logSentence(entry('archive_nothing', { actor: 'archivist' }))).toBe('Archivist found nothing older');
+		for (const a of ['refused', 'dropped', 'returned', 'conflict', 'released'])
+			expect(logSentence(entry(`archive_${a}`))).not.toBe(`Keeper archive ${a}`);
+		expect(gapStatusWords('waiting_archive')).toBe('Waiting for the Archivist');
+		expect(gapStatusWords('needs_person')).toBe('Needs person');
 	});
 	it('names who was consulted', () => {
 		expect(logSentence(entry('consulted', { why: 'asked pm' }))).toBe('Keeper asked pm about a gap');

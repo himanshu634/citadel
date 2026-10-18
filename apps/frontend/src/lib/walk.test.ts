@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { WalkStep } from './types';
 import {
 	CARRY_MAX,
+	archiveBadge,
 	STAGE,
 	answerBlocks,
 	answerRefs,
@@ -695,5 +696,34 @@ describe('sourceKind', () => {
 		const h = highlightFor({ uid: 'mcp:handbook/search_docs', step: null }, steps);
 		expect([...h.nodes]).toEqual(['mcp:handbook/search_docs']);
 		expect(h.rels.size).toBe(0);
+	});
+});
+
+describe('the Archivist', () => {
+	test('its sentences', () => {
+		const ask = { tool: 'ask_archivist', input: { kind: 'topic', text: 'the 2021 auth rewrite' } };
+		expect(stepSentence(ask)).toBe('Asking the Archivist for the 2021 auth rewrite');
+		expect(stepSentence({ ...ask, rows: [{ summary: 'found 2 older PRs on auth' }] }, true)).toBe(
+			'The Archivist found 2 older PRs on auth'
+		);
+		expect(stepSentence(ask, true)).toBe('Asked the Archivist for the 2021 auth rewrite');
+		expect(stepSentence({ tool: 'archive_search', input: { source: 'github', terms: 'jwt sessions' } })).toBe(
+			'Searching github before the window for "jwt sessions"'
+		);
+		expect(stepSentence({ tool: 'archive_fetch', input: { source: 'github', id: 'synthetic:pr:7' } })).toBe(
+			'Reading PR #7'
+		);
+		expect(stepSentence({ tool: 'archive_lookup', input: { ref: 'synthetic:issue:3' } })).toBe(
+			'Looking up issue #3 in the archive'
+		);
+		expect(stepSentence({ tool: 'submit_archive_answer', input: { outcome: 'nothing_found' } }, true)).toBe(
+			'Found nothing before the window'
+		);
+		expect(shortUid('linear:doc:abc')).toBe('Linear doc abc');
+	});
+	test('the badge shows the year', () => {
+		expect(archiveBadge('2021-03-04T10:00:00Z')).toBe('Archive · 2021');
+		expect(archiveBadge(null)).toBeNull();
+		expect(archiveBadge(undefined)).toBeNull();
 	});
 });

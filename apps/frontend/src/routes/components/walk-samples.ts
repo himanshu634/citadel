@@ -208,3 +208,64 @@ export const laneDone: Turn = turn({
 
 /** Q2 running: the follow-up, with Q1 as context. */
 export const laneFollowUp: Turn = turn({ question: 'And what did Carol change in Auth?', steps: followUp, status: 'running' });
+
+const inner = (id: string, tool: string, input: Record<string, unknown>, extra: Partial<WalkStep> = {}): WalkStep => ({
+	id,
+	n: null,
+	tool,
+	input,
+	status: 'done',
+	ms: 220,
+	count: 1,
+	error: null,
+	rows: [],
+	nodes: [],
+	rels: [],
+	...extra
+});
+
+const askArchivist: WalkStep = {
+	id: 'a1',
+	n: 2,
+	tool: 'ask_archivist',
+	input: { kind: 'topic', text: 'the 2021 move to JWT sessions' },
+	status: 'done',
+	ms: 4800,
+	count: 1,
+	error: null,
+	rows: [{ request: 'topic', outcome: 'found', status: 'done', summary: 'found 1 older PR and loaded it', finds: [] }],
+	nodes: [],
+	rels: [],
+	children: [
+		inner('a1.1', 'archive_search', { source: 'github', terms: 'jwt sessions' }, { count: 3 }),
+		inner('a1.2', 'archive_fetch', { source: 'github', id: 'synthetic:pr:1' }),
+		inner('a1.3', 'get_entity', { uid: 'synthetic:pr:1' }),
+		inner('a1.4', 'submit_archive_answer', { outcome: 'found' }, { ms: null, count: null })
+	]
+};
+
+/** The Archivist at work inside Ask: its own steps nest under the `ask_archivist` step. */
+export const archivistRunning: WalkStep[] = [
+	profile,
+	{
+		...askArchivist,
+		status: 'running',
+		ms: null,
+		count: null,
+		rows: [],
+		children: [
+			askArchivist.children![0],
+			{ ...askArchivist.children![1], status: 'running', ms: null, count: null }
+		]
+	}
+];
+
+/** The Archivist done: the sentence is its own summary. */
+export const archivistDone: WalkStep[] = [profile, askArchivist, check];
+
+/** An answer citing a PR the Archivist loaded from before the window. */
+export const archived: AskAnswer = {
+	...answer,
+	text: 'Sessions moved to JWT in the **2021 rewrite** [1], reviewed by carol [2].',
+	sources: [{ ...answer.sources[1], step: 2, archived: '2021-03-04T10:00:00Z' }, answer.sources[2]]
+};

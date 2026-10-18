@@ -336,6 +336,7 @@ export function shortUid(uid: string): string {
 	if (parts.length >= 3 && kind === 'pr') return `PR #${id}`;
 	if (parts.length >= 3 && kind === 'issue') return `issue #${id}`;
 	if (parts.length >= 3 && kind === 'commit') return `commit ${id}`;
+	if (parts.length >= 3 && kind === 'doc' && parts[0] === 'linear') return `Linear doc ${id}`;
 	return parts.slice(1).join(':') || uid;
 }
 
@@ -373,6 +374,25 @@ const SAID: Record<string, (p: Record<string, unknown>) => Said> = {
 		`Filing what you said about ${shortUid(str(p.subject_uid))}`,
 		`Filed what you said about ${shortUid(str(p.subject_uid))} for a lead to approve`
 	],
+	// The Archivist, called from Ask (outer step) and its own tools (inner steps).
+	ask_archivist: (p) => {
+		const text = str(p.text);
+		return [`Asking the Archivist for ${text}`, `Asked the Archivist for ${text}`];
+	},
+	archive_lookup: (p) => [`Looking up ${shortRef(str(p.ref))} in the archive`, `Looked up ${shortRef(str(p.ref))} in the archive`],
+	archive_search: (p) => [
+		`Searching ${str(p.source)} before the window for "${str(p.terms)}"`,
+		`Searched ${str(p.source)} before the window for "${str(p.terms)}"`
+	],
+	archive_fetch: (p) => [`Reading ${shortRef(str(p.id))}`, `Read ${shortRef(str(p.id))}`],
+	submit_archive_answer: (p) => [
+		'Handing back what it found',
+		p.outcome === 'nothing_found'
+			? 'Found nothing before the window'
+			: p.outcome === 'already_in_brain'
+				? 'Found it was already in the brain'
+				: 'Handed back what it found'
+	],
 	// The Keeper review's tools and the submits of its pm, qa and keeper jobs.
 	keeper_notes: (p) => [`Reading the Keeper's notes on ${shortUid(str(p.uid))}`, `Read the Keeper's notes on ${shortUid(str(p.uid))}`],
 	submit_consult: (p) => [
@@ -395,11 +415,31 @@ const SAID: Record<string, (p: Record<string, unknown>) => Said> = {
 	]
 };
 
+/** The badge on a source the Archivist loaded: "Archive · 2021"; null when it did not. */
+export function archiveBadge(archived: string | null | undefined): string | null {
+	const year = archived ? /^\d{4}/.exec(archived)?.[0] : null;
+	return year ? `Archive · ${year}` : null;
+}
+
+/** An archive reference as a person reads it: a uid, an `owner/repo#12` or a URL. */
+function shortRef(ref: string): string {
+	if (/^https?:\/\//.test(ref)) {
+		const path = ref.replace(/^https?:\/\/[^/]+\//, '').replace(/\/(pull|issues)\//, '#');
+		return path.length > 40 ? `${path.slice(0, 39)}…` : path;
+	}
+	return ref.includes(':') ? shortUid(ref) : ref;
+}
+
 /** "a" or "an" before a word. */
 const article = (word: string) => (/^[aeiou]/i.test(word) ? 'an' : 'a');
 
 /** What the agent is doing in this step, in plain words; `done` says what it did. */
-export function stepSentence(step: Pick<WalkStep, 'tool' | 'input'>, done = false): string {
+export function stepSentence(step: Pick<WalkStep, 'tool' | 'input'> & { rows?: unknown[] }, done = false): string {
+	// A finished request says what the Archivist reported, not what was asked.
+	if (done && step.tool === 'ask_archivist') {
+		const summary = (step.rows?.[0] as { summary?: unknown } | undefined)?.summary;
+		if (typeof summary === 'string' && summary.trim()) return `The Archivist ${summary.trim()}`;
+	}
 	const said = SAID[step.tool]?.(step.input ?? {}) ?? [`Running ${step.tool}`, `Ran ${step.tool}`];
 	return said[done ? 1 : 0];
 }
@@ -518,7 +558,7 @@ export function ledgerItems(steps: WalkStep[], settled: boolean): LedgerItem[] {
 		run = [];
 	};
 	for (const s of graph) {
-		const foldable = stepState(s) === 'done';
+		const foldable = stepState(s) === 'done' && s.tool !== 'ask_archivist';
 		if (foldable && run.length && run[0].tool === s.tool) run.push(s);
 		else {
 			flush();

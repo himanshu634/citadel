@@ -39,6 +39,8 @@ export interface Source {
 	title: string;
 	meta: string;
 	url?: string;
+	/** An ISO date when the Archivist loaded it from before the window. */
+	archived?: string | null;
 }
 
 export interface CitedAnswer {
@@ -502,6 +504,38 @@ export interface AskLlmEvent {
 	calls: AskCall[];
 }
 
+/**
+ * A step of the Archivist inside Ask's `ask_archivist` step (`archive_step` event). `parent` is
+ * the id of the outer step; it may arrive before that step does. `llm` events are not listed.
+ */
+export type AskArchiveStepEvent =
+	| { parent: string; event: 'llm' }
+	| ({ parent: string; event: 'step' } & Pick<AskStepEvent, 'id' | 'tool' | 'input'>)
+	| ({ parent: string; event: 'step_done' } & Omit<AskStepDoneEvent, 'n'>);
+
+/** A find the Archivist handed back (a row of `ask_archivist`'s result). */
+export interface ArchiveFind {
+	uid: string;
+	title: string;
+	url: string | null;
+	date: string | null;
+	verdict: 'holds' | 'superseded' | 'conflicts';
+	superseded_by: string | null;
+	archived: true;
+}
+
+/** The one row of a done `ask_archivist` step. */
+export interface ArchiveRequest {
+	request: string;
+	outcome: 'found' | 'nothing_found' | 'already_in_brain' | null;
+	status: string;
+	summary: string | null;
+	partial: boolean;
+	reason: string | null;
+	calls: number;
+	finds: ArchiveFind[];
+}
+
 export interface AskStepDoneEvent extends AskStepEvent {
 	ms: number | null;
 	/** Rows returned, all of them; `rows` holds the first few. */
@@ -519,6 +553,8 @@ export interface AskSource {
 	label: string | null;
 	/** The step that first returned it. */
 	step: number | null;
+	/** An ISO date when the Archivist loaded it from before the window; the badge shows the year. */
+	archived?: string | null;
 }
 
 export interface AskAnswer {
@@ -556,6 +592,8 @@ export interface ModelsOut {
 /** One tool call as the page shows it: asked for (running), then done. */
 export interface WalkStep extends AskStepEvent {
 	status: 'running' | 'done';
+	/** The Archivist's own steps, under its `ask_archivist` step. */
+	children?: WalkStep[];
 	ms?: number | null;
 	count?: number | null;
 	error?: string | null;
@@ -644,7 +682,7 @@ export interface Feedback {
 export interface ActivityStep {
 	/** 1-based, in the order the agent ran them. */
 	n: number;
-	/** `brain` for Ask; `keeper`, `pm` or `qa` for a step of a Keeper review. */
+	/** `brain` for Ask; `keeper`, `pm` or `qa` for a step of a Keeper review; `archivist` for its own run. */
 	actor: string;
 	tool: string;
 	kind: CallKind;
@@ -660,7 +698,7 @@ export interface ActivityStep {
 export interface ActivityRun {
 	/** `ask:<thread id>:<turn n>` or `keeper:<review uid>`. */
 	id: string;
-	source: 'ask' | 'keeper';
+	source: 'ask' | 'keeper' | 'archive';
 	/** `brain` for Ask, `keeper` for a review (its steps name pm, qa or keeper). */
 	actor: string;
 	/** What the run was for: the question, or the review's first gap. */

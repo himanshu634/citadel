@@ -51,3 +51,20 @@ export const failedRun: ActivityRun = {
 	ended_at: at(180),
 	steps: []
 };
+
+/** The Archivist's own run (Systems page): the same step list, its actor named. */
+export const archivistRun: ActivityRun = {
+	id: 'archivist:sample:1',
+	source: 'archive',
+	actor: 'archivist',
+	title: 'the 2021 move to JWT sessions',
+	status: 'done',
+	started_at: at(6),
+	ended_at: at(5),
+	thread_id: null,
+	steps: [
+		step(1, 'archive_search', { source: 'github', terms: 'jwt sessions' }, [], { actor: 'archivist', kind: 'server', count: 3 }),
+		step(2, 'archive_fetch', { source: 'github', id: 'synthetic:pr:1' }, [], { actor: 'archivist', kind: 'server' }),
+		step(3, 'submit_archive_answer', { outcome: 'found' }, [], { actor: 'archivist', kind: 'submit', count: null })
+	]
+};
