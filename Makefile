@@ -8,12 +8,15 @@
 
 SLUG ?= falkordb
 API_PORT ?= 8000
+FE_PORT ?= 5173
+# The frontend's Vite proxy reads API_PORT from the environment.
+export API_PORT
 BRAIN := uv run brain
 AGENTS := uv run agents
 BACKEND := uv run backend
 
 .DEFAULT_GOAL := help
-.PHONY: help setup up down logs ps browser init schema fetch ingest embed sync stats query tools ask chat eval eval-report eval-drafts traces reset linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
+.PHONY: help start setup up down logs ps browser init schema fetch ingest embed sync stats query tools ask chat eval eval-report eval-drafts traces reset linear-seed brain test lint fmt check clean synthetic api dev fe-install fe-dev fe-check fe-build fe-test
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
@@ -22,6 +25,9 @@ help: ## Show this help
 	@echo "  Variables: SLUG=$(SLUG)  TOOL=<name>  P="k=v ..."  JSON=1  SOURCE=<type>  FULL=1  NAME=<display name>  CONFIRM=1  ARGS=\"...\"  API_PORT=$(API_PORT)"
 
 # --- Environment ------------------------------------------------------------------------------
+
+start: ## One command from a fresh clone: checks tools/.env/ports first, then deps, FalkorDB, demo brain, API + app
+	@API_PORT=$(API_PORT) FE_PORT=$(FE_PORT) bash scripts/start.sh
 
 setup: ## Install deps (uv sync) and create .env from .env.example if missing
 	@test -f .env || (cp .env.example .env && echo "Created .env from .env.example")
@@ -130,8 +136,8 @@ FE := pnpm --dir apps/frontend
 fe-install: ## Install frontend deps
 	$(FE) install
 
-fe-dev: ## Frontend dev server on http://localhost:5173
-	$(FE) dev --port 5173
+fe-dev: ## Frontend dev server on http://localhost:5173 (FE_PORT moves it)
+	$(FE) dev --port $(FE_PORT) --strictPort
 
 fe-check: ## Type-check the frontend (svelte-check)
 	$(FE) check
