@@ -66,6 +66,8 @@ found nothing, and how many more rows the agent read than are shown.
 	}
 	li {
 		display: flex;
+		/* The list scrolls: a wrapped row keeps its height instead of shrinking under the next. */
+		flex: none;
 		align-items: center;
 		gap: var(--space-2);
 		min-height: var(--control-sm);
