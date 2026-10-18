@@ -65,6 +65,8 @@ Rules:
   `--color-text-muted`; ready and empty = no badge. The icon repeats what the accessible name says in
   words ("building", "last build failed", "config invalid", "graph unreachable").
 - `-soft` tints are for selected rows and citation chips, with text in the matching strong colour.
+  One exception: a sidebar item where something waits for the user ("Review claims") takes
+  `--color-warning-soft` and a count pill in `--color-warning`, never the accent.
   `--color-accent-soft` is also the fill of the user's question bubble on the Ask page, with ink text.
 - Node colours are for marks (dots, bars, avatar initials), never for body text or buttons.
 - Work item state maps to badges as: open = success, merged = accent, closed = neutral.
@@ -178,11 +180,28 @@ Rules:
   did. A Keeper review on the map is labelled by the step's own agent ("qa · Asking who knows
   Billing best"); in the rail it is "Keeper review", titled by its first gap, each step naming pm,
   qa or Keeper.
-- The rail, top to bottom: "Waiting for you · n" (claims in `pending_approval`, `ClaimApproval`),
-  the run, the Keeper log (`KeeperLog`, 20 lines, the runner's `episode` lines left out), then
-  Other runs. Claims and log are read again when a Keeper run starts, takes a step or ends, after
-  Review now and after each decision. The approver's name is kept in this browser
-  (`citadel-keeper-name`). Approve and Reject are secondary: the bar's Review now is the primary.
+- The rail, top to bottom: the run, the Keeper log (`KeeperLog`, 20 lines, the runner's
+  `episode` lines left out), then Other runs. The log is read again when a Keeper run starts,
+  takes a step or ends and after Review now. Claims waiting for a lead are not in the rail: a
+  logged claim that still waits links to the review page.
+
+### The review page (design direction D, list and detail)
+
+- `/c/<slug>/review`, opened from the sidebar's Keeper group, "Review claims", which shows the
+  count of claims in `pending_approval` (read every 20 s, 60 s in a hidden tab, and at once
+  after a decision or a Keeper step; `src/lib/pendingClaims.svelte.ts`). A bleed page.
+- The bar: title, one line on what waits, "n waiting · m decided here", and "Deciding as": the
+  approver's name, typed once for every claim and kept in this browser (`citadel-keeper-name`).
+  A missing or refused name is said under that field.
+- Left, the list: "Waiting · n", each claim as its kind, subject and statement (two lines); the
+  open one has the accent-soft fill and an accent edge. Under it "Decided here · n" for this
+  visit, each with a badge (Approved = success, Rejected = neutral, approved but the sources differ
+  or not added = warning). Right, the open claim (`ClaimApproval`). The open claim is in the URL
+  (`?claim=<uid>`); a link to a claim that no longer waits says so and opens the first one.
+- A decision opens the next claim and says what it did on a success-soft line (warning-soft when
+  it failed because someone decided first or the claim is gone). Approve is the page's primary.
+- Nothing waiting: an empty state that links to Systems, and the recent decisions from the log.
+  Below 64rem the list stacks above the claim.
 
 ### The Sources page (design direction A, the source ledger)
 
@@ -313,10 +332,10 @@ not add another component library.
 | `CompanyRail` | One tile per company brain; one click switches company and keeps the section you are on. Monogram 15px at width 118; ink for the current tile (section 3). Tooltip shows the name and `brain_<slug>` in mono. The + opens `AddCompanyDialog`. |
 | `TerritoryMap` | The whole company graph as territories (section 6, The graph map). Canvas plus an HTML label layer; drag pans, scroll zooms (`scrollZoom={false}` where it sits in a scrolling page; pinch and the buttons still zoom), click selects. Colours are read from the tokens and re-read when the theme changes. With `trail` (and `here`) it draws an agent's run over the map (section 6, The Systems page). |
 | `AgentRun` | One agent run in the Systems page's rail: who and when, the question, a status (Working now in ink, Done, Stopped, Failed in danger), "n steps · m not on the map", then every step numbered as on the map, its tool and rows. A node a step names ("Opened PR #10") is a `RefLink`. Links to the chat an Ask run came from. A Keeper review reads "Keeper review", titled by its first gap, and each step names its agent (pm, qa, Keeper) in ink. |
-| `ClaimApproval` | One Keeper claim waiting for a lead (Systems rail): `pending_approval` badge and its kind, the statement, why it needs a lead in words ("it touches a high-impact system"), the gap it answers, its evidence as `NodeChip`s (linked when the map knows a url), then "Your name" (required, 1 to 80 once trimmed; no sign-in), "Why (optional)" (500 at most), and Approve and Reject (secondary). Errors say what happened: a 409 "Someone already decided this claim", a 404 that it is gone, a 503 the server's sentence, a 422 under its field. Rules in `src/lib/keeper.ts`. |
+| `ClaimApproval` | One Keeper claim waiting for a lead (the review page's detail pane): its kind and subject chip, the statement in `--text-2xl`, "Why it needs you" with one row per reason (a heading and what it means), the gap it answers when it says more than the statement, its evidence as `NodeChip`s (linked when the graph knows a url), then "Why (optional)" (500 at most), Reject (secondary) and Approve (primary) in a footer that stays put while the body scrolls. The name (required, 1 to 80 once trimmed; no sign-in) comes from the page's header; a missing or refused one goes back through `onnameerror`. Errors say what happened: a 409 "Someone already decided this claim", a 404 that it is gone, a 503 the server's sentence, a 422 under its field. Rules in `src/lib/keeper.ts`. |
 | `KeeperLog` | The Keeper's log, newest first: the time in mono (clock today, else `6 Feb`), who did what in words ("pm opened a follow-up"; `auto` reads as Keeper), then why in muted text; the gap's text under a line about a gap, and "See the claim" when the rail shows that claim. |
 | `NodeInspector` | The selected node: kind, territory and state, its fields (`get_entity`), where its neighbours live, its links by relationship, and its most linked neighbours, which select in turn. Counts come from the links the map draws. Its number, commit and path, and the refs in its body, are links; the footer button names the site ("Open on GitHub", "Open on Linear") and shows only when the node has a page. |
-| `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". The sidebar folds to icons (`--sidebar-folded`) from the top bar's fold button or the `[` key; the choice is kept in `citadel-sidebar`. `/graph`, `/ask` and `/systems` are bleed pages: no width cap, no padding. |
+| `AppShell`, `Sidebar`, `Topbar`, `ThemeToggle` | The frame. Nav items for unbuilt sections stay visible, inert, marked "Soon". The sidebar folds to icons (`--sidebar-folded`) from the top bar's fold button or the `[` key; the choice is kept in `citadel-sidebar`. `/graph`, `/ask`, `/systems` and `/review` are bleed pages: no width cap, no padding. |
 
 Adding a component:
 
