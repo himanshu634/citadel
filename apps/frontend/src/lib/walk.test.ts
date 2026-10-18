@@ -11,14 +11,19 @@ import {
 	highlightFor,
 	ledgerItems,
 	ledgerRuns,
-	layoutWalk,
+	WALK_MS,
+	growSchedule,
+	layoutFollow,
 	mergeWalk,
 	nodeType,
+	pillHalfWidth,
 	progressLine,
 	relKey,
+	relTypesLine,
 	rowViews,
 	shortUid,
 	sourceKind,
+	stepAnchor,
 	stepCall,
 	stepHighlight,
 	stepSentence,
@@ -106,23 +111,24 @@ describe('mergeWalk', () => {
 	});
 });
 
-describe('layoutWalk', () => {
-	const walk = mergeWalk([profile, paths]);
+describe('layoutFollow', () => {
+	const wide = (uid: string) => pillHalfWidth(mergeWalk([profile, paths]).nodes.find((n) => n.uid === uid)?.title ?? '');
 
-	test('puts the start in the middle and every node on stage, the same way each time', () => {
-		const pos = layoutWalk(walk);
+	test('starts the first step in the middle, every node on stage, the same way each time', () => {
+		const { pos, spots } = layoutFollow([profile, paths], wide);
 		expect(pos.get('person:alice')).toEqual({ x: STAGE.width / 2, y: STAGE.height / 2 });
+		expect(spots.get(1)).toEqual({ x: STAGE.width / 2, y: STAGE.height / 2 });
 		for (const p of pos.values()) {
 			expect(p.x).toBeGreaterThanOrEqual(0);
 			expect(p.x).toBeLessThanOrEqual(STAGE.width);
 			expect(p.y).toBeGreaterThanOrEqual(0);
 			expect(p.y).toBeLessThanOrEqual(STAGE.height);
 		}
-		expect(layoutWalk(walk)).toEqual(pos);
+		expect(layoutFollow([profile, paths], wide)).toEqual({ pos, spots });
 	});
 
 	test('nodes do not sit on top of each other', () => {
-		const pos = [...layoutWalk(walk).values()];
+		const pos = [...layoutFollow([profile, paths], wide).pos.values()];
 		for (let i = 0; i < pos.length; i++)
 			for (let j = i + 1; j < pos.length; j++) {
 				const far = Math.abs(pos[i].x - pos[j].x) > 60 || Math.abs(pos[i].y - pos[j].y) > 24;
@@ -131,12 +137,81 @@ describe('layoutWalk', () => {
 	});
 
 	test('a new step barely moves the nodes already drawn', () => {
-		const first = layoutWalk(mergeWalk([profile]));
-		const next = layoutWalk(walk, first);
+		const first = layoutFollow([profile], wide).pos;
+		const next = layoutFollow([profile, paths], wide).pos;
 		for (const [uid, p] of first) {
 			const q = next.get(uid)!;
-			expect(Math.hypot(p.x - q.x, p.y - q.y)).toBeLessThan(80);
+			expect(Math.hypot(p.x - q.x, p.y - q.y)).toBeLessThan(40);
 		}
+	});
+
+	test('a step grows in place from a node an earlier step grew from, else from a spot of its own', () => {
+		const history: WalkStep = {
+			id: 't5',
+			n: 2,
+			tool: 'work_history',
+			input: { system: 'Auth' },
+			status: 'done',
+			nodes: [auth, pr1],
+			rels: [{ from: pr1.uid, to: 'system:Auth', type: 'changed', inferred: true }]
+		};
+		const { pos, spots } = layoutFollow([profile, history]);
+		expect(spots.get(2)).toEqual(pos.get('system:Auth'));
+		const search: WalkStep = { ...history, id: 't6', n: 3, tool: 'related_documents', input: { text: 'jwt' }, nodes: [pr10], rels: [] };
+		const later = layoutFollow([profile, history, search]);
+		expect(later.spots.get(3)).not.toEqual(later.spots.get(1));
+	});
+
+	test('a long list with no links goes round the edge; an empty step stays where the agent was', () => {
+		const systems: WalkStep = {
+			id: 't7',
+			n: 1,
+			tool: 'list_systems',
+			input: {},
+			status: 'done',
+			nodes: Array.from({ length: 8 }, (_, i) => ({ uid: `system:s${i}`, label: 'System', title: `s${i}`, url: null })),
+			rels: []
+		};
+		const none: WalkStep = { id: 't8', n: 2, tool: 'person_profile', input: { login: 'himanshu' }, status: 'done', nodes: [], rels: [] };
+		const { pos, spots } = layoutFollow([systems, none]);
+		for (const p of pos.values()) expect(Math.hypot((p.x - 320) / 290, (p.y - 210) / 182)).toBeGreaterThan(0.85);
+		expect(spots.get(2)).toEqual(spots.get(1));
+	});
+});
+
+describe('stepAnchor', () => {
+	test('names the node a query was asked about', () => {
+		expect(stepAnchor({ tool: 'work_history', input: { system: 'Auth' } })).toBe('system:Auth');
+		expect(stepAnchor({ tool: 'open_work_for', input: { login: 'Alice' } })).toBe('person:alice');
+		expect(stepAnchor({ tool: 'get_entity', input: { uid: 'synthetic:pr:1' } })).toBe('synthetic:pr:1');
+		expect(stepAnchor({ tool: 'related_documents', input: { text: 'jwt' } })).toBeNull();
+	});
+});
+
+describe('growSchedule', () => {
+	test('grows hop 1 before hop 2, every link from the end nearer the anchor, inside the budget', () => {
+		const g = growSchedule(paths, new Set());
+		expect(g.arrive.get('person:alice')).toBe(0);
+		const reviewed = g.links.find((l) => l.key === relKey(paths.rels![0]))!;
+		expect(reviewed.src).toBe('person:alice');
+		const authored = g.links.find((l) => l.key === relKey(paths.rels![1]))!;
+		expect(authored.src).toBe(pr10.uid);
+		expect(authored.t0).toBeGreaterThan(reviewed.t0);
+		for (const l of g.links) expect(l.t1).toBeLessThanOrEqual(WALK_MS.grow);
+		expect(g.arrive.get('person:carol')!).toBeGreaterThan(g.arrive.get(pr10.uid)!);
+	});
+
+	test('nodes no link reaches come in on spokes; drawn nodes need no arrival', () => {
+		const list: WalkStep = { id: 'x', n: 4, tool: 'list_systems', input: {}, status: 'done', nodes: [auth, identity], rels: [] };
+		const g = growSchedule(list, new Set(['team:identity']));
+		expect(g.spokes.map((s) => s.uid)).toEqual(['system:Auth']);
+		expect(g.arrive.has('team:identity')).toBe(false);
+	});
+});
+
+describe('relTypesLine', () => {
+	test('counts relationships, busiest first', () => {
+		expect(relTypesLine(paths.rels!)).toBe('reviewed 2 · member_of 2 · authored 1 · commented_on 1');
 	});
 });
 

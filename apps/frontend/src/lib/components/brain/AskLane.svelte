@@ -270,7 +270,7 @@ screen readers the step under way. Below 1100px the walk goes under the conversa
 				<span class="meta tabular">{plural(nodes, 'node')}</span>
 			</h3>
 			{#if drawn}
-				<GraphWalk steps={shown} {highlight} {fresh} {cited} {carried} />
+				<GraphWalk steps={shown} {highlight} {fresh} {cited} {carried} working={running} />
 			{:else}
 				<div class="placeholder" aria-hidden="true">
 					<div class="placeholder-canvas"></div>
