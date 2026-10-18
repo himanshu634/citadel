@@ -67,7 +67,7 @@
         max_steps: 6
 
 - id: jwt-why-and-who
-  tags: [history, why]
+  tags: [falkordb, fulltext, history, why]
   why: PR 1 (alice) replaced sessions with JWTs because the session table loaded the DB (issue 11).
   turns:
     - question: Why did we switch sessions to JWT, and who did it?
@@ -78,7 +78,7 @@
         max_steps: 8
 
 - id: duplicate-invoices
-  tags: [history, why]
+  tags: [falkordb, fulltext, history, why]
   why: issue 14 is open; the runbook and bob's comment point at the batch job's retry (PR 4).
   turns:
     - question: Why are invoice emails sometimes sent twice?
@@ -168,7 +168,7 @@
 # (EMBEDDING_PROVIDER=fastembed) when the graph is built.
 
 - id: semantic-login-state
-  tags: [semantic]
+  tags: [falkordb, vector, semantic]
   why: the question never says session, JWT, login or server; PR #1 and issue #11 say why sessions moved to JWTs.
   turns:
     - question: What drove dropping per-user records kept by our backend in favour of signed credentials?
@@ -179,7 +179,7 @@
         max_steps: 5
 
 - id: semantic-overcharge
-  tags: [semantic]
+  tags: [falkordb, vector, semantic]
   why: the question never says month, upgrade, customer, charged, billing or plan; issue #12 and PR #3 (proration) explain it.
   turns:
     - question: Why did people owe a whole period's fee after moving to a higher tier midway through?
@@ -190,7 +190,7 @@
         max_steps: 6
 
 - id: semantic-own-database
-  tags: [semantic]
+  tags: [falkordb, vector, semantic]
   why: the question never says Postgres, managed or backups; PR #8 and ADR-001 give the reason.
   turns:
     - question: What went wrong that made us outsource running our relational data store to a vendor?
@@ -211,3 +211,151 @@
         tools_all: [open_gaps]
         tools_none: [record_testimony]
         max_steps: 6
+
+# --- FalkorDB features ----------------------------------------------------------------------
+# One Ask question per graph algorithm or FalkorDB feature behind a tool, so `make eval
+# CASE=falkordb` walks all of them (the full-text and vector cases above carry the tag too):
+#   algo.SPpaths     path_between       algo.pageRank      central_nodes (System, WorkItem, Document)
+#   algo.betweenness bottlenecks        variable-length    blocked_on, waiting_on (BLOCKS*1..3)
+#   aggregation      collaborators, issues_by_system      chained algorithms   falkordb-chain
+
+- id: sppaths-people
+  tags: [falkordb, sppaths]
+  why: carol and dave share no team; the shortest path runs through PR 1 (JWT), which both reviewed.
+  turns:
+    - question: How are Carol and Dave connected?
+      expect:
+        cite_any: [synthetic:pr:1]
+        tools_any: [path_between]
+        text_any: [jwt, "#1", "PR 1"]
+        max_steps: 5
+
+- id: sppaths-person-system
+  tags: [falkordb, sppaths]
+  why: dave owns Infra, and bob's invoice query index commit touched both Infra and Billing.
+  turns:
+    - question: What links Dave to the Billing system?
+      expect:
+        cite_any: [synthetic:commit:b005, system:Infra]
+        tools_any: [path_between]
+        text_all: [infra]
+        max_steps: 5
+
+- id: pagerank-systems
+  tags: [falkordb, pagerank]
+  why: Infra is the most central system by PageRank (every system's changes touch its files).
+  turns:
+    - question: Which system is the most central to the company, the one the most other things lead to?
+      expect:
+        cite_any: [{tool: central_nodes, params: {label: System}, field: uid}]
+        tools_any: [central_nodes]
+        text_all: [infra]
+        max_steps: 4
+
+- id: pagerank-work-items
+  tags: [falkordb, pagerank]
+  why: issues 11 (session table load) and 12 (overcharged on upgrades) rank highest among work items.
+  turns:
+    - question: Which PRs or issues are the most important hubs in our history?
+      expect:
+        cite_any: [{tool: central_nodes, params: {label: WorkItem}, field: uid, top: 2}]
+        tools_any: [central_nodes]
+        text_any: [session table, overcharged]
+        max_steps: 4
+
+- id: pagerank-documents
+  tags: [falkordb, pagerank]
+  why: central_nodes ranks Documents too; the top one comes from the graph, not a fixed answer.
+  turns:
+    - question: Which of our design docs is the most central one?
+      expect:
+        cite_any: [{tool: central_nodes, params: {label: Document}, field: uid}]
+        tools_any: [central_nodes]
+        max_steps: 4
+
+- id: betweenness-all
+  tags: [falkordb, betweenness]
+  why: PR 9 (usage-based add-ons) sits on the most BLOCKS/CLOSES/MENTIONS chains between other work.
+  turns:
+    - question: What is the biggest bottleneck in our work, the item the most other work runs through?
+      expect:
+        cite_any: [{tool: bottlenecks, field: uid}]
+        tools_any: [bottlenecks]
+        text_any: [add-on, "#9", "PR 9"]
+        max_steps: 4
+
+- id: betweenness-open
+  tags: [falkordb, betweenness]
+  why: only open work counts; PR 9 and PAY-2 remain, the merged PRs 3 and 1 drop out.
+  turns:
+    - question: Which open tickets or PRs are holding up the most other work right now?
+      expect:
+        cite_any: [{tool: bottlenecks, params: {open_only: true}, field: uid, top: 2}]
+        cite_none: [synthetic:pr:1, synthetic:pr:3]
+        tools_any: [bottlenecks]
+        text_any: [PAY-2, add-on]
+        max_steps: 4
+
+- id: blocked-on-two-hops
+  tags: [falkordb, varlength]
+  why: carol's IDN-2 waits on IDN-1 (alice) and PAY-2 (bob) directly, and on PAY-3 (erin) two BLOCKS hops away.
+  turns:
+    - question: What is Carol's work waiting on, and who has to move first?
+      expect:
+        cite_all: [synthetic:ticket:IDN-1, synthetic:ticket:PAY-3]
+        tools_any: [blocked_on]
+        text_all: [alice, bob, erin]
+        max_steps: 5
+
+- id: waiting-on-alice
+  tags: [falkordb, varlength]
+  why: alice's IDN-1 blocks carol's IDN-2 and erin's PAY-4.
+  turns:
+    - question: Whose work is stuck behind Alice?
+      expect:
+        cite_any: [synthetic:ticket:IDN-2, synthetic:ticket:PAY-4]
+        tools_any: [waiting_on]
+        text_all: [carol, erin]
+        max_steps: 5
+
+- id: collaborators-alice
+  tags: [falkordb, aggregation]
+  why: carol reviewed or was reviewed by alice three times, more than anyone else.
+  turns:
+    - question: Who works most closely with Alice?
+      expect:
+        cite_any: [person:carol]
+        tools_any: [collaborators]
+        text_all: [carol]
+        max_steps: 4
+
+- id: issues-per-system
+  tags: [falkordb, aggregation]
+  why: Web app has the most issues (three, all closed).
+  turns:
+    - question: Which part of the code has had the most issues?
+      expect:
+        cite_any: [{tool: issues_by_system, field: system_uid}]
+        tools_any: [issues_by_system]
+        text_all: [web]
+        max_steps: 4
+
+- id: falkordb-chain
+  tags: [falkordb, betweenness, sppaths, thread]
+  why: three algorithms in one thread - betweenness finds PR 9, its author is erin, SPpaths links erin to carol.
+  turns:
+    - question: What open work is the biggest bottleneck right now?
+      expect:
+        cite_any: [{tool: bottlenecks, params: {open_only: true}, field: uid}]
+        tools_any: [bottlenecks]
+        max_steps: 4
+    - question: Who is working on it?
+      expect:
+        cite_any: [person:erin, synthetic:pr:9, synthetic:ticket:PAY-3]
+        text_all: [erin]
+        max_steps: 4
+    - question: How is that person connected to Carol?
+      expect:
+        cite_any: [synthetic:pr:5, synthetic:pr:9]
+        tools_any: [path_between]
+        max_steps: 4

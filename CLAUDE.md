@@ -283,7 +283,9 @@ live FalkorDB repo: rankings only as gold refs, literals only for merged PR/issu
 uids, several questions taken from real Ask traces). Results: `data/evals/<slug>/<time>-<model>-<effort>.jsonl`; `BASELINE=` diffs pass rates
 against an earlier file; `make eval-report FILES=...` (`evals/report.py`) turns result files into the
 Markdown tables of docs/evals.md (published runs: `docs/evals/<slug>/`). The `[semantic]` cases ask in words with no full-text overlap (the
-graph must be embedded). It calls the API, so it is not part of `make test`;
+graph must be embedded). The `[falkordb]` cases (`CASE=falkordb`) ask one question per graph algorithm or
+FalkorDB feature behind a tool (SPpaths, PageRank, betweenness, variable-length BLOCKS, full-text,
+vector), plus one thread that chains three of them. It calls the API, so it is not part of `make test`;
 `apps/agents/tests/test_evals.py` checks the case files and the harness with the scripted client.
 `evals/drafts.py` (`make eval-drafts`) turns thumbs-down traces into cases `fb-<trace id>`: the
 earlier turns of the thread, then the bad one expecting only an answer, with the bad answer in
