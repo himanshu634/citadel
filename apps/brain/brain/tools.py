@@ -485,9 +485,10 @@ def _since(p: dict[str, Any]) -> dict[str, Any]:
 def fulltext_query(text: str) -> str:
     """Plain text -> RediSearch query: words OR-ed, so any word matches and more is better.
 
-    Only word characters survive, so user text can never inject RediSearch syntax.
+    Only word characters survive, so user text can never inject RediSearch syntax. Words of
+    one character are dropped; two-letter ones stay (system names such as CI or DB).
     """
-    words = dict.fromkeys(w.lower() for w in re.findall(r"\w+", text) if len(w) > 2)
+    words = dict.fromkeys(w.lower() for w in re.findall(r"\w+", text) if len(w) > 1)
     return "|".join(words)
 
 
