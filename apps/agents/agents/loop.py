@@ -9,7 +9,10 @@
 
 The graph owns the loop (not the SDK tool runner), so every step is checkpointed. Rules it keeps:
 - State holds messages in Anthropic's own block format and is append-only. Assistant content is
-  stored exactly as returned (thinking blocks included); the API rejects edited history.
+  stored exactly as returned (thinking blocks included); the API rejects edited history. A
+  thread can outlive a change to the system prompt or the tools (a deploy): every request sends
+  `prefix_mismatch_behavior: "drop_block"` (`llm.THINKING`), so the API drops the thinking
+  blocks made under the old prefix instead of refusing the request.
 - All tool results of one assistant turn go back in a single user message.
 - The answer arrives through the `submit_answer` tool (the current models reject forced tool
   choice, so the system prompt asks for it). Cited uids must have appeared in a tool result in
@@ -152,13 +155,15 @@ def add_brain_loop(
         # unchanged (append-only); a model that cannot read another's blocks drops them itself.
         model = state.get("ask_model") or s.anthropic_model
         fallback = llm.fallback_params(model)
-        extra = mcp_.request_params(mcp, state["messages"], fallback.pop("betas", []))
+        betas = [llm.THINKING_BINDING_BETA, *fallback.pop("betas", [])]
+        extra = mcp_.request_params(mcp, state["messages"], betas)
         with client.beta.messages.stream(
             model=model,
             max_tokens=s.anthropic_max_tokens,
             system=[{"type": "text", "text": system_prompt}],
             tools=tool_defs,
             messages=state["messages"],
+            thinking=llm.THINKING,  # thinking from before a prompt or tool change is dropped
             output_config={"effort": s.anthropic_effort},
             cache_control={"type": "ephemeral"},
             **fallback,

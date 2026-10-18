@@ -231,6 +231,10 @@ requested graph tools (`agents/toolset.py` adapts `brain.tools`; the only model-
 Ask's `run_cypher`, read-only, see `tools.py` above). Rules:
 - State is append-only and in Anthropic block format; assistant content is replayed exactly as
   returned (thinking blocks included), because the API rejects edited history. Never trim it.
+  A thread outlives a deploy that changes the system prompt or tools: every call sends
+  `thinking.block_binding.prefix_mismatch_behavior: "drop_block"` (beta
+  `thinking-binding-controls-2026-08-01`, `llm.THINKING`), so the API drops the stale thinking
+  blocks instead of a 400 ("bound to a different conversation").
 - All tool results of one turn go back in one user message; failures are `is_error` results.
 - The answer comes through the `submit_answer` tool (forced `tool_choice` is a 400 on current
   models). It may cite only uids seen in tool results; anything else is sent back as an error.

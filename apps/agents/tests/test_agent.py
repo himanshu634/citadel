@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from agents import ask as agent
-from agents import loop
+from agents import llm, loop
 from agents.testing import (  # noqa: F401  (settings: autouse fixture)
     TOOLSET,
     FakeClient,
@@ -73,10 +73,13 @@ def test_request_shape_uses_settings_and_a_stable_prefix():
     req = client.requests[0]
     assert req["model"] == "claude-haiku-5-5"
     assert req["output_config"] == {"effort": "medium"}
-    assert "fallbacks" not in req and "betas" not in req  # Haiku has no server-side fallback
+    assert "fallbacks" not in req  # Haiku has no server-side fallback
+    assert req["betas"] == ["thinking-binding-controls-2026-08-01"]
     assert req["cache_control"] == {"type": "ephemeral"}
     assert "tool_choice" not in req  # forced tool choice is rejected by current models
-    assert "thinking" not in req
+    assert req["thinking"] == {
+        "type": "adaptive", "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+    }  # fmt: skip
     assert [t["name"] for t in req["tools"]] == ["related_work_items", loop.SUBMIT]
     assert req["tools"][0]["input_schema"]["required"] == ["text"]
     assert req["system"] == [{"type": "text", "text": loop.SYSTEM_PROMPT}]
@@ -423,4 +426,18 @@ def test_sonnet_and_opus_get_server_side_fallbacks(monkeypatch, model):
     req = client.requests[0]
     assert req["model"] == model
     assert req["fallbacks"] == "default"
-    assert req["betas"] == ["server-side-fallback-2026-07-01"]
+    assert req["betas"] == [llm.THINKING_BINDING_BETA, "server-side-fallback-2026-07-01"]
+
+
+@pytest.mark.parametrize("model", [m.id for m in llm.MODELS])
+def test_every_model_drops_thinking_made_under_an_old_prompt(monkeypatch, model):
+    """A thread asked before a deploy changed the prompt or tools replays thinking blocks bound
+    to the old prefix; without drop_block the API answers 400 ("bound to a different
+    conversation"). block_binding is accepted only with adaptive thinking."""
+    monkeypatch.setenv("ANTHROPIC_MODEL", model)
+    get_settings.cache_clear()
+    client = FakeClient(reply(submit("t1", "Nothing found.", [])))
+    ask(client)
+    req = client.requests[0]
+    assert req["thinking"] == llm.THINKING and req["thinking"]["type"] == "adaptive"
+    assert req["betas"][0] == llm.THINKING_BINDING_BETA

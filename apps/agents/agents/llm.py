@@ -23,6 +23,13 @@ from agents.mcp import McpTokenMissing
 # model Anthropic recommends for that refusal category, inside the same call.
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
+# A thinking block is bound to the system prompt, tools and messages that preceded it. A thread
+# outlives a deploy that changes the prompt or the tool list, so its old blocks no longer match:
+# with `drop_block` the API drops them (and every later one) instead of failing the request with
+# a 400. The history itself stays append-only.
+THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01"
+THINKING = {"type": "adaptive", "block_binding": {"prefix_mismatch_behavior": "drop_block"}}
+
 
 @dataclass(frozen=True)
 class Model:
