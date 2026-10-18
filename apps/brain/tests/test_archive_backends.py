@@ -433,6 +433,14 @@ def test_session_depth_budget(session_company):
     assert s.depth["e"] == 0
 
 
+def test_ids_for_lists_every_id_an_item_was_fetched_under(session_company):
+    s = session(Stub({"a": []}))
+    s.fetch("stub", "K-a")
+    s.fetch("stub", "alias:a")
+    assert s.ids_for("a") == {"a", "K-a", "alias:a"}
+    assert s.ids_for("nope") == set()
+
+
 def test_fetch_is_cached_not_recounted(session_company):
     stub = Stub({"a": []})
     s = session(stub)

@@ -237,6 +237,8 @@ def _validate(name: str, p: dict[str, Any]) -> None:
             updated_at=p.get("now"),
         )
     if name == "ledger/archive_open_request":
+        if not str(p.get("norm") or "").strip():
+            raise ValueError(f"{name}: norm is empty")
         fields = {k: p[k] for k in ArchiveRequest.model_fields if k in p}
         ArchiveRequest(**fields, created_at=p.get("now"), updated_at=p.get("now"))
     outcomes = (None, *get_args(RequestOutcome))

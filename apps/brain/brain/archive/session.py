@@ -114,6 +114,19 @@ class ArchiveSession:
                 return node
         return None
 
+    def ids_for(self, uid: str) -> set[str]:
+        """Every id a fetched item is known under: each item id it was fetched with (a key,
+        "#812", its uid) and its candidate's uid, ref, id and url. Empty when not fetched."""
+        got = self.fetched.get(uid)
+        if got is None:
+            return set()
+        c = got.candidate
+        ids = {c.uid, c.ref, c.id}
+        ids.update(key for (_, key), f in self._by_id.items() if f is got)
+        if c.url:
+            ids.add(c.url)
+        return ids
+
     def _spend(self) -> None:
         if self.calls_used >= self.budget.calls:
             raise BudgetSpent("calls", f"{self.calls_used} of {self.budget.calls} calls used")
@@ -150,6 +163,7 @@ class ArchiveSession:
         target = b.parse_ref(item_id) or item_id
         for key in (item_id, target):
             if hit := self._by_id.get((source_key, key)):
+                self._by_id[(source_key, item_id)] = hit  # remember this spelling too
                 return hit
         self._too_deep(item_id, self._depth_of(b, {item_id, target}))
         self._spend()

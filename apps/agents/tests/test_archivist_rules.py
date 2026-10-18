@@ -5,11 +5,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from agents.archivist import rules
 from agents.keeper.model import ArchiveRequest
 from agents.keeper.store import MemoryKeeperStore
-from brain.archive.backends import Candidate, Fetched
+from brain.adapters.github import GithubSource
+from brain.adapters.linear import LinearSource
+from brain.adapters.linear import client as lc
+from brain.archive.backends import Candidate, Fetched, GithubBackend, LinearBackend
+from brain.config import CompanyConfig
 
 T1 = "2026-10-17T10:00:00Z"
 NOW = datetime(2026, 10, 17, 12, 0, tzinfo=UTC)
@@ -174,3 +179,127 @@ def test_ask_found_serves_both_tiers(asked_by):
     store = MemoryKeeperStore("t")
     _answered(store, "archive:a", outcome="found")
     assert rules.recall(store, "n", asked_by, NOW) is not None
+
+
+# --- rule 13: an exact ref must resolve to the item (real backends' parse_ref, no network) ----
+
+LIN_UUID = "0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d"
+LIN_UID = f"linear:issue:{LIN_UUID}"
+
+
+@pytest.fixture
+def backends(tmp_path, monkeypatch):
+    monkeypatch.setattr(lc, "token", lambda: "test")
+    (tmp_path / "meta.json").write_text(
+        '{"nameWithOwner": "acme/widgets", "url": "https://github.com/acme/widgets",'
+        ' "isPrivate": false, "defaultBranch": "main"}'
+    )
+    cfg = CompanyConfig.model_validate(
+        {
+            "slug": "archtest_rules",
+            "name": "x",
+            "data_permission": "synthetic",
+            "window": {"since": "2026-01-01"},
+            "sources": [
+                {"type": "github", "repo": "acme/widgets"},
+                {"type": "linear", "workspace": "acme", "teams": ["ENG"]},
+            ],
+        }
+    )
+    client = lc.LinearClient(log=lambda m: None, transport=httpx.MockTransport(lambda r: None))
+    gh = GithubBackend(
+        cfg, GithubSource(type="github", repo="acme/widgets"), tmp_path, lambda p: None
+    )
+    lin = LinearBackend(cfg, LinearSource(type="linear", workspace="acme", teams=["ENG"]),
+                        lambda p: None, client=client)  # fmt: skip
+    return {gh.key: gh, lin.key: lin}
+
+
+def _exact(backends, ref, fetched, ids):
+    request = _request("reference", [ref])
+    find = _find(quote="", uid=fetched.candidate.uid)
+    return rules.check_find(
+        find, fetched, request, in_brain, ids=ids, resolve=rules.resolver(backends)
+    )
+
+
+def test_exact_ref_hash_number_resolves_for_github(backends):
+    f = _fetched()  # github:acme/widgets#12
+    assert _exact(backends, "#12", f, {"github:acme/widgets#12", UID}) is None
+    assert _exact(backends, "acme/widgets#12", f, {"github:acme/widgets#12"}) is None
+    assert _exact(backends, "#13", f, {"github:acme/widgets#12"}) is not None
+
+
+def test_exact_ref_url_with_trailing_slash(backends):
+    f = _fetched()
+    url = "https://github.com/acme/widgets/issues/12/"
+    assert _exact(backends, url, f, {"github:acme/widgets#12"}) is None
+    lin = "https://linear.app/acme/issue/ENG-12/"
+    assert _exact(backends, lin, _linear(), {"ENG-12", LIN_UID}) is None
+
+
+def _linear() -> Fetched:
+    c = Candidate(id=LIN_UID, uid=LIN_UID, ref=LIN_UID, source_key="linear:acme", kind="ticket",
+                  title="t")  # fmt: skip
+    return Fetched(candidate=c, text=TEXT, records=[], refs=[])
+
+
+def test_exact_ref_linear_key_fetched_by_key(backends):
+    # the session fetched it as "ENG-12": the candidate carries the uuid uid, the key is an alias
+    assert _exact(backends, "ENG-12", _linear(), {"ENG-12", LIN_UID}) is None
+    assert _exact(backends, "ENG-13", _linear(), {"ENG-12", LIN_UID}) is not None
+
+
+def test_exact_ref_bare_uuid(backends):
+    assert _exact(backends, LIN_UUID.upper(), _linear(), {LIN_UID}) is None
+
+
+def test_a_key_needs_the_session_to_have_seen_it(backends):
+    # the candidate carries only the uuid uid: without the alias ids, "ENG-12" is no match
+    assert "quote" in _exact(backends, "ENG-12", _linear(), set())
+
+
+# --- norm is never empty ----------------------------------------------------------------------
+
+
+def test_norm_of_only_stop_words_is_not_empty():
+    assert rules.norm("topic", "why?", []) == "why?"
+    assert rules.norm("topic", "why?", []) != rules.norm("topic", "how?", [])
+    assert rules.norm("topic", "  Why   ?? ", []) == "why ??"
+
+
+def test_norm_of_non_ascii_text():
+    n = rules.norm("topic", "为什么放弃 SQLite", [])
+    assert n and "sqlite" in n
+    assert rules.norm("topic", "Почему SQLite", []) != rules.norm("topic", "为什么放弃", [])
+
+
+def test_store_rejects_an_empty_norm():
+    store = MemoryKeeperStore("t")
+    with pytest.raises(ValueError):
+        store.write(
+            "ledger/archive_open_request",
+            "citadel_archivist",
+            {"uid": "archive:x", "kind": "topic", "text": "t", "asked_by": "ask", "norm": "",
+             "now": T1},
+        )  # fmt: skip
+
+
+# --- superseded_by ----------------------------------------------------------------------------
+
+
+def test_superseded_needs_superseded_by_in_the_brain():
+    f = _fetched()
+    bare = _find(verdict="superseded")
+    assert "superseded_by" in rules.check_find(bare, f, _request(), in_brain)
+    gone = _find(verdict="superseded", superseded_by="system:gone")
+    assert "system:gone" in rules.check_find(gone, f, _request(), in_brain)
+    ok = _find(verdict="superseded", superseded_by="system:db")
+    assert rules.check_find(ok, f, _request(), in_brain) is None
+
+
+@pytest.mark.parametrize("verdict", ["holds", "conflicts"])
+def test_other_verdicts_must_not_name_superseded_by(verdict):
+    bad = _find(verdict=verdict, superseded_by="system:db")
+    reason = rules.check_find(bad, _fetched(), _request(), in_brain)
+    assert reason and "superseded_by" in reason

@@ -6,7 +6,7 @@
 // returns: uid, created (bool), status
 // example: store.write("ledger/archive_open_request", "citadel_brain", {"uid": "archive:1a2b3c4d5e6f",
 //          "kind": "topic", "text": "why did we drop sqlite", "refs": [], "asked_by": "ask",
-//          "norm": "drop sqlite why", "now": "2026-10-17T10:00:00Z"})
+//          "norm": "drop sqlite", "now": "2026-10-17T10:00:00Z"})
 OPTIONAL MATCH (r:ArchiveRequest {norm: $norm})
 WHERE r.status IN ['open', 'running']
 WITH r ORDER BY r.created_at, r.uid LIMIT 1

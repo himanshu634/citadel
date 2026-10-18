@@ -11,7 +11,7 @@ reference that no source of the company owns.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -41,14 +41,28 @@ class FindLike(Protocol):
 
 
 def norm(kind: str, text: str, refs: list[str]) -> str:
-    """The dedupe key of a request: its exact refs (trimmed, lowercased, sorted, joined with a
-    comma) when it has any, else the lowercased words of the text without stop words, each
-    once, sorted. `kind` only decides which of the two a request is keyed by: a topic request is
-    always keyed by its words."""
+    """The dedupe key of a request, never empty for a non-empty text: its exact refs (trimmed,
+    lowercased, sorted, joined with a comma) when it is a reference request with any, else the
+    lowercased words of the text without stop words, each once, sorted. A text of only stop
+    words or punctuation ("why?") keys by its lowercased, whitespace-squashed self."""
     if kind == "reference" and refs:
         return ",".join(sorted({r.strip().lower() for r in refs if r.strip()}))
-    words = {w for w in re.findall(r"[a-z0-9_#]+", text.lower()) if w not in STOP_WORDS}
-    return " ".join(sorted(words))
+    words = {w for w in re.findall(r"#?\w+", text.lower()) if w not in STOP_WORDS}
+    return " ".join(sorted(words)) or " ".join(text.lower().split())
+
+
+def resolver(backends: Mapping[str, Backend]) -> Callable[[str], set[str]]:
+    """`resolve` for `check_find`: every id a request ref stands for: the ref as written, and
+    what each backend's `parse_ref` makes of it (no network)."""
+
+    def resolve(ref: str) -> set[str]:
+        ids = {ref}
+        for b in backends.values():
+            if item := b.parse_ref(ref):
+                ids.add(item)
+        return ids
+
+    return resolve
 
 
 def check_scope(refs: list[str], backends: Mapping[str, Backend]) -> str | None:
@@ -72,16 +86,24 @@ def check_find(
     fetched: Fetched | None,
     request: ArchiveRequest,
     lookup: Callable[[str], dict[str, Any] | None],
+    *,
+    ids: Iterable[str] = (),
+    resolve: Callable[[str], set[str]] | None = None,
 ) -> str | None:
     """Why this find is refused, or None when it passes. The reason is a sentence the model
-    gets back as an error. `fetched` is the item this run fetched under the find's uid."""
+    gets back as an error. `fetched` is the item this run fetched under the find's uid; `ids`
+    are every id it was fetched under (`ArchiveSession.ids_for`) and `resolve` maps a request
+    ref to the ids it stands for (`resolver`): when one of them is the item's, the request named
+    the item exactly and no quote is needed."""
     if fetched is None or fetched.candidate.uid != find.uid:  # rule 12
         return f"{find.uid} was not fetched in this run; fetch it before reporting it."
     if not find.why.strip():  # rule 13
         return "why is empty; say why this item answers the request."
     c = fetched.candidate
-    names = {n.strip().lower() for n in (c.uid, c.ref, c.id, c.url) if n}
-    if not (request.kind == "reference" and any(r.strip().lower() in names for r in request.refs)):
+    names = {n.strip().lower() for n in (*ids, c.uid, c.ref, c.id, c.url) if n}
+    resolve = resolve or (lambda ref: {ref})
+    named = {i.strip().lower() for r in request.refs for i in resolve(r.strip())}
+    if not (request.kind == "reference" and names & named):
         minimum = get_settings().archivist_quote_min
         quote = _squash(find.quote)
         if len(quote) < minimum:
@@ -93,6 +115,13 @@ def check_find(
     for uid in find.evidence:
         if lookup(uid) is None:
             return f"evidence {uid} is not in the brain; cite only uids the brain holds."
+    if find.verdict == "superseded":
+        if not find.superseded_by:
+            return "superseded_by is empty; a superseded item needs the uid that replaces it."
+        if lookup(find.superseded_by) is None:
+            return f"superseded_by {find.superseded_by} is not in the brain."
+    elif find.superseded_by:
+        return f"superseded_by is only for the verdict superseded, not {find.verdict}."
     return None
 
 
