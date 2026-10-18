@@ -109,6 +109,7 @@ normalize scrubs addresses out of every text field.
 | `(Change)-[:PART_OF]->(WorkItem)` | commit belongs to a PR (PR commit list, merge commit, or `(#123)` in the subject) |
 | `(WorkItem)-[:CLOSES]->(WorkItem)` | PR closes issue |
 | `(WorkItem \| Document)-[:MENTIONS]->(WorkItem \| System)` | `#123` / PR URLs, and repo paths such as `src/index/`. A ticket can name a work item by its `url` (for example a GitHub PR): the loader matches it to the work item with that `url` |
+| `(WorkItem)-[:SUPERSEDED_BY]->(WorkItem)` | an archived item that a newer item in the window replaced (the Archivist's `superseded` verdict). Marked again on every load, since a rebuild loads the archive before the newer item exists |
 | `(Chunk)-[:FROM]->(WorkItem \| Document)` | where a piece of text came from |
 | `(Claim)-[:ABOUT]->(any)` | what a Keeper claim is about: its subject (and, for a decision, the systems it concerns). The Graph page does not draw claims yet |
 | `(Claim)-[:EVIDENCE]->(any)` | the brain nodes the claim rests on; only uids that exist are linked |
@@ -139,6 +140,19 @@ or review in it. A bare `updated_at` bump (a bulk relabel or a bot sweep) does n
 An open ticket (its `status_category` is not `done` or `canceled`) is always loaded, whatever its
 dates, so the graph keeps the current backlog.
 
+## Archived items
+
+The window cuts off older work, so the Archivist ([agents.md](agents.md#the-archivist)) loads
+single old items on demand. They are ordinary `WorkItem` and `Document` nodes with `archived =
+true`, `archived_at`, `archive_request` (the request's uid) and `ref` (the string other items
+carry for it, such as `gh:acme/app#812`). They come from the archive cache, not the sources, so
+a rebuild brings them back, and the window rule never drops them or their comments, reviews and
+links. A work item that points at something the brain does not hold keeps the reference in
+`unresolved_refs`; when the item is archived the reference becomes a `MENTIONS` edge and leaves
+the list. An archived PR has no `Change`, so it reaches a `System` only through `MENTIONS` of
+repo paths in its text. Linear documents become `Document` nodes (uid `linear:doc:<id>`) only
+this way.
+
 ## Keeper claims in the brain
 
 The Keeper's knowledge is written beside the ingested facts, never over them: a re-ingest would
@@ -164,12 +178,14 @@ other), so the ledger has no relationships. Timestamps are ISO-8601 UTC strings.
 
 | Label | Key properties |
 |---|---|
-| `Gap` | `kind` (failed_question/thumbs_down/stale_owner/unowned_hot_system), `text`, `norm` (normalised question, the dedupe key), `subject` (a noticing gap's dedupe key), `status` (open/in_review/resolved/needs_person/dismissed), `count`, `attempts`, `trace_ids`, `about` |
+| `Gap` | `kind` (failed_question/thumbs_down/stale_owner/unowned_hot_system/archive_conflict), `text`, `norm` (normalised question, the dedupe key), `subject` (a noticing gap's dedupe key), `status` (open/in_review/waiting_archive/resolved/needs_person/dismissed), `archive_asked` (the Keeper asked the Archivist; once per gap), `count`, `attempts`, `trace_ids`, `about` |
 | `Consult` | `gap`, `role` (pm/qa), `attempt`, `status` (open/answered), `can_ground`, the draft claim (`kind`, `subject`, `statement`, `value`), `cites`; uid `consult:<gap>:<role>:<attempt>` |
 | `Claim` | as in the brain, plus `about`, `evidence`, `critical`, `critical_reasons` (replaces_claim/high_impact_system/no_source_evidence), `conflict` (the source fact it contradicts), `why`, `gap`; `status` pending_approval/accepted/rejected/superseded/stale/conflicts_with_source |
 | `FollowUp` | `claim`, `title`, `body`, `by` (`pm`), `status` (open/done); one per claim, uid `followup:<claim>` |
-| `LogEntry` | `at`, `actor` (keeper, pm, qa, a lead's name, or auto), `action` (gap_opened, consulted, claim_written, claim_queued, claim_approved, claim_rejected, claim_superseded, claim_stale, needs_person, follow_up_opened, review_done, ...), `why`, `gap`, `claim`, `evidence`; append-only |
-| `Review` | `trigger` (build/manual/approval), `state` (running/done/stopped/failed/skipped), `budget`, `started_at`, `ended_at`, `stop`; at most one `running` per company |
+| `LogEntry` | `at`, `actor` (keeper, pm, qa, a lead's name, or auto), `action` (gap_opened, consulted, claim_written, claim_queued, claim_approved, claim_rejected, claim_superseded, claim_stale, needs_person, follow_up_opened, review_done, archive_requested, archive_loaded, archive_nothing, archive_dropped, archive_conflict, archive_returned, archive_released, ...), `why`, `gap`, `claim`, `evidence`; append-only |
+| `ArchiveRequest` | `kind` (reference/topic), `text`, `refs`, `from_uid`, `asked_by` (ask/keeper), `gap`, `thread`, `status` (open/running/answered/failed/refused), `outcome` (found/nothing_found/already_in_brain), `summary`, `reason`, `norm` (the dedupe key), `partial`, `calls`; uid `archive:<12 hex>` |
+| `ArchiveFind` | `request`, `uid` (the brain uid it loaded as), `url`, `title`, `date`, `why`, `quote`, `verdict` (holds/superseded/conflicts), `evidence`, `superseded_by` |
+| `Review` | `trigger` (build/manual/approval/archive), `state` (running/done/stopped/failed/skipped), `budget`, `started_at`, `ended_at`, `stop`; at most one `running` per company |
 
 Indexes: `queries/ledger/schema.cypher`, applied by the ledger store the first time it opens a
 company.

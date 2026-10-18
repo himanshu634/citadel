@@ -211,3 +211,25 @@
         tools_all: [open_gaps]
         tools_none: [record_testimony]
         max_steps: 6
+
+# --- archive: the answer is older than the window; the brain must ask the Archivist -----------
+
+- id: archive-reference
+  tags: [archive]
+  why: Issue #15 says the decisive proof is in #900, a 2025 item outside the window; Ask must hand off to the Archivist and cite what it loaded.
+  turns:
+    - question: What is the decisive proof referenced in issue 15, "Cut session expiry to 1h"?
+      expect:
+        cite_any: [synthetic:issue:900]
+        tools_any: [ask_archivist]
+        max_steps: 8
+
+- id: archive-topic
+  tags: [archive]
+  why: The decision to move Auth to JWT is the archived issue #900, from 2025; Ask must cite it and say when it was decided.
+  turns:
+    - question: Why did Auth move to JWT?
+      expect:
+        cite_any: [synthetic:issue:900]
+        text_re: "20(24|25)"
+        max_steps: 8

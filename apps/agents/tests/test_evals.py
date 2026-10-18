@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 
 import pytest
+from agents.archivist import live
 from agents.evals import cases, run
 from agents.evals.cases import Case, Expect, Gold, GoldResolver
 from agents.evals.graders import grade
@@ -31,7 +32,8 @@ def test_case_files_name_real_tools_and_row_fields(slug):
         for turn in case.turns:
             e = turn.expect
             for name in [*e.tools_any, *e.tools_all, *e.tools_none]:
-                assert name in tools.TOOLS or name in interview.TOOLS, f"{case.id}: unknown {name}"
+                known = name in tools.TOOLS or name in interview.TOOLS or name in live.TOOLS
+                assert known, f"{case.id}: unknown {name}"
             for ref in _refs(e):
                 if isinstance(ref, Gold):
                     tool = tools.TOOLS.get(ref.tool)

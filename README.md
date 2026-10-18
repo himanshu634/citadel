@@ -52,6 +52,7 @@ How a gap becomes a claim: [The self-healing loop](#the-self-healing-loop).
 | **Ask** (`brain` agent) | A Claude agent that answers from the tools and may cite only the nodes it has seen. Every turn is traced (no-answer, zero-source, thumbs). It answers from the sources first and says when a part comes from the Keeper | Built |
 | **Keeper** (`keeper` agent) | Turns failed questions, thumbs-down answers and what it notices after a build into gaps, consults `pm` and `qa`, checks their claims against the sources and a fixed critical rule, asks a lead to approve the critical ones, writes the rest into the brain, and logs every step | Built: HTTP API and app |
 | **`pm` and `qa` agents** | Answer the Keeper's consults with draft claims that cite real nodes; `pm` opens a follow-up for each new owner, expert or decision claim, and for each claim the sources contradict. They never message each other: the Keeper's ledger graph is the only channel ([spec](docs/agents.md)) | Built |
+| **Archivist** (`archivist` agent) | Goes back past the ingest window when Ask meets a reference to an old item (or the Keeper has a gap about old history): finds it on GitHub or Linear, checks it against the brain, loads it, and hands back what it found. Fixed budgets and grounding checks, kept across rebuilds ([spec](docs/agents.md#the-archivist)) | Built |
 | **Keeper in the app** | Keeper reviews as steps on the Systems page's agent trail, with Review now, the approvals card and the log in its rail | Built |
 | **MCP server** | The same named tools for any outside agent (Claude, an IDE, a Slack bot), read-only, plus one gated `propose_claim` write | Planned |
 
@@ -59,7 +60,7 @@ How a gap becomes a claim: [The self-healing loop](#the-self-healing-loop).
 
 ![Company Brain overview: people, the brain, the Keeper and its ledger, pm and qa](docs/architecture/overview.svg)
 
-Four agents: `brain` answers questions, `keeper` keeps the brain right, `pm` and `qa` advise it.
+Five agents: `brain` answers questions, `keeper` keeps the brain right, `pm` and `qa` advise it, `archivist` fetches older history.
 
 - **People ask, the brain answers.** A CEO or tech lead asks in the app (an outside AI agent will
   ask over MCP, planned). Both go through the same named tools and get an answer with sources and
